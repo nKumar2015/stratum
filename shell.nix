@@ -3,7 +3,6 @@
   # Define the Qt6 packages we need
   qt6Deps = with pkgs.qt6; [
     qtdeclarative
-    qtquickcontrols2
     qtbase
   ];
 
