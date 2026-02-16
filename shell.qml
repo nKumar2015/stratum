@@ -1,7 +1,7 @@
 import Quickshell
 import QtQuick
 
-floatingWindow {
+FloatingWindow {
     visible: true
     width: 200
     height: 100
