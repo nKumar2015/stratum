@@ -1,55 +1,76 @@
+//@ pragma UseQApplication
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 
+import "sidebar"
+import "theme"
+
 PanelWindow {
+    id: rootPanelWindow
     anchors.top: true
     anchors.left: true
     anchors.bottom: true
+    implicitWidth: 60
+    color: "transparent"
 
-    implicitWidth: 40
+    margins.right: -20
 
-    color: "#1A1B26"
+    Rectangle {
+        id: sidebar
+        width: 40
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
 
-    Text {
-        anchors.centerIn: parent
-        text: "Current Application"
-        color: "#A9B1D6"
-        font.pixelSize: 14
-        rotation: 270
-    }
+        color: Theme.background
+        clip: true
+        border.width: 1
+        border.color: "transparent"
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 8
+        ColumnLayout {
+            anchors.fill: parent
 
-        Repeater {
-            model: 9
+            AppTitle {
+                anchors.centerIn: parent
+            }
 
-            Text {
-                property var ws: Hyprland.workspaces.values.find(w => w.id === index + 1)
-                property bool isActive: Hyprland.focusedWorkspace?.id === (index + 1)
+            Workspaces {
+                Layout.alignment: Qt.AlignVCenter
+            }
 
+            Item {
+                Layout.fillHeight: true
+            }
+
+            Tray {
                 Layout.alignment: Qt.AlignHCenter
+                Layout.bottomMargin: 10
+            }
 
-                text: index + 1
-                color: isActive ? "#0DB9D7" : (ws ? "#7AA2F7" : "#444B6A")
-                font {
-                    pixelSize: 14
-                    bold: true
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: Hyprland.dispatch("workspace " + (index + 1))
-                }
+            Clock {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 20
+                Layout.bottomMargin: 20
             }
         }
+    }
 
-        Item {
-            Layout.fillHeight: true
-        }
+    // Top Corner
+    InvertedCorner {
+        anchors.top: sidebar.top
+        anchors.left: sidebar.right // Attach to the right edge of the 40px bar
+        color: Theme.background
+        flip: false
+    }
+
+    // Bottom Corner
+    InvertedCorner {
+        anchors.bottom: sidebar.bottom
+        anchors.left: sidebar.right
+        flip: true
+        color: Theme.background
     }
 }
