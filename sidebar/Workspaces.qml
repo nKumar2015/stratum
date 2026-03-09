@@ -1,9 +1,11 @@
+pragma ComponentBehavior: Bound
 import Quickshell.Hyprland
 import QtQuick
+import QtQuick.Layouts
 import "../theme"
 
 Item {
-    id: root
+    id: wsRoot
 
     property int itemHeight: 20
     property int itemSpacing: 3
@@ -15,15 +17,13 @@ Item {
     property int activeWsId: Hyprland.focusedWorkspace?.id || 1
     property int startIdx: Math.min(4, Math.max(0, activeWsId - 3))
 
-    Column {
+    ColumnLayout {
         id: mainColumn
-        width: 30
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: root.itemSpacing
+        spacing: wsRoot.itemSpacing
+        anchors.left: parent.left
+        anchors.right: parent.right
 
-        // 3. The Slide Animation
-        // When startIdx changes, this Y position will glide to the new spot
-        y: -(root.startIdx * (root.itemHeight + root.itemSpacing))
+        y: -(wsRoot.startIdx * (wsRoot.itemHeight + wsRoot.itemSpacing))
 
         Behavior on y {
             NumberAnimation {
@@ -36,12 +36,13 @@ Item {
             model: 9 // All workspaces exist in this long column
 
             Text {
+                id: wsText
+                required property int index
                 property int wsId: index + 1
                 property var ws: Hyprland.workspaces.values.find(w => w.id === wsId)
                 property bool isActive: Hyprland.focusedWorkspace?.id === wsId
-
-                height: 20
-                anchors.horizontalCenter: parent.horizontalCenter
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredHeight: 20
 
                 text: wsId
                 color: isActive ? Theme.activeWs : (ws ? Theme.defaultWs : Theme.inactiveWs)
@@ -58,12 +59,12 @@ Item {
 
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: Hyprland.dispatch("workspace " + wsId)
+                    onClicked: Hyprland.dispatch("workspace " + wsText.wsId)
                     onWheel: wheel => {
                         if (wheel.angleDelta.y > 0) {
-                            Hyprland.dispatch("workspace " + Math.max(1, root.activeWsId - 1));
+                            Hyprland.dispatch("workspace " + Math.max(1, wsRoot.activeWsId - 1));
                         } else {
-                            Hyprland.dispatch("workspace " + Math.min(9, root.activeWsId + 1));
+                            Hyprland.dispatch("workspace " + Math.min(9, wsRoot.activeWsId + 1));
                         }
                     }
                 }

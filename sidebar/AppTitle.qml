@@ -2,38 +2,55 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Widgets
+import QtQuick.Layouts
 
 import "../theme"
 
-Row {
-    spacing: 10
-    rotation: 270
-    width: 300
+Item {
+    Layout.fillHeight: true
+    Layout.preferredWidth: 36
+    clip: true
 
-    IconImage {
-        property string appClass: (Hyprland.activeToplevel?.wayland?.appId || "desktop").toLowerCase()
-        source: Quickshell.iconPath(appClass, "application-x-executable")
-        implicitSize: 16
-        anchors.verticalCenter: parent.verticalCenter
+    Item {
+        anchors.centerIn: parent
 
-        visible: appText.text !== "\uf4a9  Desktop"
-    }
+        width: parent.height
+        height: parent.width
+        rotation: 270
 
-    Text {
-        id: appText
-        text: {
-            let win = Hyprland.activeToplevel;
-            if (win && win.workspace.id === Hyprland.focusedWorkspace.id) {
-                return win.title;
-            } else {
-                return "\uf4a9  Desktop";
+        RowLayout {
+            anchors.centerIn: parent
+            spacing: 8
+            width: Math.min(implicitWidth, parent.width - 20)
+            IconImage {
+                id: appIcon
+                property string appClass: (Hyprland.activeToplevel?.wayland?.appId || "desktop").toLowerCase()
+                source: Quickshell.iconPath(appClass, "application-x-executable")
+
+                Layout.preferredWidth: 16
+                Layout.preferredHeight: 16
+                Layout.alignment: Qt.AlignVCenter
+
+                visible: appText.text !== "\uf4a9  Desktop"
+            }
+
+            Text {
+                id: appText
+                text: {
+                    let win = Hyprland.activeToplevel;
+                    if (win && win.workspace.id === Hyprland.focusedWorkspace.id) {
+                        return win.title;
+                    } else {
+                        return "\uf4a9  Desktop";
+                    }
+                }
+                color: Theme.text
+                font.pixelSize: 14
+
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                elide: Text.ElideRight
             }
         }
-        color: Theme.text
-        font.pixelSize: 14
-
-        width: Math.min(implicitWidth, 274)
-        elide: Text.ElideRight
-        anchors.verticalCenter: parent.verticalCenter
     }
 }

@@ -10,7 +10,6 @@ import "../theme"
 Flow {
     id: trayRoot
     spacing: 6
-    anchors.horizontalCenter: parent.horizontalCenter
     QsMenuOpener {
         id: menuOpener
     }
@@ -26,22 +25,22 @@ Flow {
         property bool sourceIconHovered: false
 
         function checkHoverStatus() {
-           closeTimer.restart()
+            closeTimer.restart();
         }
 
-        Timer { 
-            id: closeTimer 
-            interval: 150 
-            onTriggered: { 
-                if (!menuHover.hovered && !customMenu.sourceIconHovered) { 
-                    customMenu.visible = false
+        Timer {
+            id: closeTimer
+            interval: 150
+            onTriggered: {
+                if (!menuHover.hovered && !customMenu.sourceIconHovered) {
+                    customMenu.visible = false;
                 }
             }
         }
 
-
         onVisibleChanged: {
-            if (!visible) menuOpener.menu = null
+            if (!visible)
+                menuOpener.menu = null;
         }
 
         Rectangle {
@@ -51,7 +50,7 @@ Flow {
                 id: menuHover
                 onHoveredChanged: {
                     if (!hovered && customMenu.visible) {
-                        customMenu.checkHoverStatus()
+                        customMenu.checkHoverStatus();
                     }
                 }
             }
@@ -59,7 +58,7 @@ Flow {
             // Added Math.max so the popup never collapses to 0x0 while waiting for DBus
             implicitWidth: Math.max(120, menuLayout.implicitWidth + 8)
             implicitHeight: Math.max(32, menuLayout.implicitHeight + 8)
-            color: Theme.background 
+            color: Theme.background
             border.color: Theme.inactiveWs
             border.width: 1
             radius: 6
@@ -73,8 +72,8 @@ Flow {
                     model: menuOpener.children
 
                     delegate: Rectangle {
-                        required property var modelData 
-                        
+                        required property var modelData
+
                         implicitWidth: Math.max(100, entryText.implicitWidth + 24)
                         implicitHeight: modelData.isSeparator ? 1 : 28
                         color: entryMouse.containsMouse ? Theme.hover : "transparent"
@@ -104,10 +103,10 @@ Flow {
                             anchors.fill: parent
                             hoverEnabled: true
                             enabled: !modelData.isSeparator && modelData.enabled
-                            
+
                             onClicked: {
-                                modelData.triggered()
-                                customMenu.visible = false
+                                modelData.triggered();
+                                customMenu.visible = false;
                             }
                         }
                     }
@@ -121,8 +120,8 @@ Flow {
 
         delegate: Rectangle {
             id: trayIconWrap
-            required property var modelData 
-            
+            required property var modelData
+
             implicitWidth: 24
             implicitHeight: 24
             color: mouseArea.containsMouse ? "#313244" : "transparent"
@@ -142,49 +141,41 @@ Flow {
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                onContainsMouseChanged: { 
-                    if (menuOpener.menu === modelData.menu) { 
-                        customMenu.sourceIconHovered = containsMouse
+                onContainsMouseChanged: {
+                    if (menuOpener.menu === modelData.menu) {
+                        customMenu.sourceIconHovered = containsMouse;
 
-                        if (!containsMouse && customMenu.visible) { 
-                            customMenu.checkHoverStatus()
+                        if (!containsMouse && customMenu.visible) {
+                            customMenu.checkHoverStatus();
                         }
                     }
                 }
 
-                onClicked: (mouse) => {
+                onClicked: mouse => {
                     if (mouse.button === Qt.LeftButton) {
-                        modelData.activate()
-                        
+                        modelData.activate();
                     } else if (mouse.button === Qt.RightButton) {
-                        
                         if (modelData.hasMenu) {
-                            menuOpener.menu = modelData.menu
-                            customMenu.sourceIconHovered = true 
+                            menuOpener.menu = modelData.menu;
+                            customMenu.sourceIconHovered = true;
                             // Dynamically find the attached parent window
-                            let parentWindow = rootPanelWindow
-                            
+                            let parentWindow = rootPanelWindow;
+
                             if (parentWindow) {
-                                customMenu.anchor.window = parentWindow
-                                let baseRect = parentWindow.itemRect(trayIconWrap)
-                                let shiftX = 10 
-                                customMenu.anchor.rect = Qt.rect(
-                                    baseRect.x + shiftX, 
-                                    baseRect.y, 
-                                    baseRect.width, 
-                                    baseRect.height
-                                )
-                                customMenu.anchor.edges = Edges.Right 
-                                customMenu.anchor.gravity = Edges.Right
-                                customMenu.visible = true
+                                customMenu.anchor.window = parentWindow;
+                                let baseRect = parentWindow.itemRect(trayIconWrap);
+                                let shiftX = 10;
+                                customMenu.anchor.rect = Qt.rect(baseRect.x + shiftX, baseRect.y, baseRect.width, baseRect.height);
+                                customMenu.anchor.edges = Edges.Right;
+                                customMenu.anchor.gravity = Edges.Right;
+                                customMenu.visible = true;
                             } else {
-                                console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.")
+                                console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.");
                             }
                         } else {
                             // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
-                            modelData.secondaryActivate()
+                            modelData.secondaryActivate();
                         }
-                        
                     }
                 }
             }

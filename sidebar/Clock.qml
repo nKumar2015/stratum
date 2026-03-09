@@ -2,11 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import "../theme"
 
-Column {
+ColumnLayout {
     id: clockRoot
     spacing: -4 // Tighten the stack for a more stylistic look
-
-    anchors.horizontalCenter: parent.horizontalCenter
 
     property var timeParts: new Date().toLocaleTimeString(Qt.locale(), "hh mm AP").split(" ")
 
@@ -28,7 +26,6 @@ Column {
     }
 
     Text {
-        anchors.horizontalCenter: parent.horizontalCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[0] : "--"
         color: Theme.activeWs // Using your active workspace color for emphasis
         font {
@@ -39,7 +36,6 @@ Column {
     }
 
     Text {
-        anchors.horizontalCenter: parent.horizontalCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[1] : "--"
         color: Theme.defaultWs
         font {
@@ -50,7 +46,6 @@ Column {
     }
 
     Text {
-        width: parent.width
         horizontalAlignment: Text.AlignHCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[2] : "--"
         color: Theme.inactiveWs // Use a dimmer color so it doesn't distract
