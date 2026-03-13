@@ -502,8 +502,7 @@ Window {
     Rectangle {
         id: menuCard
         anchors.fill: parent
-        color: Theme.black
-        border.color: Theme.grey
+        color: Theme.background
         border.width: 1
         radius: 12
 
@@ -605,7 +604,7 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 170
-                color: "#141422"
+                color: Theme.background
                 radius: 8
                 border.color: Theme.grey
                 border.width: 1
@@ -831,7 +830,7 @@ Window {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: "#141422"
+                    color: Theme.background
                     radius: 8
                     border.color: Theme.grey
                     border.width: 1
@@ -855,7 +854,7 @@ Window {
                                     width: parent.width
                                     height: 56
                                     radius: 6
-                                    color: wifiMenu.selectedSsid === modelData.ssid ? "#1d2434" : "#10101b"
+                                    color: wifiMenu.selectedSsid === modelData.ssid ? "#1d2434" : Theme.background
                                     border.color: modelData.inUse === "*" ? Theme.activeWs : Theme.grey
                                     border.width: 1
                                     opacity: wifiMenu.animateRowsOnNextLoad ? 0 : 1
