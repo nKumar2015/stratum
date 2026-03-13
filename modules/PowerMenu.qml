@@ -1,10 +1,10 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
-import Qt5Compat.GraphicalEffects
 
 import "../theme"
 
@@ -123,6 +123,7 @@ PanelWindow {
 
                 model: powerMenu.powerOptions
                 delegate: Rectangle {
+                    id: powerOption
                     required property var modelData
                     required property int index
 
@@ -150,29 +151,29 @@ PanelWindow {
                             height: 100
                             Image {
                                 id: btnIcon
-                                Layout.alignment: Qt.AlignHCenter
-                                Layout.preferredWidth: 100
-                                Layout.preferredHeight: 100
-
-                                source: modelData.icon
+                                anchors.fill: parent
+                                source: powerOption.modelData.icon
                                 fillMode: Image.PreserveAspectFit
 
                                 sourceSize.width: 100
                                 sourceSize.height: 100
+                                visible: false
                             }
-
-                            ColorOverlay {
-                                anchors.fill: btnIcon
+                            MultiEffect {
                                 source: btnIcon
-                                color: isActive ? Theme.text : Theme.hover
+                                anchors.fill: btnIcon
+                                colorization: 1.0
+                                brightness: 1
+                                colorizationColor: powerOption.isActive ? Theme.text : Theme.hover
                             }
                         }
                         Text {
                             id: btnText
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: modelData.name
-                            color: isActive ? Theme.text : Theme.hover
+                            text: powerOption.modelData.name
+                            color: powerOption.isActive ? Theme.text : Theme.hover
                             font.pixelSize: 10
+                            font.family: Theme.font
                             font.bold: true
                         }
                     }
@@ -181,7 +182,7 @@ PanelWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: powerMenu.executeSelected()
-                        onEntered: powerMenu.selectedIndex = index
+                        onEntered: powerMenu.selectedIndex = powerOption.index
                     }
                 }
             }

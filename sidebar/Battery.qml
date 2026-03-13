@@ -60,7 +60,7 @@ ColumnLayout {
             color: root.getBatteryColor()
             font.pixelSize: 24
             rotation: 90
-
+            font.family: Theme.font
             Behavior on color {
                 ColorAnimation {
                     duration: 250
@@ -73,8 +73,9 @@ ColumnLayout {
         Layout.alignment: Qt.AlignHCenter
         text: UPower.displayDevice.ready ? Math.round(UPower.displayDevice.percentage * 100) + "%" : "--"
         color: root.getBatteryColor()
-        font.pixelSize: 10
+        font.pixelSize: 11
         font.bold: true
+        font.family: Theme.font
 
         Behavior on color {
             ColorAnimation {

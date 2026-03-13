@@ -12,6 +12,7 @@ import "theme"
 ShellRoot {
     PowerMenu {}
     LockScreen {}
+    WifiMenu {}
     PanelWindow {
         id: rootPanelWindow
         anchors.top: true
@@ -60,6 +61,8 @@ ShellRoot {
                 Tray {
                     Layout.alignment: Qt.AlignHCenter
                 }
+
+                Wifi {}
 
                 Battery {
                     Layout.alignment: Qt.AlignHCenter

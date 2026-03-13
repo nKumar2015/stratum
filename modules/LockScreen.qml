@@ -5,11 +5,31 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Services.Pam
 import Quickshell.Io
+import QtQuick.Effects
+import Quickshell.Widgets
+
+import "../theme"
 
 Scope {
     id: lockRoot
 
     property bool authFailed: false
+    property string timeString: new Date().toLocaleTimeString(Qt.locale(), "hh:mm AP")
+    function updateTime() {
+        let now = new Date();
+        timeString = now.toLocaleTimeString(Qt.locale(), "hh:mm AP");
+
+        timer.interval = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+        timer.restart();
+    }
+
+    Timer {
+        id: timer
+        interval: 1000 * 60
+        repeat: true
+        running: true
+        onTriggered: lockRoot.updateTime()
+    }
 
     IpcHandler {
         target: "lockscreen"
@@ -43,9 +63,26 @@ Scope {
         locked: false
 
         WlSessionLockSurface {
-            Rectangle {
+            Item {
                 anchors.fill: parent
-                color: "#1e1e2e"
+                Image {
+                    id: bgImage
+                    anchors.fill: parent
+                    source: "file:///home/nakul/Pictures/Wallpapers/mountain.jpg"
+                    fillMode: Image.PreserveAspectCrop
+                    visible: true
+                    layer.enabled: true
+                    layer.effect: MultiEffect {
+                        blurEnabled: true
+                        blurMax: 30
+                        blur: 0.8
+                    }
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: "#8011111b"
+                }
 
                 MouseArea {
                     anchors.fill: parent
@@ -56,37 +93,58 @@ Scope {
                     anchors.centerIn: parent
                     spacing: 24
 
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: lockRoot.timeString
+                        color: Theme.activeWs // Using your active workspace color for emphasis
+                        font {
+                            pixelSize: 50
+                            bold: true
+                            family: Theme.font // Or your preferred monospace font
+                        }
+                    }
+
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
-                        width: 120
-                        height: 120
+                        Layout.preferredWidth: 120
+                        Layout.preferredHeight: 120
                         radius: 60
-                        color: "#313244"
-                        border.color: "#89b4fa"
+                        color: "transparent"
                         border.width: 3
-                        Text {
-                            anchors.centerIn: parent
-                            text: "󰣇"
-                            color: "#89b4fa"
-                            font.pixelSize: 48
+                        border.color: Theme.blue
+                        ClippingWrapperRectangle {
+                            width: 120
+                            height: 120
+                            radius: width / 2
+                            anchors.fill: parent
+                            anchors.margins: 3
+                            Image {
+                                id: avatar
+                                anchors.fill: parent
+                                anchors.margins: -1
+                                source: "file:///home/nakul/Pictures/pfp.png"
+
+                                visible: true
+                            }
                         }
                     }
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: pam.message || "Enter Password"
-                        color: "#cdd6f4"
+                        text: "Enter Password"
+                        color: Theme.white
                         font.pixelSize: 20
                         font.bold: true
+                        font.family: Theme.font
                     }
 
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
-                        width: 300
-                        height: 50
-                        color: "#11111b"
+                        Layout.preferredWidth: 300
+                        Layout.preferredHeight: 50
+                        color: Theme.black
                         radius: 8
-                        border.color: passwordInput.activeFocus ? "#89b4fa" : "#45475a"
+                        border.color: passwordInput.activeFocus ? Theme.blue : Theme.hover
                         border.width: 2
 
                         TextInput {
@@ -94,7 +152,7 @@ Scope {
                             anchors.fill: parent
                             anchors.margins: 14
                             verticalAlignment: TextInput.AlignVCenter
-                            color: "#cdd6f4"
+                            color: Theme.white
                             font.pixelSize: 18
                             echoMode: TextInput.Password
                             focus: true
@@ -124,9 +182,10 @@ Scope {
                         id: errorText
                         Layout.alignment: Qt.AlignHCenter
                         text: "Incorrect password, try again."
-                        color: "#f38ba8"
+                        color: Theme.red
                         font.pixelSize: 14
                         visible: lockRoot.authFailed
+                        font.family: Theme.font
                     }
                 }
             }

@@ -87,6 +87,7 @@ Flow {
                             text: modelData.isSeparator ? "" : modelData.text.replace(/&/g, "")
                             color: Theme.text
                             font.pixelSize: 13
+                            font.family: Theme.font
                             visible: !modelData.isSeparator
                         }
 

@@ -47,8 +47,9 @@ Item {
                 text: wsId
                 color: isActive ? Theme.activeWs : (ws ? Theme.defaultWs : Theme.inactiveWs)
                 font {
-                    pixelSize: 14
+                    pixelSize: 15
                     bold: true
+                    family: Theme.font
                 }
 
                 Behavior on color {

@@ -31,7 +31,7 @@ ColumnLayout {
         font {
             pixelSize: 18
             bold: true
-            family: "JetBrains Mono" // Or your preferred monospace font
+            family: Theme.font // Or your preferred monospace font
         }
     }
 
@@ -41,7 +41,7 @@ ColumnLayout {
         font {
             pixelSize: 18
             bold: true
-            family: "JetBrains Mono"
+            family: Theme.font
         }
     }
 
@@ -52,7 +52,7 @@ ColumnLayout {
         font {
             pixelSize: 18
             bold: false
-            family: "JetBrains Mono"
+            family: Theme.font
         }
     }
 }

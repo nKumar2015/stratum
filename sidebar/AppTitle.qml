@@ -45,6 +45,7 @@ Item {
                     }
                 }
                 color: Theme.text
+                font.family: Theme.font
                 font.pixelSize: 14
 
                 Layout.fillWidth: true
