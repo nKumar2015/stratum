@@ -1205,6 +1205,7 @@ Window {
                                 color: bluetoothMenu.selectedConnected === "yes" ? Theme.green : Theme.hover
                                 font.family: Theme.font
                                 font.pixelSize: 11
+                                elide: Text.ElideRight
                             }
 
                             Text {
@@ -1219,21 +1220,18 @@ Window {
                                 color: Theme.hover
                                 font.family: Theme.font
                                 font.pixelSize: 11
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
                             }
+                        }
 
-                            Text {
-                                text: "•"
-                                color: Theme.grey
-                                font.family: Theme.font
-                                font.pixelSize: 11
-                            }
-
-                            Text {
-                                text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
-                                color: Theme.hover
-                                font.family: Theme.font
-                                font.pixelSize: 11
-                            }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
+                            color: Theme.hover
+                            font.family: Theme.font
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
                         }
 
                         Rectangle {

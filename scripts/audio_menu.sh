@@ -9,6 +9,69 @@ sanitize_field() {
     printf '%s' "$1" | tr '|' '/'
 }
 
+is_headphone_default_sink() {
+    default_sink="$1"
+    [ -n "$default_sink" ] || {
+        echo "no"
+        return
+    }
+
+    sink_info=$(pactl list sinks 2>/dev/null | awk -v target="$default_sink" '
+        /^Sink #/ {
+            if (found)
+                exit;
+            in_block = 0;
+        }
+        /^[[:space:]]*Name: / {
+            name = $0;
+            sub(/^[[:space:]]*Name: /, "", name);
+            if (name == target) {
+                in_block = 1;
+                found = 1;
+                next;
+            }
+            if (in_block)
+                exit;
+        }
+        in_block && /^[[:space:]]*Description: / {
+            desc = $0;
+            sub(/^[[:space:]]*Description: /, "", desc);
+            print desc;
+            exit;
+        }
+    ')
+
+    sink_block=$(pactl list sinks 2>/dev/null | awk -v target="$default_sink" '
+        /^Sink #/ {
+            if (found)
+                exit;
+            in_block = 0;
+        }
+        /^[[:space:]]*Name: / {
+            name = $0;
+            sub(/^[[:space:]]*Name: /, "", name);
+            if (name == target) {
+                in_block = 1;
+                found = 1;
+            }
+        }
+        in_block { print }
+    ')
+
+    # Prefer robust properties that pavucontrol also uses.
+    if printf '%s\n' "$sink_block" | tr '[:upper:]' '[:lower:]' | grep -Eq 'device\.form_factor = "(headset|headphone)"|device\.icon_name = "audio-headset|active port: headset|active port: headphone|api\.bluez5\.icon = "audio-headset"'; then
+        echo "yes"
+        return
+    fi
+
+    probe=$(printf '%s %s' "$default_sink" "$sink_info" | tr '[:upper:]' '[:lower:]')
+    if printf '%s\n' "$probe" | grep -Eq '(^|[[:space:]])bluez_output\.|headphone|headset|earbud|earphone|airpods|buds'; then
+        echo "yes"
+    else
+        echo "no"
+    fi
+}
+
 print_sink_rows() {
     pactl list sinks 2>/dev/null | awk '
         /^Sink #/ {
@@ -68,9 +131,12 @@ case "$cmd" in
     status)
         volume=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk 'NR == 1 { if (match($0, /[0-9]+%/)) print substr($0, RSTART, RLENGTH); exit }')
         mute=$(pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | awk '{print tolower($2); exit}')
+        def_sink=$(pactl get-default-sink 2>/dev/null)
+        headphones=$(is_headphone_default_sink "$def_sink")
         [ -n "$volume" ] || volume="0%"
         [ -n "$mute" ] || mute="yes"
-        printf '%s|%s\n' "$volume" "$mute"
+        [ -n "$headphones" ] || headphones="no"
+        printf '%s|%s|%s\n' "$volume" "$mute" "$headphones"
         ;;
     hover-status)
         volume=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk 'NR == 1 { if (match($0, /[0-9]+%/)) print substr($0, RSTART, RLENGTH); exit }')
