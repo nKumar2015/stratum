@@ -20,6 +20,14 @@ QtObject {
     property color black: "#11111b"
     property color white: "#cdd6f4"
     property color grey: "#313244"
+
+    // Notification colors
+    property color notificationBg: "#171923"
+    property color notificationBorder: "#2f3448"
+    property color notificationLow: "#7f849c"
+    property color notificationNormal: "#89b4fa"
+    property color notificationCritical: "#e06c75"
+    property color notificationMuted: "#6c7086"
     // Font
     property var font: "JetBrainsMono NFM"
 }

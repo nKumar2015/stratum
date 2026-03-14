@@ -13,6 +13,8 @@ ShellRoot {
     PowerMenu {}
     LockScreen {}
     SystemOsd {}
+    NotificationListener {}
+    NotificationCenter {}
     BluetoothMenu {}
     BluetoothHoverMenu {}
     WifiMenu {}
