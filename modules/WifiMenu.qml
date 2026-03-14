@@ -836,12 +836,14 @@ Window {
                     border.width: 1
 
                     ScrollView {
+                        id: wifiNetworkScroll
                         anchors.fill: parent
                         anchors.margins: 8
                         clip: true
+                        contentWidth: availableWidth
 
                         Column {
-                            width: parent.width
+                            width: wifiNetworkScroll.availableWidth
                             spacing: 6
 
                             Repeater {
@@ -850,6 +852,7 @@ Window {
                                 delegate: Rectangle {
                                     required property var modelData
                                     id: networkRow
+                                    property bool shouldAnimateOnCreate: wifiMenu.animateRowsOnNextLoad
 
                                     width: parent.width
                                     height: 56
@@ -857,7 +860,7 @@ Window {
                                     color: wifiMenu.selectedSsid === modelData.ssid ? "#1d2434" : Theme.background
                                     border.color: modelData.inUse === "*" ? Theme.activeWs : Theme.grey
                                     border.width: 1
-                                    opacity: wifiMenu.animateRowsOnNextLoad ? 0 : 1
+                                    opacity: 1
 
                                     SequentialAnimation {
                                         id: rowFadeIn
@@ -878,12 +881,18 @@ Window {
                                     }
 
                                     Component.onCompleted: {
-                                        if (wifiMenu.animateRowsOnNextLoad) {
+                                        if (networkRow.shouldAnimateOnCreate) {
                                             networkRow.opacity = 0;
                                             rowFadeIn.restart();
                                         } else {
                                             networkRow.opacity = 1;
                                         }
+                                    }
+
+                                    onModelDataChanged: {
+                                        // Ensure reused delegates never stay hidden after list refreshes.
+                                        if (!rowFadeIn.running)
+                                            networkRow.opacity = 1;
                                     }
 
                                     Behavior on color {

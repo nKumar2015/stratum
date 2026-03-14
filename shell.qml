@@ -12,6 +12,7 @@ import "theme"
 ShellRoot {
     PowerMenu {}
     LockScreen {}
+    BluetoothMenu {}
     WifiMenu {}
     PanelWindow {
         id: rootPanelWindow
@@ -61,6 +62,8 @@ ShellRoot {
                 Tray {
                     Layout.alignment: Qt.AlignHCenter
                 }
+
+                Bluetooth {}
 
                 Wifi {}
 
