@@ -10,6 +10,16 @@ import "../globals"
 PanelWindow {
     id: center
 
+    property bool keyboardFocusRequested: false
+
+    function requestKeyboardFocus(): void {
+        keyboardFocusRequested = true;
+    }
+
+    function releaseKeyboardFocus(): void {
+        keyboardFocusRequested = false;
+    }
+
     anchors.top: true
     anchors.bottom: true
     anchors.right: true
@@ -20,7 +30,12 @@ PanelWindow {
     visible: GlobalState.showNotificationCenter || center.activeToasts.length > 0
 
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: (GlobalState.showNotificationCenter || center.activeToasts.length > 0) ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: center.keyboardFocusRequested ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    onVisibleChanged: {
+        if (!visible)
+            center.releaseKeyboardFocus();
+    }
 
     readonly property var activeToasts: {
         const out = [];
@@ -57,6 +72,7 @@ PanelWindow {
 
         function close(): void {
             GlobalState.showNotificationCenter = false;
+            center.releaseKeyboardFocus();
         }
 
         function toggle(): void {
@@ -89,6 +105,15 @@ PanelWindow {
         anchors.topMargin: 16
         anchors.rightMargin: 18
         spacing: 10
+
+        HoverHandler {
+            onHoveredChanged: {
+                if (hovered)
+                    center.requestKeyboardFocus();
+                else
+                    center.releaseKeyboardFocus();
+            }
+        }
 
         Repeater {
             model: center.activeToasts
@@ -125,6 +150,15 @@ PanelWindow {
         border.width: 1
         border.color: Theme.notificationBorder
         visible: GlobalState.showNotificationCenter
+
+        HoverHandler {
+            onHoveredChanged: {
+                if (hovered)
+                    center.requestKeyboardFocus();
+                else
+                    center.releaseKeyboardFocus();
+            }
+        }
 
         Behavior on anchors.rightMargin {
             NumberAnimation {
@@ -238,7 +272,10 @@ PanelWindow {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: GlobalState.showNotificationCenter = false
+                        onClicked: {
+                            GlobalState.showNotificationCenter = false;
+                            center.releaseKeyboardFocus();
+                        }
                     }
                 }
             }
