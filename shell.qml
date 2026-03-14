@@ -16,6 +16,7 @@ ShellRoot {
     BluetoothHoverMenu {}
     WifiMenu {}
     WifiHoverMenu {}
+    AudioHoverMenu {}
     PanelWindow {
         id: rootPanelWindow
         anchors.top: true
@@ -65,9 +66,18 @@ ShellRoot {
                     Layout.alignment: Qt.AlignHCenter
                 }
 
-                Bluetooth {}
+                Audio {
+                    Layout.alignment: Qt.AlignHCenter
+                }
 
-                Wifi {}
+                Bluetooth {
+                    Layout.alignment: Qt.AlignHCenter
+                }
+
+                Wifi {
+                    Layout.alignment: Qt.AlignHCenter
+
+                }
 
                 Battery {
                     Layout.alignment: Qt.AlignHCenter
