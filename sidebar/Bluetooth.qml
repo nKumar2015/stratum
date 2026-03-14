@@ -69,10 +69,33 @@ Item {
         }
     }
 
+    Timer {
+        id: hoverShowTimer
+        interval: 350
+        repeat: false
+        onTriggered: {
+            if (bluetoothHover.containsMouse && !GlobalState.showBluetoothSettings)
+                GlobalState.showBluetoothHoverMenu = true;
+        }
+    }
+
     MouseArea {
         id: bluetoothHover
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: GlobalState.showBluetoothSettings = !GlobalState.showBluetoothSettings
+        onEntered: {
+            GlobalState.bluetoothIconY = root.mapToGlobal(0, root.height / 2).y;
+            GlobalState.bluetoothHoverIntent = true;
+            hoverShowTimer.start();
+        }
+        onExited: {
+            GlobalState.bluetoothHoverIntent = false;
+            hoverShowTimer.stop();
+        }
+        onClicked: {
+            hoverShowTimer.stop();
+            GlobalState.showBluetoothHoverMenu = false;
+            GlobalState.showBluetoothSettings = !GlobalState.showBluetoothSettings;
+        }
     }
 }

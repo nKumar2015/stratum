@@ -58,10 +58,6 @@ Window {
         return value !== "" && value !== "--" && value !== "none";
     }
 
-    function shellQuote(value) {
-        return "'" + String(value).replace(/'/g, "'\\''") + "'";
-    }
-
     function splitNmcliFields(line, expectedFields) {
         const fields = [];
         let current = "";
@@ -145,7 +141,7 @@ Window {
             return;
         }
 
-        activeInfoProc.command = ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli -t -f IP4.ADDRESS,IP4.GATEWAY dev show " + shellQuote(activeDevice) + " 2>/dev/null"];
+        activeInfoProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "active-info", activeDevice];
         activeInfoProc.running = true;
     }
 
@@ -160,13 +156,10 @@ Window {
             return;
         }
 
-        let command = "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; ";
-        command += "nmcli dev wifi connect " + shellQuote(selectedSsid);
-
+        const cmd = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "connect", selectedSsid];
         if (showPassword)
-            command += " password " + shellQuote(trimmedPassword);
-
-        actionProc.command = ["sh", "-lc", command + " 2>&1"];
+            cmd.push(trimmedPassword);
+        actionProc.command = cmd;
         pendingAction = "connect";
         pendingActionTarget = selectedSsid;
         pendingConnectWasKnown = isKnownNetwork(selectedSsid);
@@ -180,7 +173,7 @@ Window {
         if (!activeDevice)
             return;
 
-        actionProc.command = ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli dev disconnect " + shellQuote(activeDevice) + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "disconnect", activeDevice];
         pendingAction = "disconnect";
         pendingActionTarget = activeSsid;
         statusMessage = "Disconnecting " + activeSsid + "...";
@@ -193,14 +186,14 @@ Window {
 
         pendingAction = "forget";
         pendingActionTarget = activeSsid;
-        actionProc.command = ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli connection delete id " + shellQuote(activeSsid) + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "forget", activeSsid];
         statusMessage = "Forgetting " + activeSsid + "...";
         actionProc.running = true;
     }
 
     function toggleWifiRadio() {
         const target = wifiEnabled ? "off" : "on";
-        actionProc.command = ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli radio wifi " + target + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "toggle", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         statusMessage = wifiEnabled ? "Turning Wi-Fi off..." : "Turning Wi-Fi on...";
@@ -209,7 +202,7 @@ Window {
 
     Process {
         id: wifiStateProc
-        command: ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli -t -f WIFI general status 2>/dev/null"]
+        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "state"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -225,7 +218,7 @@ Window {
 
     Process {
         id: deviceStatusProc
-        command: ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null"]
+        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "device-status"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -274,7 +267,7 @@ Window {
 
     Process {
         id: knownConnectionsProc
-        command: ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli -t -f NAME,TYPE connection show 2>/dev/null"]
+        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "known-connections"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -305,7 +298,7 @@ Window {
 
     Process {
         id: wifiListProc
-        command: ["sh", "-lc", "if ! command -v nmcli >/dev/null 2>&1; then echo '__ERROR__|nmcli not found'; exit 0; fi; nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan auto 2>/dev/null"]
+        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "list"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();

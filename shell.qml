@@ -13,7 +13,9 @@ ShellRoot {
     PowerMenu {}
     LockScreen {}
     BluetoothMenu {}
+    BluetoothHoverMenu {}
     WifiMenu {}
+    WifiHoverMenu {}
     PanelWindow {
         id: rootPanelWindow
         anchors.top: true

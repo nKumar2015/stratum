@@ -109,10 +109,6 @@ Window {
         refreshAll();
     }
 
-    function shellQuote(value) {
-        return "'" + String(value).replace(/'/g, "'\\''") + "'";
-    }
-
     function splitPipeFields(line, expectedFields) {
         const parts = line.split("|");
         while (parts.length < expectedFields)
@@ -216,7 +212,7 @@ Window {
         if (!selectedMac || selectedConnected === "yes")
             return;
 
-        actionProc.command = ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl connect " + shellQuote(selectedMac) + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "connect", selectedMac];
         pendingAction = "connect";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Connecting to " + pendingActionTarget + "...", false);
@@ -230,7 +226,7 @@ Window {
             return;
 
         const label = activeName || selectedName || targetMac;
-        actionProc.command = ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl disconnect " + shellQuote(targetMac) + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "disconnect", targetMac];
         pendingAction = "disconnect";
         pendingActionTarget = label;
         setStatusMessage("Disconnecting " + label + "...", false);
@@ -242,7 +238,7 @@ Window {
         if (!selectedMac)
             return;
 
-        actionProc.command = ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl remove " + shellQuote(selectedMac) + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "forget", selectedMac];
         pendingAction = "forget";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Removing " + pendingActionTarget + "...", false);
@@ -252,7 +248,7 @@ Window {
 
     function toggleBluetoothPower() {
         const target = bluetoothEnabled ? "off" : "on";
-        actionProc.command = ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl --timeout 4 power " + target + " 2>&1"];
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "power", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         setStatusMessage(bluetoothEnabled ? "Turning Bluetooth off..." : "Turning Bluetooth on...", false);
@@ -264,7 +260,7 @@ Window {
         if (scanning)
             return;
 
-        scanProc.command = ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl --timeout 5 scan on 2>&1"];
+        scanProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "scan"];
         scanning = true;
         GlobalState.bluetoothScanning = true;
         setStatusMessage("Scanning for devices...", false);
@@ -277,7 +273,7 @@ Window {
 
     Process {
         id: btStateProc
-        command: ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; bluetoothctl show 2>/dev/null | awk -F': ' '/Powered:/ {print tolower($2); exit}'"]
+        command: ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "state"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -324,7 +320,7 @@ Window {
 
     Process {
         id: btListProc
-        command: ["sh", "-lc", "if ! command -v bluetoothctl >/dev/null 2>&1; then echo '__ERROR__|bluetoothctl not found'; exit 0; fi; { bluetoothctl devices 2>/dev/null; bluetoothctl devices Paired 2>/dev/null; } | awk '!seen[$2]++' | while read -r _ mac name; do info=$(bluetoothctl info \"$mac\" 2>/dev/null); connected=$(printf '%s\\n' \"$info\" | awk -F': ' '/Connected:/ {print tolower($2); exit}'); trusted=$(printf '%s\\n' \"$info\" | awk -F': ' '/Trusted:/ {print tolower($2); exit}'); paired=$(printf '%s\\n' \"$info\" | awk -F': ' '/Paired:/ {print tolower($2); exit}'); printf '%s|%s|%s|%s|%s\\n' \"$mac\" \"$name\" \"${connected:-no}\" \"${trusted:-no}\" \"${paired:-no}\"; done"]
+        command: ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "list"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();

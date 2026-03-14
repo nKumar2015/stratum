@@ -70,10 +70,33 @@ Item {
         }
     }
 
+    Timer {
+        id: hoverShowTimer
+        interval: 350
+        repeat: false
+        onTriggered: {
+            if (wifiHover.containsMouse && !GlobalState.showWifiSettings)
+                GlobalState.showWifiHoverMenu = true;
+        }
+    }
+
     MouseArea {
         id: wifiHover
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: GlobalState.showWifiSettings = !GlobalState.showWifiSettings
+        onEntered: {
+            GlobalState.wifiIconY = root.mapToGlobal(0, root.height / 2).y;
+            GlobalState.wifiHoverIntent = true;
+            hoverShowTimer.start();
+        }
+        onExited: {
+            GlobalState.wifiHoverIntent = false;
+            hoverShowTimer.stop();
+        }
+        onClicked: {
+            hoverShowTimer.stop();
+            GlobalState.showWifiHoverMenu = false;
+            GlobalState.showWifiSettings = !GlobalState.showWifiSettings;
+        }
     }
 }
