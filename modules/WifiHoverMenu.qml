@@ -105,7 +105,7 @@ PanelWindow {
 
     Timer {
         id: hideTimer
-        interval: 350
+        interval: 800
         repeat: false
         running: false
         onTriggered: {
@@ -131,11 +131,9 @@ PanelWindow {
         border.width: 1
         radius: 10
 
-        MouseArea {
-            anchors.fill: parent
-            hoverEnabled: true
-            onEntered: GlobalState.wifiHoverIntent = true
-            onExited: GlobalState.wifiHoverIntent = false
+        // HoverHandler covers the whole panel without being blocked by child MouseAreas.
+        HoverHandler {
+            onHoveredChanged: GlobalState.wifiHoverIntent = hovered
         }
 
         ColumnLayout {

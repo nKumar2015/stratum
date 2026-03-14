@@ -12,11 +12,13 @@ import "theme"
 ShellRoot {
     PowerMenu {}
     LockScreen {}
+    SystemOsd {}
     BluetoothMenu {}
     BluetoothHoverMenu {}
     WifiMenu {}
     WifiHoverMenu {}
     AudioHoverMenu {}
+    BatteryHoverMenu {}
     PanelWindow {
         id: rootPanelWindow
         anchors.top: true
@@ -66,21 +68,39 @@ ShellRoot {
                     Layout.alignment: Qt.AlignHCenter
                 }
 
-                Audio {
+                Rectangle {
                     Layout.alignment: Qt.AlignHCenter
-                }
+                    Layout.preferredWidth: 30
+                    Layout.preferredHeight: 86
+                    radius: 15
+                    color: Theme.black
+                    border.width: 1
+                    border.color: Theme.grey
 
-                Bluetooth {
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.topMargin: 6
+                        anchors.bottomMargin: 6
+                        spacing: 4
 
-                Wifi {
-                    Layout.alignment: Qt.AlignHCenter
+                        Audio {
+                            Layout.alignment: Qt.AlignHCenter
+                        }
 
+                        Bluetooth {
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+
+                        Wifi {
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+                    }
                 }
 
                 Battery {
                     Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: -6
+                    Layout.bottomMargin: -6
                 }
 
                 Clock {

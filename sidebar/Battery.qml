@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import "../theme"
+import "../globals"
 
 ColumnLayout {
     id: root
@@ -16,6 +17,10 @@ ColumnLayout {
         let state = UPower.displayDevice.state;
 
         if (state === UPowerDeviceState.Charging)
+            return "󰂄";
+        if (state === UPowerDeviceState.FullyCharged)
+            return "󰁹";
+        if (state === UPowerDeviceState.PendingCharge)
             return "󰂄";
         if (pct >= 90)
             return "󰁹";
@@ -42,6 +47,10 @@ ColumnLayout {
         if (!UPower.displayDevice.ready)
             return Theme.inactiveWs;
         if (UPower.displayDevice.state === UPowerDeviceState.Charging)
+            return Theme.green;
+        if (UPower.displayDevice.state === UPowerDeviceState.FullyCharged)
+            return Theme.green;
+        if (UPower.displayDevice.state === UPowerDeviceState.PendingCharge)
             return Theme.green;
         if (UPower.displayDevice.percentage <= 0.20)
             return Theme.red;
@@ -81,6 +90,42 @@ ColumnLayout {
             ColorAnimation {
                 duration: 250
             }
+        }
+    }
+
+    Timer {
+        id: hoverShowTimer
+        interval: 350
+        repeat: false
+        onTriggered: {
+            if (batteryHover.containsMouse)
+                GlobalState.showBatteryHoverMenu = true;
+        }
+    }
+
+    Timer {
+        id: hoverExitGraceTimer
+        interval: 420
+        repeat: false
+        onTriggered: {
+            if (!batteryHover.containsMouse)
+                GlobalState.batteryHoverIntent = false;
+        }
+    }
+
+    MouseArea {
+        id: batteryHover
+        anchors.fill: parent
+        hoverEnabled: true
+        onEntered: {
+            hoverExitGraceTimer.stop();
+            GlobalState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
+            GlobalState.batteryHoverIntent = true;
+            hoverShowTimer.start();
+        }
+        onExited: {
+            hoverShowTimer.stop();
+            hoverExitGraceTimer.restart();
         }
     }
 }

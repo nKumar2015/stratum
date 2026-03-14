@@ -208,6 +208,18 @@ Window {
         selectedPaired = "";
     }
 
+    function pairSelectedDevice() {
+        if (!selectedMac || selectedPaired === "yes")
+            return;
+
+        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "pair", selectedMac];
+        pendingAction = "pair";
+        pendingActionTarget = selectedName || selectedMac;
+        setStatusMessage("Pairing with " + pendingActionTarget + "...", false);
+        actionWatchdogTimer.restart();
+        actionProc.running = true;
+    }
+
     function connectSelectedDevice() {
         if (!selectedMac || selectedConnected === "yes")
             return;
@@ -421,6 +433,8 @@ Window {
                     bluetoothMenu.setStatusMessage(result, true);
                 } else if (result.length > 0 && result.toLowerCase().indexOf("error") !== -1) {
                     bluetoothMenu.setStatusMessage(result, true);
+                } else if (bluetoothMenu.pendingAction === "pair") {
+                    bluetoothMenu.setStatusMessage("Paired with " + bluetoothMenu.pendingActionTarget + ".", true);
                 } else if (bluetoothMenu.pendingAction === "connect") {
                     bluetoothMenu.setStatusMessage("Connected to " + bluetoothMenu.pendingActionTarget + ".", true);
                 } else if (bluetoothMenu.pendingAction === "disconnect") {
@@ -812,24 +826,12 @@ Window {
                     }
 
                     Text {
-                        text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A")
+                        text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A") + "  •  Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A") + "  •  Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
                         color: Theme.hover
                         font.family: Theme.font
                         font.pixelSize: 12
-                    }
-
-                    Text {
-                        text: "Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A")
-                        color: Theme.hover
-                        font.family: Theme.font
-                        font.pixelSize: 12
-                    }
-
-                    Text {
-                        text: "Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
-                        color: Theme.hover
-                        font.family: Theme.font
-                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
                     }
                 }
             }
@@ -1194,25 +1196,44 @@ Window {
                             font.pixelSize: 11
                         }
 
-                        Text {
-                            text: "Connected: " + (bluetoothMenu.selectedConnected || "no")
-                            color: bluetoothMenu.selectedConnected === "yes" ? Theme.green : Theme.hover
-                            font.family: Theme.font
-                            font.pixelSize: 11
-                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 5
 
-                        Text {
-                            text: "Trusted: " + (bluetoothMenu.selectedTrusted || "no")
-                            color: Theme.hover
-                            font.family: Theme.font
-                            font.pixelSize: 11
-                        }
+                            Text {
+                                text: "Connected: " + (bluetoothMenu.selectedConnected || "no")
+                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.green : Theme.hover
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
 
-                        Text {
-                            text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
-                            color: Theme.hover
-                            font.family: Theme.font
-                            font.pixelSize: 11
+                            Text {
+                                text: "•"
+                                color: Theme.grey
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
+
+                            Text {
+                                text: "Trusted: " + (bluetoothMenu.selectedTrusted || "no")
+                                color: Theme.hover
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
+
+                            Text {
+                                text: "•"
+                                color: Theme.grey
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
+
+                            Text {
+                                text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
+                                color: Theme.hover
+                                font.family: Theme.font
+                                font.pixelSize: 11
+                            }
                         }
 
                         Rectangle {
@@ -1220,6 +1241,46 @@ Window {
                             Layout.preferredHeight: 1
                             color: Theme.grey
                             opacity: 0.8
+                        }
+
+                        Rectangle {
+                            property bool isEnabled: bluetoothMenu.bluetoothEnabled && bluetoothMenu.selectedMac.length > 0 && bluetoothMenu.selectedPaired !== "yes"
+                            Layout.preferredHeight: 36
+                            Layout.fillWidth: true
+                            radius: 6
+                            color: !isEnabled ? "#23232d" : (pairMainMouse.containsMouse ? "#2e4060" : "#1e2e45")
+                            border.color: Theme.grey
+                            border.width: 1
+                            opacity: isEnabled ? 1.0 : 0.6
+                            visible: bluetoothMenu.selectedPaired !== "yes"
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: 6
+
+                                Text {
+                                    text: "󰌹"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    text: "Pair"
+                                    color: Theme.text
+                                    font.family: Theme.font
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+                            }
+
+                            MouseArea {
+                                id: pairMainMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                enabled: parent.isEnabled
+                                onClicked: bluetoothMenu.pairSelectedDevice()
+                            }
                         }
 
                         Rectangle {

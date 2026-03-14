@@ -38,10 +38,16 @@ case "$cmd" in
         done
         ;;
     connect)
-        bluetoothctl connect "$1" 2>&1
+        bluetoothctl trust "$1" 2>&1
+        result=$(printf 'agent on\ndefault-agent\nconnect %s\n' "$1" | timeout 12 bluetoothctl 2>&1)
+        printf '%s\n' "$result" | grep -Ei 'successful|failed|error|not available|already' | head -1
         ;;
     disconnect)
         bluetoothctl disconnect "$1" 2>&1
+        ;;
+    pair)
+        bluetoothctl pair "$1" 2>&1
+        bluetoothctl trust "$1" 2>&1
         ;;
     forget)
         bluetoothctl remove "$1" 2>&1

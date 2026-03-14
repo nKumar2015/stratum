@@ -19,4 +19,7 @@ QtObject {
     property bool bluetoothPowered: false
     property bool bluetoothConnected: false
     property bool bluetoothScanning: false
+    property bool showBatteryHoverMenu: false
+    property real batteryIconY: 0
+    property bool batteryHoverIntent: false
 }

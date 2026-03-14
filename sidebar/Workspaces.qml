@@ -52,6 +52,16 @@ Item {
                     family: Theme.font
                 }
 
+                Rectangle {
+                    visible: wsText.isActive
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    width: 14
+                    height: 2
+                    radius: 2
+                    color: Theme.activeWs
+                }
+
                 Behavior on color {
                     ColorAnimation {
                         duration: 200

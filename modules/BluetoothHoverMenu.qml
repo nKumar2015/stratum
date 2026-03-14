@@ -136,7 +136,7 @@ PanelWindow {
 
     Timer {
         id: hideTimer
-        interval: 350
+        interval: 800
         repeat: false
         running: false
         onTriggered: {
@@ -162,12 +162,11 @@ PanelWindow {
         border.width: 1
         radius: 10
 
-        // Track hover over the whole panel so we can auto-hide on exit
-        MouseArea {
-            anchors.fill: parent
-            hoverEnabled: true
-            onEntered: GlobalState.bluetoothHoverIntent = true
-            onExited: GlobalState.bluetoothHoverIntent = false
+        // Track hover over the whole panel so we can auto-hide on exit.
+        // HoverHandler is used instead of MouseArea so child MouseAreas don't
+        // steal events and cause premature exit detection.
+        HoverHandler {
+            onHoveredChanged: GlobalState.bluetoothHoverIntent = hovered
         }
 
         ColumnLayout {
