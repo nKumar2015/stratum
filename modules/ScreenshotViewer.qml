@@ -121,7 +121,7 @@ PanelWindow {
         if (hasAnnotations()) {
             const runtimeDir = StandardPaths.writableLocation(StandardPaths.RuntimeLocation) || "/tmp";
             const composedPath = runtimeDir + "/quickshell-screenshot-viewer-" + Date.now() + ".png";
-            renderSurface.grabToImage(function(result) {
+            imageDrawSurface.grabToImage(function(result) {
                 const saved = result.saveToFile(composedPath);
                 if (!saved) {
                     viewer.isWorking = false;
@@ -510,72 +510,90 @@ PanelWindow {
                     cache: false
                 }
 
-                Canvas {
-                    id: paintCanvas
-                    anchors.fill: parent
+                Item {
+                    id: imageDrawSurface
+                    visible: screenshotImage.status === Image.Ready
+                    x: screenshotImage.x + (screenshotImage.width - screenshotImage.paintedWidth) / 2
+                    y: screenshotImage.y + (screenshotImage.height - screenshotImage.paintedHeight) / 2
+                    width: screenshotImage.paintedWidth
+                    height: screenshotImage.paintedHeight
+                    clip: true
 
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        ctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-                        const strokes = viewer.annotationStrokes || [];
-                        for (let i = 0; i < strokes.length; i++) {
-                            const stroke = strokes[i];
-                            const points = stroke.points || [];
-                            if (points.length < 2)
-                                continue;
-
-                            ctx.lineJoin = "round";
-                            ctx.lineCap = "round";
-                            ctx.strokeStyle = stroke.color;
-                            ctx.lineWidth = stroke.size;
-                            ctx.beginPath();
-                            ctx.moveTo(points[0].x, points[0].y);
-                            for (let p = 1; p < points.length; p++)
-                                ctx.lineTo(points[p].x, points[p].y);
-                            ctx.stroke();
-                        }
+                    Image {
+                        anchors.fill: parent
+                        source: screenshotImage.source
+                        fillMode: Image.Stretch
+                        smooth: true
+                        cache: false
                     }
 
-                    property int currentStrokeIndex: -1
-
-                    MouseArea {
+                    Canvas {
+                        id: paintCanvas
                         anchors.fill: parent
-                        cursorShape: Qt.CrossCursor
 
-                        onPressed: function(mouse) {
-                            const strokes = viewer.annotationStrokes.slice();
-                            const stroke = {
-                                color: viewer.colorToHex(viewer.annotationColor),
-                                size: viewer.penSize,
-                                points: [{ x: mouse.x, y: mouse.y }]
-                            };
-                            strokes.push(stroke);
-                            viewer.annotationStrokes = strokes;
-                            paintCanvas.currentStrokeIndex = strokes.length - 1;
-                            paintCanvas.requestPaint();
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            ctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+                            const strokes = viewer.annotationStrokes || [];
+                            for (let i = 0; i < strokes.length; i++) {
+                                const stroke = strokes[i];
+                                const points = stroke.points || [];
+                                if (points.length < 2)
+                                    continue;
+
+                                ctx.lineJoin = "round";
+                                ctx.lineCap = "round";
+                                ctx.strokeStyle = stroke.color;
+                                ctx.lineWidth = stroke.size;
+                                ctx.beginPath();
+                                ctx.moveTo(points[0].x, points[0].y);
+                                for (let p = 1; p < points.length; p++)
+                                    ctx.lineTo(points[p].x, points[p].y);
+                                ctx.stroke();
+                            }
                         }
 
-                        onPositionChanged: function(mouse) {
-                            if (!(mouse.buttons & Qt.LeftButton))
-                                return;
+                        property int currentStrokeIndex: -1
 
-                            const idx = paintCanvas.currentStrokeIndex;
-                            if (idx < 0)
-                                return;
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.CrossCursor
 
-                            const strokes = viewer.annotationStrokes.slice();
-                            const stroke = strokes[idx];
-                            if (!stroke || !stroke.points)
-                                return;
+                            onPressed: function(mouse) {
+                                const strokes = viewer.annotationStrokes.slice();
+                                const stroke = {
+                                    color: viewer.colorToHex(viewer.annotationColor),
+                                    size: viewer.penSize,
+                                    points: [{ x: mouse.x, y: mouse.y }]
+                                };
+                                strokes.push(stroke);
+                                viewer.annotationStrokes = strokes;
+                                paintCanvas.currentStrokeIndex = strokes.length - 1;
+                                paintCanvas.requestPaint();
+                            }
 
-                            stroke.points.push({ x: mouse.x, y: mouse.y });
-                            strokes[idx] = stroke;
-                            viewer.annotationStrokes = strokes;
-                            paintCanvas.requestPaint();
-                        }
+                            onPositionChanged: function(mouse) {
+                                if (!(mouse.buttons & Qt.LeftButton))
+                                    return;
 
-                        onReleased: {
-                            paintCanvas.currentStrokeIndex = -1;
+                                const idx = paintCanvas.currentStrokeIndex;
+                                if (idx < 0)
+                                    return;
+
+                                const strokes = viewer.annotationStrokes.slice();
+                                const stroke = strokes[idx];
+                                if (!stroke || !stroke.points)
+                                    return;
+
+                                stroke.points.push({ x: mouse.x, y: mouse.y });
+                                strokes[idx] = stroke;
+                                viewer.annotationStrokes = strokes;
+                                paintCanvas.requestPaint();
+                            }
+
+                            onReleased: {
+                                paintCanvas.currentStrokeIndex = -1;
+                            }
                         }
                     }
                 }
