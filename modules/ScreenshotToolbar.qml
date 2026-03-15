@@ -11,12 +11,27 @@ PanelWindow {
     id: toolbar
 
     property bool visibleState: false
-    property string selectedMode: "window"
     property bool isCapturing: false
+    property string pendingCommand: ""
+    property string pendingGeometry: ""
     property string pendingMode: ""
     property string lastCapturePath: ""
     property string statusMessage: ""
     property bool statusError: false
+    property real hoverWindowX: 0
+    property real hoverWindowY: 0
+    property real hoverWindowW: 0
+    property real hoverWindowH: 0
+    property string hoverWindowGeometry: ""
+    property bool pointerDown: false
+    property bool dragActive: false
+    property real pressX: 0
+    property real pressY: 0
+    property real dragX: 0
+    property real dragY: 0
+    property real dragW: 0
+    property real dragH: 0
+    readonly property real dragThreshold: 8
 
     anchors {
         top: true
@@ -42,6 +57,68 @@ PanelWindow {
         return mode;
     }
 
+    function resetSelectionState() {
+        hoverWindowX = 0;
+        hoverWindowY = 0;
+        hoverWindowW = 0;
+        hoverWindowH = 0;
+        hoverWindowGeometry = "";
+        pointerDown = false;
+        dragActive = false;
+        dragX = 0;
+        dragY = 0;
+        dragW = 0;
+        dragH = 0;
+    }
+
+    function parseGeometry(geometry) {
+        const text = String(geometry || "").trim();
+        const match = /^(-?\d+),(-?\d+)\s+(\d+)x(\d+)$/.exec(text);
+        if (!match)
+            return null;
+        return {
+            x: Number(match[1]),
+            y: Number(match[2]),
+            w: Number(match[3]),
+            h: Number(match[4])
+        };
+    }
+
+    function updateHoverFromGeometry(geometry) {
+        const parsed = parseGeometry(geometry);
+        if (!parsed) {
+            hoverWindowGeometry = "";
+            hoverWindowX = 0;
+            hoverWindowY = 0;
+            hoverWindowW = 0;
+            hoverWindowH = 0;
+            return;
+        }
+
+        hoverWindowGeometry = String(geometry || "");
+        hoverWindowX = parsed.x;
+        hoverWindowY = parsed.y;
+        hoverWindowW = parsed.w;
+        hoverWindowH = parsed.h;
+    }
+
+    function updateDragRect(mouseX, mouseY) {
+        const dx = mouseX - pressX;
+        const dy = mouseY - pressY;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (!dragActive && (absDx >= dragThreshold || absDy >= dragThreshold))
+            dragActive = true;
+
+        if (!dragActive)
+            return;
+
+        dragX = Math.min(pressX, mouseX);
+        dragY = Math.min(pressY, mouseY);
+        dragW = Math.max(1, absDx);
+        dragH = Math.max(1, absDy);
+    }
+
     function showStatus(message, isError) {
         statusMessage = String(message || "");
         statusError = !!isError;
@@ -54,26 +131,53 @@ PanelWindow {
         visibleState = true;
         statusMessage = "";
         statusError = false;
-        selectedMode = "window";
+        resetSelectionState();
     }
 
     function closeToolbar() {
         visibleState = false;
-        if (!isCapturing)
+        if (!isCapturing) {
             pendingMode = "";
+            pendingGeometry = "";
+            pendingCommand = "";
+        }
+        resetSelectionState();
     }
 
-    function runCapture(mode) {
+    function runCapture(commandName, mode, geometry) {
         if (isCapturing)
             return;
 
-        const chosenMode = String(mode || selectedMode || "window");
-        selectedMode = chosenMode;
+        const chosenCommand = String(commandName || "capture-fullscreen");
+        const chosenMode = String(mode || "fullscreen");
+        const chosenGeometry = String(geometry || "");
         statusMessage = "";
         statusError = false;
+        pendingCommand = chosenCommand;
         pendingMode = chosenMode;
+        pendingGeometry = chosenGeometry;
         visibleState = false;
         delayedCaptureTimer.restart();
+    }
+
+    function captureFromClick() {
+        if (dragActive)
+            return;
+
+        if (hoverWindowGeometry.length > 0) {
+            runCapture("capture-geometry", "window", hoverWindowGeometry);
+            return;
+        }
+
+        runCapture("capture-fullscreen", "fullscreen", "");
+    }
+
+    function captureFromDrag() {
+        if (!dragActive)
+            return;
+
+        const geometry = Math.round(dragX) + "," + Math.round(dragY) + " " + Math.round(dragW) + "x" + Math.round(dragH);
+        runCapture("capture-geometry", "region", geometry);
     }
 
     function dispatchViewerOpen(path, mode) {
@@ -95,14 +199,37 @@ PanelWindow {
         interval: 24
         repeat: false
         onTriggered: {
+            const nextCommand = toolbar.pendingCommand;
             const nextMode = toolbar.pendingMode;
-            if (!nextMode)
+            if (!nextCommand)
                 return;
 
+            const nextGeometry = toolbar.pendingGeometry;
+            toolbar.pendingCommand = "";
             toolbar.pendingMode = "";
+            toolbar.pendingGeometry = "";
             toolbar.isCapturing = true;
-            captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture", nextMode];
+
+            if (nextCommand === "capture-geometry")
+                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-geometry", nextGeometry, nextMode];
+            else
+                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-fullscreen", nextMode];
+
             captureProc.running = true;
+        }
+    }
+
+    Timer {
+        id: hoverPollTimer
+        interval: 45
+        running: toolbar.visibleState && !toolbar.pointerDown && !toolbar.dragActive
+        repeat: true
+        onTriggered: {
+            if (!toolbar.visibleState || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
+                return;
+
+            windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(Math.round(pointerArea.mouseX)), String(Math.round(pointerArea.mouseY))];
+            windowAtProc.running = true;
         }
     }
 
@@ -165,6 +292,27 @@ PanelWindow {
         }
     }
 
+    Process {
+        id: windowAtProc
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                if (!result)
+                    return;
+
+                if (result.startsWith("ok|")) {
+                    const parts = result.split("|");
+                    toolbar.updateHoverFromGeometry(parts[1] || "");
+                    return;
+                }
+
+                if (result === "none")
+                    toolbar.updateHoverFromGeometry("");
+            }
+        }
+    }
+
     IpcHandler {
         target: "screenshot"
 
@@ -184,9 +332,18 @@ PanelWindow {
         }
 
         function capture(mode): void {
+            const chosenMode = String(mode || "window");
+            if (chosenMode === "region") {
+                if (!toolbar.visibleState)
+                    toolbar.openToolbar();
+                return;
+            }
+            if (chosenMode === "fullscreen") {
+                toolbar.runCapture("capture-fullscreen", "fullscreen", "");
+                return;
+            }
             if (!toolbar.visibleState)
                 toolbar.openToolbar();
-            toolbar.runCapture(mode);
         }
     }
 
@@ -199,107 +356,87 @@ PanelWindow {
     }
 
     MouseArea {
+        id: pointerArea
         anchors.fill: parent
         enabled: toolbar.visibleState
-        onClicked: toolbar.closeToolbar()
+        hoverEnabled: true
+
+        onPressed: function(mouse) {
+            toolbar.pointerDown = true;
+            toolbar.dragActive = false;
+            toolbar.pressX = mouse.x;
+            toolbar.pressY = mouse.y;
+            toolbar.dragX = mouse.x;
+            toolbar.dragY = mouse.y;
+            toolbar.dragW = 1;
+            toolbar.dragH = 1;
+        }
+
+        onPositionChanged: function(mouse) {
+            if (toolbar.pointerDown)
+                toolbar.updateDragRect(mouse.x, mouse.y);
+        }
+
+        onReleased: {
+            const hadDrag = toolbar.dragActive;
+            toolbar.pointerDown = false;
+            if (hadDrag)
+                toolbar.captureFromDrag();
+            else
+                toolbar.captureFromClick();
+            toolbar.dragActive = false;
+        }
+
+        onCanceled: {
+            toolbar.pointerDown = false;
+            toolbar.dragActive = false;
+        }
     }
 
     Rectangle {
-        width: Math.max(520, controlsLayout.implicitWidth + 24)
-        height: 84
+        width: 320
+        height: 32
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: 26
-        radius: 12
-        color: Theme.background
+        anchors.topMargin: 20
+        radius: 8
+        color: "#aa000000"
         border.width: 1
-        border.color: Theme.grey
+        border.color: "#66ffffff"
         visible: toolbar.visibleState
 
-        MouseArea {
-            anchors.fill: parent
-            onClicked: {
-            }
-        }
-
-        RowLayout {
-            id: controlsLayout
-            anchors.fill: parent
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
-            anchors.topMargin: 8
-            anchors.bottomMargin: 8
-            spacing: 8
-
-            Repeater {
-                model: [
-                    { key: "window", label: "Window" },
-                    { key: "region", label: "Region" },
-                    { key: "fullscreen", label: "Full" }
-                ]
-
-                delegate: Rectangle {
-                    required property var modelData
-
-                    readonly property bool active: toolbar.selectedMode === modelData.key
-                    Layout.preferredHeight: 38
-                    Layout.preferredWidth: modelData.key === "fullscreen" ? 64 : 88
-                    radius: 8
-                    color: active ? Theme.activeWs : Theme.black
-                    border.width: 1
-                    border.color: active ? Theme.activeWs : Theme.grey
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: modelData.label
-                        color: Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: !toolbar.isCapturing
-                        onClicked: toolbar.runCapture(modelData.key)
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.preferredHeight: 38
-                Layout.preferredWidth: 72
-                radius: 8
-                color: "#2a2a2a"
-                border.width: 1
-                border.color: Theme.grey
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "OCR"
-                    color: Theme.hover
-                    font.family: Theme.font
-                    font.pixelSize: 12
-                    font.bold: true
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: false
-                }
-            }
-        }
-
         Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 8
-            text: toolbar.isCapturing ? "Select on screen..." : "Click a mode, then release mouse to capture"
-            color: Theme.hover
+            anchors.centerIn: parent
+            text: toolbar.pointerDown ? "Release to capture" : "Click window, drag region, or click empty for fullscreen"
+            color: Theme.text
             font.family: Theme.font
-            font.pixelSize: 10
+            font.pixelSize: 11
             font.bold: true
         }
+    }
+
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.dragActive && toolbar.hoverWindowGeometry.length > 0
+        x: toolbar.hoverWindowX
+        y: toolbar.hoverWindowY
+        width: toolbar.hoverWindowW
+        height: toolbar.hoverWindowH
+        color: "#3a7aa2f7"
+        border.width: 2
+        border.color: "#bcd6ffff"
+        radius: 6
+    }
+
+    Rectangle {
+        visible: toolbar.visibleState && toolbar.dragActive
+        x: toolbar.dragX
+        y: toolbar.dragY
+        width: toolbar.dragW
+        height: toolbar.dragH
+        color: "#3a7aa2f7"
+        border.width: 2
+        border.color: "#cfe0ffff"
+        radius: 3
     }
 
     Rectangle {
