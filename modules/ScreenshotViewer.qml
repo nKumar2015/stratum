@@ -26,6 +26,7 @@ PanelWindow {
     property string statusMessage: ""
     property bool statusError: false
     property var annotationStrokes: []
+    readonly property real pickerSampleScale: Math.max(1, Number(Screen.devicePixelRatio || 1))
 
     anchors {
         top: true
@@ -189,10 +190,18 @@ PanelWindow {
         return Math.max(minValue, Math.min(maxValue, value));
     }
 
+    function toSampleX(x) {
+        return Math.round(clamp(x * pickerSampleScale, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
+    }
+
+    function toSampleY(y) {
+        return Math.round(clamp(y * pickerSampleScale, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
+    }
+
     function pickColorAt(x, y) {
         colorSampleCanvas.requestPaint();
-        const sx = Math.round(clamp(x, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
-        const sy = Math.round(clamp(y, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
+        const sx = toSampleX(x);
+        const sy = toSampleY(y);
         const ctx = colorSampleCanvas.getContext("2d");
         if (!ctx)
             return;
@@ -610,7 +619,7 @@ PanelWindow {
                         anchors.fill: parent
                         source: screenshotImage.source
                         fillMode: Image.Stretch
-                        smooth: true
+                        smooth: false
                         cache: false
 
                         onStatusChanged: colorSampleCanvas.requestPaint()
@@ -709,7 +718,7 @@ PanelWindow {
                         id: colorSampleCanvas
                         anchors.fill: parent
                         visible: false
-                        canvasSize: Qt.size(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)))
+                        canvasSize: Qt.size(Math.max(1, Math.round(width * viewer.pickerSampleScale)), Math.max(1, Math.round(height * viewer.pickerSampleScale)))
 
                         onWidthChanged: requestPaint()
                         onHeightChanged: requestPaint()
@@ -719,6 +728,7 @@ PanelWindow {
                             const cw = colorSampleCanvas.canvasSize.width;
                             const ch = colorSampleCanvas.canvasSize.height;
                             ctx.clearRect(0, 0, cw, ch);
+                            ctx.imageSmoothingEnabled = false;
                             ctx.drawImage(drawImageBase, 0, 0, cw, ch);
                             zoomCanvas.requestPaint();
                         }
@@ -748,8 +758,8 @@ PanelWindow {
 
                                 const sampleSize = 13;
                                 const half = Math.floor(sampleSize / 2);
-                                const centerX = Math.round(viewer.pickerHoverX);
-                                const centerY = Math.round(viewer.pickerHoverY);
+                                const centerX = viewer.toSampleX(viewer.pickerHoverX);
+                                const centerY = viewer.toSampleY(viewer.pickerHoverY);
                                 const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.canvasSize.width - sampleSize));
                                 const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.canvasSize.height - sampleSize));
                                 const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
