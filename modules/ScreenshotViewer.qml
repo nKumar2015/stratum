@@ -21,9 +21,6 @@ PanelWindow {
     property bool colorPickerActive: false
     property real pickerHoverX: 0
     property real pickerHoverY: 0
-    property real pickerPendingX: 0
-    property real pickerPendingY: 0
-    property bool pickerPendingDirty: false
     property string pickedColorHex: ""
     property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
@@ -182,7 +179,6 @@ PanelWindow {
         colorPickerActive = !colorPickerActive;
         if (colorPickerActive) {
             showStatus("Click image to pick color", false);
-            pickerPendingDirty = false;
             pickerHoverX = 0;
             pickerHoverY = 0;
             zoomCanvas.requestPaint();
@@ -219,22 +215,6 @@ PanelWindow {
         onTriggered: {
             viewer.statusMessage = "";
             viewer.statusError = false;
-        }
-    }
-
-    Timer {
-        id: pickerHoverUpdateTimer
-        interval: 33
-        repeat: true
-        running: viewer.colorPickerActive && viewer.visibleState
-        onTriggered: {
-            if (!viewer.pickerPendingDirty)
-                return;
-
-            viewer.pickerPendingDirty = false;
-            viewer.pickerHoverX = viewer.pickerPendingX;
-            viewer.pickerHoverY = viewer.pickerPendingY;
-            zoomCanvas.requestPaint();
         }
     }
 
@@ -415,7 +395,7 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "󰴄"
+                        text: ""
                         color: Theme.text
                         font.family: Theme.font
                         font.pixelSize: 14
@@ -671,6 +651,9 @@ PanelWindow {
 
                             onPressed: function(mouse) {
                                 if (viewer.colorPickerActive) {
+                                    viewer.pickerHoverX = mouse.x;
+                                    viewer.pickerHoverY = mouse.y;
+                                    zoomCanvas.requestPaint();
                                     viewer.pickColorAt(mouse.x, mouse.y);
                                     viewer.colorPickerActive = false;
                                     return;
@@ -690,9 +673,9 @@ PanelWindow {
 
                             onPositionChanged: function(mouse) {
                                 if (viewer.colorPickerActive) {
-                                    viewer.pickerPendingX = mouse.x;
-                                    viewer.pickerPendingY = mouse.y;
-                                    viewer.pickerPendingDirty = true;
+                                    viewer.pickerHoverX = mouse.x;
+                                    viewer.pickerHoverY = mouse.y;
+                                    zoomCanvas.requestPaint();
                                     return;
                                 }
 
@@ -741,8 +724,8 @@ PanelWindow {
                     Rectangle {
                         id: zoomLens
                         visible: viewer.colorPickerActive
-                        width: 128
-                        height: 128
+                        width: 96
+                        height: 96
                         radius: 8
                         border.width: 1
                         border.color: Theme.activeWs
@@ -760,7 +743,7 @@ PanelWindow {
                                 if (!sampleCtx)
                                     return;
 
-                                const sampleSize = 17;
+                                const sampleSize = 13;
                                 const half = Math.floor(sampleSize / 2);
                                 const centerX = Math.round(viewer.pickerHoverX);
                                 const centerY = Math.round(viewer.pickerHoverY);
