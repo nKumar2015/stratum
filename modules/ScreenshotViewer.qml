@@ -21,6 +21,9 @@ PanelWindow {
     property bool colorPickerActive: false
     property real pickerHoverX: 0
     property real pickerHoverY: 0
+    property real pickerPendingX: 0
+    property real pickerPendingY: 0
+    property bool pickerPendingDirty: false
     property string pickedColorHex: ""
     property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
@@ -177,8 +180,13 @@ PanelWindow {
         if (isWorking)
             return;
         colorPickerActive = !colorPickerActive;
-        if (colorPickerActive)
+        if (colorPickerActive) {
             showStatus("Click image to pick color", false);
+            pickerPendingDirty = false;
+            pickerHoverX = 0;
+            pickerHoverY = 0;
+            zoomCanvas.requestPaint();
+        }
     }
 
     function clamp(value, minValue, maxValue) {
@@ -211,6 +219,22 @@ PanelWindow {
         onTriggered: {
             viewer.statusMessage = "";
             viewer.statusError = false;
+        }
+    }
+
+    Timer {
+        id: pickerHoverUpdateTimer
+        interval: 33
+        repeat: true
+        running: viewer.colorPickerActive && viewer.visibleState
+        onTriggered: {
+            if (!viewer.pickerPendingDirty)
+                return;
+
+            viewer.pickerPendingDirty = false;
+            viewer.pickerHoverX = viewer.pickerPendingX;
+            viewer.pickerHoverY = viewer.pickerPendingY;
+            zoomCanvas.requestPaint();
         }
     }
 
@@ -391,7 +415,7 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "󰏘"
+                        text: "󰴄"
                         color: Theme.text
                         font.family: Theme.font
                         font.pixelSize: 14
@@ -666,8 +690,9 @@ PanelWindow {
 
                             onPositionChanged: function(mouse) {
                                 if (viewer.colorPickerActive) {
-                                    viewer.pickerHoverX = mouse.x;
-                                    viewer.pickerHoverY = mouse.y;
+                                    viewer.pickerPendingX = mouse.x;
+                                    viewer.pickerPendingY = mouse.y;
+                                    viewer.pickerPendingDirty = true;
                                     return;
                                 }
 
@@ -709,6 +734,7 @@ PanelWindow {
                             const ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
                             ctx.drawImage(drawImageBase, 0, 0, width, height);
+                            zoomCanvas.requestPaint();
                         }
                     }
 
@@ -724,32 +750,34 @@ PanelWindow {
                         x: viewer.clamp(viewer.pickerHoverX + 18, 0, Math.max(0, imageDrawSurface.width - width))
                         y: viewer.clamp(viewer.pickerHoverY + 18, 0, Math.max(0, imageDrawSurface.height - height))
 
-                        Image {
-                            anchors.fill: parent
-                            source: drawImageBase.source
-                            smooth: false
-                            fillMode: Image.Stretch
-
-                            sourceClipRect: {
-                                const sampleSize = 17;
-                                const half = Math.floor(sampleSize / 2);
-                                const srcW = Math.max(1, drawImageBase.sourceSize.width);
-                                const srcH = Math.max(1, drawImageBase.sourceSize.height);
-                                const normX = viewer.clamp(viewer.pickerHoverX / Math.max(1, imageDrawSurface.width), 0, 1);
-                                const normY = viewer.clamp(viewer.pickerHoverY / Math.max(1, imageDrawSurface.height), 0, 1);
-                                const centerX = Math.round(normX * (srcW - 1));
-                                const centerY = Math.round(normY * (srcH - 1));
-                                const clipX = viewer.clamp(centerX - half, 0, Math.max(0, srcW - sampleSize));
-                                const clipY = viewer.clamp(centerY - half, 0, Math.max(0, srcH - sampleSize));
-                                return Qt.rect(clipX, clipY, sampleSize, sampleSize);
-                            }
-                        }
-
                         Canvas {
+                            id: zoomCanvas
                             anchors.fill: parent
                             onPaint: {
                                 const ctx = getContext("2d");
                                 ctx.clearRect(0, 0, width, height);
+                                const sampleCtx = colorSampleCanvas.getContext("2d");
+                                if (!sampleCtx)
+                                    return;
+
+                                const sampleSize = 17;
+                                const half = Math.floor(sampleSize / 2);
+                                const centerX = Math.round(viewer.pickerHoverX);
+                                const centerY = Math.round(viewer.pickerHoverY);
+                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.width - sampleSize));
+                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.height - sampleSize));
+                                const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
+                                const cellW = width / sampleSize;
+                                const cellH = height / sampleSize;
+
+                                for (let y = 0; y < sampleSize; y++) {
+                                    for (let x = 0; x < sampleSize; x++) {
+                                        const idx = (y * sampleSize + x) * 4;
+                                        ctx.fillStyle = "rgba(" + data[idx] + "," + data[idx + 1] + "," + data[idx + 2] + "," + (data[idx + 3] / 255) + ")";
+                                        ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+                                    }
+                                }
+
                                 ctx.strokeStyle = "#ffffff";
                                 ctx.lineWidth = 1;
                                 ctx.beginPath();
