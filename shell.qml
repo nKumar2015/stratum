@@ -21,6 +21,7 @@ ShellRoot {
     WifiHoverMenu {}
     AudioHoverMenu {}
     BatteryHoverMenu {}
+    DashboardMenu {}
     Variants {
         model: Quickshell.screens
 

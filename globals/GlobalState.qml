@@ -24,6 +24,7 @@ QtObject {
     property bool showBatteryHoverMenu: false
     property real batteryIconY: 0
     property bool batteryHoverIntent: false
+    property bool showDashboardMenu: false
 
     property bool showNotificationCenter: false
     property bool doNotDisturb: false
