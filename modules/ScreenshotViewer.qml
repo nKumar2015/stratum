@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtCore
+import QtQuick.Dialogs
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
@@ -17,6 +18,7 @@ PanelWindow {
     property color annotationColor: "#ff3b30"
     property int penSize: 3
     property bool isWorking: false
+    property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
     property bool statusError: false
     property var annotationStrokes: []
@@ -104,6 +106,10 @@ PanelWindow {
     }
 
     function startPostAction(action) {
+        startPostActionWithTarget(action, "");
+    }
+
+    function startPostActionWithTarget(action, targetPath) {
         if (isWorking)
             return;
         if (!sourcePath) {
@@ -123,14 +129,43 @@ PanelWindow {
                     return;
                 }
 
-                postProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, composedPath];
+                const args = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, composedPath];
+                const normalizedTarget = viewer.toLocalPath(targetPath);
+                if (normalizedTarget.length > 0)
+                    args.push(normalizedTarget);
+                postProc.command = args;
                 postProc.running = true;
             });
             return;
         }
 
-        postProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, toLocalPath(sourcePath)];
+        const args = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, toLocalPath(sourcePath)];
+        const normalizedTarget = toLocalPath(targetPath);
+        if (normalizedTarget.length > 0)
+            args.push(normalizedTarget);
+        postProc.command = args;
         postProc.running = true;
+    }
+
+    function startSaveAs() {
+        if (isWorking)
+            return;
+        if (!sourcePath) {
+            showStatus("No image loaded", true);
+            return;
+        }
+
+        const picturesDir = StandardPaths.writableLocation(StandardPaths.PicturesLocation);
+        const baseDir = (picturesDir && picturesDir.length > 0) ? picturesDir + "/Screenshots" : "/tmp";
+        const stamp = new Date();
+        const pad = n => String(n).padStart(2, "0");
+        const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
+        const baseDirUrl = "file://" + encodeURI(baseDir);
+        reopenAfterSaveAsDialog = viewer.visibleState;
+        viewer.visibleState = false;
+        saveAsDialog.currentFolder = baseDirUrl;
+        saveAsDialog.selectedFile = baseDirUrl + "/" + encodeURIComponent(name);
+        saveAsDialog.open();
     }
 
     Timer {
@@ -356,7 +391,7 @@ PanelWindow {
                     MouseArea {
                         anchors.fill: parent
                         enabled: !viewer.isWorking
-                        onClicked: viewer.startPostAction("save-as")
+                        onClicked: viewer.startSaveAs()
                     }
                 }
 
@@ -564,6 +599,32 @@ PanelWindow {
                     font.bold: true
                 }
             }
+        }
+    }
+
+    FileDialog {
+        id: saveAsDialog
+        title: "Save Screenshot As"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["PNG Image (*.png)"]
+        defaultSuffix: "png"
+
+        onAccepted: {
+            if (viewer.reopenAfterSaveAsDialog)
+                viewer.visibleState = true;
+            viewer.reopenAfterSaveAsDialog = false;
+            const chosenPath = viewer.toLocalPath(String(selectedFile || ""));
+            if (!chosenPath) {
+                viewer.showStatus("Save As cancelled", true);
+                return;
+            }
+            viewer.startPostActionWithTarget("save-to", chosenPath);
+        }
+
+        onRejected: {
+            if (viewer.reopenAfterSaveAsDialog)
+                viewer.visibleState = true;
+            viewer.reopenAfterSaveAsDialog = false;
         }
     }
 }

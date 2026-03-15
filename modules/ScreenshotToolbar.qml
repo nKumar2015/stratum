@@ -127,6 +127,19 @@ PanelWindow {
         dragH = Math.max(1, absDy);
     }
 
+    function expandGeometry(geometry, marginPx) {
+        const parsed = parseGeometry(geometry);
+        if (!parsed)
+            return geometry;
+
+        const margin = Math.max(0, Number(marginPx || 0));
+        const x = Math.round(parsed.x - margin);
+        const y = Math.round(parsed.y - margin);
+        const w = Math.round(parsed.w + margin * 2);
+        const h = Math.round(parsed.h + margin * 2);
+        return x + "," + y + " " + Math.max(1, w) + "x" + Math.max(1, h);
+    }
+
     function openToolbar() {
         visibleState = true;
         freezeReady = false;
@@ -168,7 +181,7 @@ PanelWindow {
             return;
 
         if (hoverWindowGeometry.length > 0) {
-            runCapture("capture-geometry", "window", hoverWindowGeometry);
+            runCapture("capture-geometry", "window", expandGeometry(hoverWindowGeometry, 5));
             return;
         }
 
@@ -189,7 +202,7 @@ PanelWindow {
 
     Timer {
         id: delayedCaptureTimer
-        interval: 24
+        interval: 160
         repeat: false
         onTriggered: {
             const nextCommand = toolbar.pendingCommand;
@@ -288,13 +301,6 @@ PanelWindow {
 
                 toolbar.lastCapturePath = imagePath;
                 toolbar.visibleState = false;
-                GlobalState.addNotification({
-                    appName: "Screenshot",
-                    summary: "Captured " + toolbar.modeLabel(captureMode),
-                    body: imagePath,
-                    urgency: 1,
-                    category: "screenshot"
-                });
                 toolbar.dispatchViewerOpen(imagePath, captureMode);
             }
         }
@@ -435,7 +441,9 @@ PanelWindow {
         anchors.fill: parent
         visible: toolbar.visibleState && toolbar.freezeReady && toolbar.freezeFramePath.length > 0
         source: toolbar.toFileUrl(toolbar.freezeFramePath)
-        fillMode: Image.PreserveAspectCrop
+        fillMode: Image.Stretch
+        sourceSize.width: Math.max(1, Math.round(width * Screen.devicePixelRatio))
+        sourceSize.height: Math.max(1, Math.round(height * Screen.devicePixelRatio))
         smooth: false
         cache: false
     }

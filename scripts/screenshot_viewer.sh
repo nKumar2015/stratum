@@ -69,77 +69,31 @@ save_only() {
     echo "ok|save|$target_path"
 }
 
-choose_save_path() {
-    default_path="$1"
-
-    if command -v zenity >/dev/null 2>&1; then
-        zenity --file-selection --save --confirm-overwrite --filename="$default_path" 2>/dev/null
-        return $?
-    fi
-
-    if command -v kdialog >/dev/null 2>&1; then
-        kdialog --getsavefilename "$default_path" "*.png" 2>/dev/null
-        return $?
-    fi
-
-    return 1
-}
-
-save_as() {
+save_to_path() {
     image_path="$1"
-    target_dir="$HOME/Pictures/Screenshots"
-    timestamp="$(date +%Y%m%d-%H%M%S)"
-    default_path="$target_dir/Screenshot-$timestamp.png"
+    target_path_raw="$2"
 
-    mkdir -p "$target_dir" || error "failed to create screenshot directory"
+    target_path="$(normalize_path "$target_path_raw")"
+    [ -n "$target_path" ] || error "missing destination path"
 
-    chosen_path="$(choose_save_path "$default_path")"
-    if [ $? -ne 0 ] || [ -z "$chosen_path" ]; then
-        error "save-as cancelled"
-    fi
-
-    chosen_path="$(normalize_path "$chosen_path")"
-    case "$chosen_path" in
+    case "$target_path" in
         *.png) ;;
-        *) chosen_path="$chosen_path.png" ;;
+        *) target_path="$target_path.png" ;;
     esac
 
-    target_parent="$(dirname "$chosen_path")"
+    target_parent="$(dirname "$target_path")"
     mkdir -p "$target_parent" || error "failed to create destination directory"
 
-    if ! cp -- "$image_path" "$chosen_path"; then
+    if ! cp -- "$image_path" "$target_path"; then
         error "failed to save screenshot"
     fi
 
-    echo "ok|save-as|$chosen_path"
-}
-
-save_and_copy() {
-    image_path="$1"
-    target_path="$(save_only "$image_path" | awk -F'|' '/^ok\|save\|/ {print $3}')"
-    if [ -z "$target_path" ]; then
-        error "failed to save screenshot"
-    fi
-
-    if command -v wl-copy >/dev/null 2>&1; then
-        if wl-copy < "$target_path" >/dev/null 2>&1; then
-            echo "ok|save-copy|$target_path"
-            return 0
-        fi
-    fi
-
-    if command -v xclip >/dev/null 2>&1; then
-        if xclip -selection clipboard -t image/png -i "$target_path" >/dev/null 2>&1; then
-            echo "ok|save-copy|$target_path"
-            return 0
-        fi
-    fi
-
-    error "saved but failed to copy (install wl-clipboard or xclip)"
+    echo "ok|save-as|$target_path"
 }
 
 action="${1:-}"
 image_path="$(require_file "${2:-}")"
+destination_path="${3:-}"
 
 case "$action" in
     copy)
@@ -148,11 +102,11 @@ case "$action" in
     save)
         save_only "$image_path"
         ;;
-    save-as)
-        save_as "$image_path"
+    save-to)
+        save_to_path "$image_path" "$destination_path"
         ;;
-    save-copy)
-        save_and_copy "$image_path"
+    save-as)
+        save_to_path "$image_path" "$destination_path"
         ;;
     *)
         error "unknown action"
