@@ -23,110 +23,125 @@ ShellRoot {
     BatteryHoverMenu {}
     ScreenshotToolbar {}
     ScreenshotViewer {}
-    PanelWindow {
-        id: rootPanelWindow
-        anchors.top: true
-        anchors.left: true
-        anchors.bottom: true
-        implicitWidth: 60
-        color: "transparent"
+    Variants {
+        model: Quickshell.screens
 
-        margins.right: -20
+        PanelWindow {
+            id: panelWindow
 
-        Rectangle {
-            id: sidebar
-            width: 40
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.bottom: parent.bottom
+            property var modelData
+            property var monitor: Hyprland.monitorFor(modelData)
+            property string monitorName: monitor?.name || ""
 
-            color: Theme.background
-            clip: true
-            border.width: 1
-            border.color: "transparent"
+            screen: modelData
+            anchors.top: true
+            anchors.left: true
+            anchors.bottom: true
+            implicitWidth: 60
+            color: "transparent"
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.topMargin: 12
-                anchors.bottomMargin: 12
-                anchors.leftMargin: 0
-                anchors.rightMargin: 0
-                spacing: 16
+            margins.right: -20
 
-                Text {
-                    text: ""
-                    color: Theme.defaultWs
-                    font.pixelSize: 20
-                    Layout.alignment: Qt.AlignHCenter
-                }
+            Rectangle {
+                id: sidebar
+                width: 40
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
 
-                Workspaces {
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                color: Theme.background
+                clip: true
+                border.width: 1
+                border.color: "transparent"
 
-                AppTitle {
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.topMargin: 12
+                    anchors.bottomMargin: 12
+                    anchors.leftMargin: 0
+                    anchors.rightMargin: 0
+                    spacing: 16
 
-                Tray {
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                    Text {
+                        text: ""
+                        color: Theme.defaultWs
+                        font.pixelSize: 20
+                        Layout.alignment: Qt.AlignHCenter
+                    }
 
-                Rectangle {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: 30
-                    Layout.preferredHeight: 86
-                    radius: 15
-                    color: Theme.black
-                    border.width: 1
-                    border.color: Theme.grey
+                    Workspaces {
+                        monitor: panelWindow.monitor
+                        Layout.alignment: Qt.AlignHCenter
+                    }
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.topMargin: 6
-                        anchors.bottomMargin: 6
-                        spacing: 4
+                    AppTitle {
+                        monitor: panelWindow.monitor
+                        Layout.alignment: Qt.AlignHCenter
+                    }
 
-                        Audio {
-                            Layout.alignment: Qt.AlignHCenter
-                        }
+                    Tray {
+                        panelWindow: panelWindow
+                        Layout.alignment: Qt.AlignHCenter
+                    }
 
-                        Bluetooth {
-                            Layout.alignment: Qt.AlignHCenter
-                        }
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 86
+                        radius: 15
+                        color: Theme.black
+                        border.width: 1
+                        border.color: Theme.grey
 
-                        Wifi {
-                            Layout.alignment: Qt.AlignHCenter
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.topMargin: 6
+                            anchors.bottomMargin: 6
+                            spacing: 4
+
+                            Audio {
+                                monitorName: panelWindow.monitorName
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+
+                            Bluetooth {
+                                monitorName: panelWindow.monitorName
+                                Layout.alignment: Qt.AlignHCenter
+                            }
+
+                            Wifi {
+                                monitorName: panelWindow.monitorName
+                                Layout.alignment: Qt.AlignHCenter
+                            }
                         }
                     }
-                }
 
-                Battery {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.topMargin: -6
-                    Layout.bottomMargin: -6
-                }
+                    Battery {
+                        monitorName: panelWindow.monitorName
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: -6
+                        Layout.bottomMargin: -6
+                    }
 
-                Clock {
-                    Layout.alignment: Qt.AlignHCenter
+                    Clock {
+                        Layout.alignment: Qt.AlignHCenter
+                    }
                 }
             }
-        }
 
-        // Top Corner
-        InvertedCorner {
-            anchors.top: sidebar.top
-            anchors.left: sidebar.right // Attach to the right edge of the 40px bar
-            color: Theme.background
-            flip: false
-        }
+            InvertedCorner {
+                anchors.top: sidebar.top
+                anchors.left: sidebar.right
+                color: Theme.background
+                flip: false
+            }
 
-        // Bottom Corner
-        InvertedCorner {
-            anchors.bottom: sidebar.bottom
-            anchors.left: sidebar.right
-            flip: true
-            color: Theme.background
+            InvertedCorner {
+                anchors.bottom: sidebar.bottom
+                anchors.left: sidebar.right
+                flip: true
+                color: Theme.background
+            }
         }
     }
 }

@@ -8,6 +8,8 @@ import "../globals"
 Item {
     id: root
 
+    property string monitorName: ""
+
     Layout.alignment: Qt.AlignHCenter
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
@@ -131,6 +133,7 @@ Item {
         hoverEnabled: true
         onEntered: {
             hoverExitGraceTimer.stop();
+            GlobalState.setPopupMonitorName(root.monitorName);
             GlobalState.audioIconY = root.mapToGlobal(0, root.height / 2).y;
             GlobalState.audioHoverIntent = true;
             hoverShowTimer.start();

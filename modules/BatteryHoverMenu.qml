@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../theme"
@@ -8,6 +9,18 @@ import "../globals"
 
 PanelWindow {
     id: hoverMenu
+
+    screen: {
+        const targetName = GlobalState.popupMonitorName || Hyprland.focusedMonitor?.name || "";
+        const screens = Quickshell.screens || [];
+        for (let index = 0; index < screens.length; index++) {
+            const candidate = screens[index];
+            const monitor = Hyprland.monitorFor(candidate);
+            if (monitor?.name === targetName)
+                return candidate;
+        }
+        return null;
+    }
 
     anchors.left: true
     anchors.top: true

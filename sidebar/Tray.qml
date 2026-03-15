@@ -9,6 +9,8 @@ import "../theme"
 
 Flow {
     id: trayRoot
+    required property var panelWindow
+
     spacing: 6
     QsMenuOpener {
         id: menuOpener
@@ -133,7 +135,7 @@ Flow {
                 anchors.centerIn: parent
                 implicitWidth: 18
                 implicitHeight: 18
-                source: modelData.icon || ""
+                source: modelData.icon ? modelData.icon : Quickshell.iconPath(modelData.id, "application-x-executable")
             }
 
             MouseArea {
@@ -159,8 +161,7 @@ Flow {
                         if (modelData.hasMenu) {
                             menuOpener.menu = modelData.menu;
                             customMenu.sourceIconHovered = true;
-                            // Dynamically find the attached parent window
-                            let parentWindow = rootPanelWindow;
+                            let parentWindow = trayRoot.panelWindow;
 
                             if (parentWindow) {
                                 customMenu.anchor.window = parentWindow;

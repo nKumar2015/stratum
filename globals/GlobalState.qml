@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 
 QtObject {
+    property string popupMonitorName: ""
     property bool showWifiSettings: false
     property bool showWifiHoverMenu: false
     property real wifiIconY: 0
@@ -32,6 +33,10 @@ QtObject {
     signal notificationActionRequested(int notificationId, string actionKey, string replyText)
     signal notificationDismissRequested(int notificationId, bool expired)
     signal screenshotViewerOpenRequested(string imagePath, string captureMode)
+
+    function setPopupMonitorName(name) {
+        popupMonitorName = String(name || "");
+    }
 
     function normalizeProgress(value) {
         const parsed = Number(value);

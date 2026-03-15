@@ -7,15 +7,44 @@ import "../theme"
 Item {
     id: wsRoot
 
+    required property var monitor
+
     property int itemHeight: 20
     property int itemSpacing: 3
 
     implicitWidth: 40
-    implicitHeight: 110
+    implicitHeight: 115
     clip: true
 
-    property int activeWsId: Hyprland.focusedWorkspace?.id || 1
-    property int startIdx: Math.min(4, Math.max(0, activeWsId - 3))
+    readonly property var workspaceIds: {
+        const ids = [];
+        const targetMonitor = wsRoot.monitor;
+        const allWorkspaces = Hyprland.workspaces.values || [];
+
+        for (let index = 0; index < allWorkspaces.length; index++) {
+            const workspace = allWorkspaces[index];
+            if (!workspace || workspace.id <= 0)
+                continue;
+            if (workspace.monitor !== targetMonitor)
+                continue;
+            ids.push(workspace.id);
+        }
+
+        ids.sort((left, right) => left - right);
+
+        const activeWorkspaceId = targetMonitor?.activeWorkspace?.id || -1;
+        if (activeWorkspaceId > 0 && ids.indexOf(activeWorkspaceId) === -1)
+            ids.push(activeWorkspaceId);
+
+        ids.sort((left, right) => left - right);
+        return ids;
+    }
+    property int activeWsId: monitor?.activeWorkspace?.id || workspaceIds[0] || 1
+    property int startIdx: {
+        const ids = workspaceIds;
+        const activeIndex = Math.max(0, ids.indexOf(activeWsId));
+        return Math.max(0, Math.min(Math.max(0, ids.length - 5), activeIndex - 2));
+    }
 
     ColumnLayout {
         id: mainColumn
@@ -33,14 +62,14 @@ Item {
         }
 
         Repeater {
-            model: 9 // All workspaces exist in this long column
+            model: wsRoot.workspaceIds
 
             Text {
                 id: wsText
-                required property int index
-                property int wsId: index + 1
+                required property var modelData
+                property int wsId: Number(modelData)
                 property var ws: Hyprland.workspaces.values.find(w => w.id === wsId)
-                property bool isActive: Hyprland.focusedWorkspace?.id === wsId
+                property bool isActive: wsRoot.monitor?.activeWorkspace?.id === wsId
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredHeight: 20
 
@@ -72,10 +101,15 @@ Item {
                     anchors.fill: parent
                     onClicked: Hyprland.dispatch("workspace " + wsText.wsId)
                     onWheel: wheel => {
+                        const ids = wsRoot.workspaceIds;
+                        const currentIndex = ids.indexOf(wsRoot.activeWsId);
+                        if (currentIndex < 0)
+                            return;
+
                         if (wheel.angleDelta.y > 0) {
-                            Hyprland.dispatch("workspace " + Math.max(1, wsRoot.activeWsId - 1));
+                            Hyprland.dispatch("workspace " + ids[Math.max(0, currentIndex - 1)]);
                         } else {
-                            Hyprland.dispatch("workspace " + Math.min(9, wsRoot.activeWsId + 1));
+                            Hyprland.dispatch("workspace " + ids[Math.min(ids.length - 1, currentIndex + 1)]);
                         }
                     }
                 }

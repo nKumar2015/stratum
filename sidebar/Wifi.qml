@@ -8,6 +8,8 @@ import "../globals"
 Item {
     id: root
 
+    property string monitorName: ""
+
     Layout.alignment: Qt.AlignHCenter
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
@@ -85,6 +87,7 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         onEntered: {
+            GlobalState.setPopupMonitorName(root.monitorName);
             GlobalState.wifiIconY = root.mapToGlobal(0, root.height / 2).y;
             GlobalState.wifiHoverIntent = true;
             hoverShowTimer.start();

@@ -7,6 +7,7 @@ import "../globals"
 
 ColumnLayout {
     id: root
+    property string monitorName: ""
     spacing: 0
 
     function getBatteryIcon() {
@@ -119,6 +120,7 @@ ColumnLayout {
         hoverEnabled: true
         onEntered: {
             hoverExitGraceTimer.stop();
+            GlobalState.setPopupMonitorName(root.monitorName);
             GlobalState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
             GlobalState.batteryHoverIntent = true;
             hoverShowTimer.start();

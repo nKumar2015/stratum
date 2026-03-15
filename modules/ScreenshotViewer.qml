@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
 import QtCore
-import QtQuick.Dialogs
 import QtQuick.Controls
 import Quickshell
 import Quickshell.Wayland
@@ -172,24 +171,20 @@ PanelWindow {
     }
 
     function startSaveAs() {
-        if (isWorking)
+        if (isWorking || portalSaveAsProc.running)
             return;
         if (!sourcePath) {
             showStatus("No image loaded", true);
             return;
         }
 
-        const picturesDir = StandardPaths.writableLocation(StandardPaths.PicturesLocation);
-        const baseDir = (picturesDir && picturesDir.length > 0) ? picturesDir + "/Screenshots" : "/tmp";
         const stamp = new Date();
         const pad = n => String(n).padStart(2, "0");
         const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
-        const baseDirUrl = "file://" + encodeURI(baseDir);
         reopenAfterSaveAsDialog = viewer.visibleState;
         viewer.visibleState = false;
-        saveAsDialog.currentFolder = baseDirUrl;
-        saveAsDialog.selectedFile = baseDirUrl + "/" + encodeURIComponent(name);
-        saveAsDialog.open();
+        portalSaveAsProc.command = ["sh", Quickshell.shellDir + "/scripts/portal_save_file.sh", "Save Screenshot As", name];
+        portalSaveAsProc.running = true;
     }
 
     function clamp(value, minValue, maxValue) {
@@ -354,6 +349,47 @@ PanelWindow {
                 }
 
                 viewer.showStatus("Done", false);
+            }
+        }
+    }
+
+    Process {
+        id: portalSaveAsProc
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (viewer.reopenAfterSaveAsDialog)
+                    viewer.visibleState = true;
+                viewer.reopenAfterSaveAsDialog = false;
+
+                const result = this.text.trim();
+                if (!result) {
+                    viewer.showStatus("Save As failed: empty response", true);
+                    return;
+                }
+
+                if (result.startsWith("__ERROR__|")) {
+                    const message = result.substring("__ERROR__|".length);
+                    viewer.showStatus(message || "Save As failed", true);
+                    return;
+                }
+
+                if (result === "cancel")
+                    return;
+
+                if (!result.startsWith("ok\n")) {
+                    viewer.showStatus("Save As failed", true);
+                    return;
+                }
+
+                const selectedUri = result.substring(3).trim();
+                const selectedPath = viewer.toLocalPath(selectedUri);
+                if (!selectedPath) {
+                    viewer.showStatus("Save As failed: invalid destination", true);
+                    return;
+                }
+
+                viewer.startPostActionWithTarget("save-to", selectedPath);
             }
         }
     }
@@ -824,32 +860,6 @@ PanelWindow {
                 }
             }
 
-        }
-    }
-
-    FileDialog {
-        id: saveAsDialog
-        title: "Save Screenshot As"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["PNG Image (*.png)"]
-        defaultSuffix: "png"
-
-        onAccepted: {
-            if (viewer.reopenAfterSaveAsDialog)
-                viewer.visibleState = true;
-            viewer.reopenAfterSaveAsDialog = false;
-            const chosenPath = viewer.toLocalPath(String(selectedFile || ""));
-            if (!chosenPath) {
-                viewer.showStatus("Save As cancelled", true);
-                return;
-            }
-            viewer.startPostActionWithTarget("save-to", chosenPath);
-        }
-
-        onRejected: {
-            if (viewer.reopenAfterSaveAsDialog)
-                viewer.visibleState = true;
-            viewer.reopenAfterSaveAsDialog = false;
         }
     }
 }

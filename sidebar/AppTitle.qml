@@ -7,9 +7,36 @@ import QtQuick.Layouts
 import "../theme"
 
 Item {
+    required property var monitor
+
     Layout.fillHeight: true
     Layout.preferredWidth: 36
     clip: true
+
+    readonly property var monitorWorkspace: monitor?.activeWorkspace || null
+    readonly property var monitorWindows: monitorWorkspace?.toplevels?.values || []
+    readonly property var activatedMonitorWindow: {
+        for (let index = 0; index < monitorWindows.length; index++) {
+            const candidate = monitorWindows[index];
+            if (candidate?.activated)
+                return candidate;
+        }
+        return null;
+    }
+    readonly property var displayWindow: {
+        const active = Hyprland.activeToplevel;
+        if (active && active.workspace?.id === monitorWorkspace?.id)
+            return active;
+
+        if (activatedMonitorWindow)
+            return activatedMonitorWindow;
+
+        if (monitorWindows.length > 0)
+            return monitorWindows[monitorWindows.length - 1];
+
+        return null;
+    }
+    readonly property string displayAppId: String(displayWindow?.appId || displayWindow?.wayland?.appId || displayWindow?.handle?.appId || "desktop").toLowerCase()
 
     Item {
         anchors.centerIn: parent
@@ -22,10 +49,9 @@ Item {
             anchors.centerIn: parent
             spacing: 8
             width: Math.min(implicitWidth, parent.width - 20)
-            IconImage {
+            Image {
                 id: appIcon
-                property string appClass: (Hyprland.activeToplevel?.wayland?.appId || "desktop").toLowerCase()
-                source: Quickshell.iconPath(appClass, "application-x-executable")
+                source: Quickshell.iconPath(displayAppId, "application-x-executable")
 
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
@@ -36,14 +62,7 @@ Item {
 
             Text {
                 id: appText
-                text: {
-                    let win = Hyprland.activeToplevel;
-                    if (win && win.workspace.id === Hyprland.focusedWorkspace.id) {
-                        return win.title;
-                    } else {
-                        return "\uf4a9  Desktop";
-                    }
-                }
+                text: displayWindow?.title || "\uf4a9  Desktop"
                 color: Theme.text
                 font.family: Theme.font
                 font.pixelSize: 14
