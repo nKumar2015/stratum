@@ -19,10 +19,6 @@ PanelWindow {
     property color annotationColor: "#ff3b30"
     property int penSize: 3
     property bool isWorking: false
-    property bool colorPickerActive: false
-    property real pickerHoverX: 0
-    property real pickerHoverY: 0
-    property string pickedColorHex: ""
     property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
     property bool statusError: false
@@ -35,8 +31,6 @@ PanelWindow {
     property bool panActive: false
     property real panLastSurfaceX: 0
     property real panLastSurfaceY: 0
-    readonly property real pickerSampleScaleX: colorSampleCanvas.canvasSize.width / Math.max(1, imageDrawSurface.width)
-    readonly property real pickerSampleScaleY: colorSampleCanvas.canvasSize.height / Math.max(1, imageDrawSurface.height)
 
     anchors {
         top: true
@@ -95,7 +89,6 @@ PanelWindow {
 
     function closeViewer() {
         visibleState = false;
-        colorPickerActive = false;
         panActive = false;
         statusMessage = "";
         statusError = false;
@@ -189,31 +182,20 @@ PanelWindow {
         saveAsDialog.open();
     }
 
-    function toggleColorPicker() {
-        if (isWorking)
-            return;
-        colorPickerActive = !colorPickerActive;
-        if (colorPickerActive) {
-            showStatus("Click image to pick color", false);
-            pickerHoverX = 0;
-            pickerHoverY = 0;
-        }
-    }
-
     function clamp(value, minValue, maxValue) {
         return Math.max(minValue, Math.min(maxValue, value));
     }
 
-    function toSampleX(x) {
-        return Math.round(clamp(x * pickerSampleScaleX, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
-    }
-
-    function toSampleY(y) {
-        return Math.round(clamp(y * pickerSampleScaleY, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
-    }
-
     function mapPaintToSurface(paintItem, x, y) {
         return paintItem.mapToItem(renderSurface, x, y);
+    }
+
+    function mapPaintToImage(paintItem, x, y) {
+        const mapped = paintItem.mapToItem(imageDrawSurface, x, y);
+        return {
+            x: clamp(mapped.x, 0, Math.max(0, imageDrawSurface.width - 1)),
+            y: clamp(mapped.y, 0, Math.max(0, imageDrawSurface.height - 1))
+        };
     }
 
     function clampPanForZoom(zoomValue, proposedPanX, proposedPanY) {
@@ -295,35 +277,6 @@ PanelWindow {
         panActive = false;
     }
 
-    function pickColorAt(x, y) {
-        const sx = toSampleX(x);
-        const sy = toSampleY(y);
-        const ctx = colorSampleCanvas.getContext("2d");
-        if (!ctx)
-            return;
-
-        const cw = colorSampleCanvas.canvasSize.width;
-        const ch = colorSampleCanvas.canvasSize.height;
-        ctx.clearRect(0, 0, cw, ch);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(drawImageBase, 0, 0, cw, ch);
-
-        let px;
-        try {
-            px = ctx.getImageData(sx, sy, 1, 1).data;
-        } catch (_error) {
-            return;
-        }
-        if (!px || px.length < 3)
-            return;
-
-        const toHex = n => Number(n || 0).toString(16).padStart(2, "0");
-        const hex = "#" + toHex(px[0]) + toHex(px[1]) + toHex(px[2]);
-        pickedColorHex = hex;
-        colorCopyProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", "copy-text", hex];
-        colorCopyProc.running = true;
-    }
-
     Timer {
         id: clearStatusTimer
         interval: 2600
@@ -391,28 +344,6 @@ PanelWindow {
                 }
 
                 viewer.showStatus("Done", false);
-            }
-        }
-    }
-
-    Process {
-        id: colorCopyProc
-        running: false
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const result = this.text.trim();
-                if (!result) {
-                    viewer.showStatus("Failed to copy color", true);
-                    return;
-                }
-
-                if (result.startsWith("__ERROR__|")) {
-                    const message = result.substring("__ERROR__|".length);
-                    viewer.showStatus(message || "Failed to copy color", true);
-                    return;
-                }
-
-                viewer.showStatus("Copied color " + viewer.pickedColorHex, false);
             }
         }
     }
@@ -498,30 +429,6 @@ PanelWindow {
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.clearAnnotations()
-                    }
-                }
-
-                Rectangle {
-                    Layout.preferredHeight: 32
-                    Layout.preferredWidth: 42
-                    radius: 8
-                    color: viewer.colorPickerActive ? Theme.activeWs : Theme.black
-                    border.width: 1
-                    border.color: viewer.colorPickerActive ? Theme.activeWs : Theme.grey
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: ""
-                        color: Theme.text
-                        font.family: Theme.font
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: !viewer.isWorking
-                        onClicked: viewer.toggleColorPicker()
                     }
                 }
 
@@ -767,9 +674,6 @@ PanelWindow {
                         fillMode: Image.Stretch
                         smooth: false
                         cache: false
-
-                        onStatusChanged: colorSampleCanvas.requestPaint()
-                        onSourceChanged: colorSampleCanvas.requestPaint()
                     }
 
                     Canvas {
@@ -801,6 +705,7 @@ PanelWindow {
                         property int currentStrokeIndex: -1
 
                         MouseArea {
+                            id: paintInputArea
                             anchors.fill: parent
                             cursorShape: Qt.CrossCursor
                             acceptedButtons: Qt.LeftButton | Qt.MiddleButton
@@ -818,30 +723,19 @@ PanelWindow {
                                     return;
                                 }
 
-                                const surfacePos = viewer.mapPaintToSurface(this, wheel.x, wheel.y);
+                                const surfacePos = viewer.mapPaintToSurface(paintInputArea, wheel.x, wheel.y);
                                 const zoomStep = dy > 0 ? 0.15 : -0.15;
                                 viewer.setImageZoom(viewer.imageZoom + zoomStep, surfacePos.x, surfacePos.y);
                                 wheel.accepted = true;
                             }
 
                             onPressed: function(mouse) {
-                                const surfacePos = viewer.mapPaintToSurface(this, mouse.x, mouse.y);
-                                const imagePos = {
-                                    x: viewer.clamp(mouse.x, 0, Math.max(0, imageDrawSurface.width - 1)),
-                                    y: viewer.clamp(mouse.y, 0, Math.max(0, imageDrawSurface.height - 1))
-                                };
+                                const surfacePos = viewer.mapPaintToSurface(paintInputArea, mouse.x, mouse.y);
+                                const imagePos = viewer.mapPaintToImage(paintInputArea, mouse.x, mouse.y);
 
-                                if (mouse.button === Qt.MiddleButton || ((mouse.modifiers & Qt.ControlModifier) && !viewer.colorPickerActive)) {
+                                if (mouse.button === Qt.MiddleButton || (mouse.modifiers & Qt.ControlModifier)) {
                                     viewer.startPan(surfacePos.x, surfacePos.y);
                                     paintCanvas.currentStrokeIndex = -1;
-                                    return;
-                                }
-
-                                if (viewer.colorPickerActive) {
-                                    viewer.pickerHoverX = imagePos.x;
-                                    viewer.pickerHoverY = imagePos.y;
-                                    viewer.pickColorAt(imagePos.x, imagePos.y);
-                                    viewer.colorPickerActive = false;
                                     return;
                                 }
 
@@ -858,20 +752,11 @@ PanelWindow {
                             }
 
                             onPositionChanged: function(mouse) {
-                                const surfacePos = viewer.mapPaintToSurface(this, mouse.x, mouse.y);
-                                const imagePos = {
-                                    x: viewer.clamp(mouse.x, 0, Math.max(0, imageDrawSurface.width - 1)),
-                                    y: viewer.clamp(mouse.y, 0, Math.max(0, imageDrawSurface.height - 1))
-                                };
+                                const surfacePos = viewer.mapPaintToSurface(paintInputArea, mouse.x, mouse.y);
+                                const imagePos = viewer.mapPaintToImage(paintInputArea, mouse.x, mouse.y);
 
                                 if (viewer.panActive) {
                                     viewer.updatePan(surfacePos.x, surfacePos.y);
-                                    return;
-                                }
-
-                                if (viewer.colorPickerActive) {
-                                    viewer.pickerHoverX = imagePos.x;
-                                    viewer.pickerHoverY = imagePos.y;
                                     return;
                                 }
 
@@ -908,28 +793,6 @@ PanelWindow {
                             }
                         }
                     }
-
-                    Canvas {
-                        id: colorSampleCanvas
-                        anchors.fill: parent
-                        visible: false
-                        canvasSize: Qt.size(
-                            Math.max(1, Math.round((drawImageBase.sourceSize.width > 0 ? drawImageBase.sourceSize.width : width * Screen.devicePixelRatio))),
-                            Math.max(1, Math.round((drawImageBase.sourceSize.height > 0 ? drawImageBase.sourceSize.height : height * Screen.devicePixelRatio)))
-                        )
-
-                        onWidthChanged: requestPaint()
-                        onHeightChanged: requestPaint()
-
-                        onPaint: {
-                            const ctx = getContext("2d");
-                            const cw = colorSampleCanvas.canvasSize.width;
-                            const ch = colorSampleCanvas.canvasSize.height;
-                            ctx.clearRect(0, 0, cw, ch);
-                            ctx.imageSmoothingEnabled = false;
-                            ctx.drawImage(drawImageBase, 0, 0, cw, ch);
-                        }
-                    }
                 }
             }
 
@@ -951,6 +814,7 @@ PanelWindow {
                     font.bold: true
                 }
             }
+
         }
     }
 
