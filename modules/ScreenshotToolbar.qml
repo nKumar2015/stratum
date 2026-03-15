@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../theme"
@@ -9,6 +10,12 @@ import "../globals"
 PanelWindow {
     id: toolbar
 
+    readonly property var currentMonitor: Hyprland.monitorFor(screen)
+    readonly property string monitorName: String(currentMonitor?.name || "")
+    readonly property real monitorOffsetX: Number(currentMonitor?.x || 0)
+    readonly property real monitorOffsetY: Number(currentMonitor?.y || 0)
+    readonly property real monitorWidth: Math.max(1, Number(currentMonitor?.width || screen?.width || 1))
+    readonly property real monitorHeight: Math.max(1, Number(currentMonitor?.height || screen?.height || 1))
     property bool visibleState: false
     property bool isCapturing: false
     property bool suppressOverlayVisuals: false
@@ -23,7 +30,7 @@ PanelWindow {
     property real hoverWindowY: 0
     property real hoverWindowW: 0
     property real hoverWindowH: 0
-    property string hoverWindowGeometry: ""
+    property string hoverWindowGeometryGlobal: ""
     property bool pointerDown: false
     property bool dragActive: false
     property real pressX: 0
@@ -33,7 +40,6 @@ PanelWindow {
     property real dragW: 0
     property real dragH: 0
     readonly property real dragThreshold: 8
-
     anchors {
         top: true
         bottom: true
@@ -72,13 +78,21 @@ PanelWindow {
         hoverWindowY = 0;
         hoverWindowW = 0;
         hoverWindowH = 0;
-        hoverWindowGeometry = "";
+        hoverWindowGeometryGlobal = "";
         pointerDown = false;
         dragActive = false;
         dragX = 0;
         dragY = 0;
         dragW = 0;
         dragH = 0;
+    }
+
+    function monitorGeometryString() {
+        const x = Math.round(monitorOffsetX);
+        const y = Math.round(monitorOffsetY);
+        const w = Math.max(1, Math.round(monitorWidth));
+        const h = Math.max(1, Math.round(monitorHeight));
+        return x + "," + y + " " + w + "x" + h;
     }
 
     function parseGeometry(geometry) {
@@ -97,7 +111,7 @@ PanelWindow {
     function updateHoverFromGeometry(geometry) {
         const parsed = parseGeometry(geometry);
         if (!parsed) {
-            hoverWindowGeometry = "";
+            hoverWindowGeometryGlobal = "";
             hoverWindowX = 0;
             hoverWindowY = 0;
             hoverWindowW = 0;
@@ -105,9 +119,9 @@ PanelWindow {
             return;
         }
 
-        hoverWindowGeometry = String(geometry || "");
-        hoverWindowX = parsed.x;
-        hoverWindowY = parsed.y;
+        hoverWindowGeometryGlobal = String(geometry || "");
+        hoverWindowX = parsed.x - monitorOffsetX;
+        hoverWindowY = parsed.y - monitorOffsetY;
         hoverWindowW = parsed.w;
         hoverWindowH = parsed.h;
     }
@@ -143,6 +157,12 @@ PanelWindow {
     }
 
     function openToolbar() {
+        if (GlobalState.screenshotOverlayOpen)
+            return;
+        GlobalState.screenshotOverlayOpen = true;
+    }
+
+    function beginOverlaySession() {
         visibleState = true;
         suppressOverlayVisuals = false;
         freezeReady = false;
@@ -152,7 +172,8 @@ PanelWindow {
             freezeStartTimer.restart();
     }
 
-    function closeToolbar() {
+    function closeToolbar(emitGlobal) {
+        const shouldEmit = (emitGlobal === undefined) ? true : !!emitGlobal;
         visibleState = false;
         suppressOverlayVisuals = false;
         hideCursorForCapture = false;
@@ -163,6 +184,8 @@ PanelWindow {
             pendingCommand = "";
         }
         resetSelectionState();
+        if (shouldEmit && GlobalState.screenshotOverlayOpen)
+            GlobalState.screenshotOverlayOpen = false;
     }
 
     function runCapture(commandName, mode, geometry) {
@@ -184,8 +207,8 @@ PanelWindow {
         if (dragActive)
             return;
 
-        if (hoverWindowGeometry.length > 0) {
-            runCapture("capture-geometry", "window", expandGeometry(hoverWindowGeometry, 5));
+        if (hoverWindowGeometryGlobal.length > 0) {
+            runCapture("capture-geometry", "window", expandGeometry(hoverWindowGeometryGlobal, 5));
             return;
         }
 
@@ -196,11 +219,14 @@ PanelWindow {
         if (!dragActive)
             return;
 
-        const geometry = Math.round(dragX) + "," + Math.round(dragY) + " " + Math.round(dragW) + "x" + Math.round(dragH);
+        const globalX = Math.round(dragX + monitorOffsetX);
+        const globalY = Math.round(dragY + monitorOffsetY);
+        const geometry = globalX + "," + globalY + " " + Math.round(dragW) + "x" + Math.round(dragH);
         runCapture("capture-geometry", "region", geometry);
     }
 
     function dispatchViewerOpen(path, mode) {
+        GlobalState.setPopupMonitorName(monitorName);
         GlobalState.screenshotViewerOpenRequested(path, mode);
     }
 
@@ -211,7 +237,7 @@ PanelWindow {
         onTriggered: {
             if (!toolbar.visibleState || freezeProc.running)
                 return;
-            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame"];
+            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame", toolbar.monitorGeometryString(), toolbar.monitorName, toolbar.monitorName];
             freezeProc.running = true;
         }
     }
@@ -237,7 +263,7 @@ PanelWindow {
             if (nextCommand === "capture-geometry")
                 captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-geometry", nextGeometry, nextMode];
             else
-                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-fullscreen", nextMode];
+                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-fullscreen", nextMode, toolbar.monitorGeometryString(), toolbar.monitorName];
 
             captureProc.running = true;
         }
@@ -246,13 +272,15 @@ PanelWindow {
     Timer {
         id: hoverPollTimer
         interval: 45
-        running: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.pointerDown && !toolbar.dragActive
+        running: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.pointerDown && !toolbar.dragActive && pointerArea.containsMouse
         repeat: true
         onTriggered: {
-            if (!toolbar.visibleState || toolbar.suppressOverlayVisuals || !toolbar.freezeReady || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
+            if (!toolbar.visibleState || toolbar.suppressOverlayVisuals || !toolbar.freezeReady || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running || !pointerArea.containsMouse)
                 return;
 
-            windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(Math.round(pointerArea.mouseX)), String(Math.round(pointerArea.mouseY))];
+            const globalX = Math.round(pointerArea.mouseX + toolbar.monitorOffsetX);
+            const globalY = Math.round(pointerArea.mouseY + toolbar.monitorOffsetY);
+            windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(globalX), String(globalY)];
             windowAtProc.running = true;
         }
     }
@@ -324,7 +352,7 @@ PanelWindow {
                 }
 
                 toolbar.lastCapturePath = imagePath;
-                toolbar.visibleState = false;
+                GlobalState.screenshotOverlayOpen = false;
                 toolbar.dispatchViewerOpen(imagePath, captureMode);
             }
         }
@@ -341,7 +369,7 @@ PanelWindow {
 
                 if (!result) {
                     toolbar.freezeReady = false;
-                    toolbar.closeToolbar();
+                    toolbar.closeToolbar(true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Start failed",
@@ -355,7 +383,7 @@ PanelWindow {
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
                     toolbar.freezeReady = false;
-                    toolbar.closeToolbar();
+                    toolbar.closeToolbar(true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Start failed",
@@ -369,7 +397,7 @@ PanelWindow {
                 const parts = result.split("|");
                 if (parts.length < 2 || parts[0] !== "ok") {
                     toolbar.freezeReady = false;
-                    toolbar.closeToolbar();
+                    toolbar.closeToolbar(true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Start failed",
@@ -420,7 +448,18 @@ PanelWindow {
         sequence: "Escape"
         onActivated: {
             if (toolbar.visibleState)
-                toolbar.closeToolbar();
+                GlobalState.screenshotOverlayOpen = false;
+        }
+    }
+
+    Connections {
+        target: GlobalState
+
+        function onScreenshotOverlayOpenChanged() {
+            if (GlobalState.screenshotOverlayOpen)
+                toolbar.beginOverlaySession();
+            else
+                toolbar.closeToolbar(false);
         }
     }
 
@@ -430,6 +469,11 @@ PanelWindow {
         enabled: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.isCapturing
         hoverEnabled: true
         cursorShape: Qt.CrossCursor
+
+        onContainsMouseChanged: {
+            if (!containsMouse && !toolbar.pointerDown && !toolbar.dragActive)
+                toolbar.updateHoverFromGeometry("");
+        }
 
         onPressed: function(mouse) {
             if (!toolbar.freezeReady)
@@ -479,7 +523,7 @@ PanelWindow {
     }
 
     Rectangle {
-        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && toolbar.hoverWindowGeometry.length === 0
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && pointerArea.containsMouse && toolbar.hoverWindowGeometryGlobal.length === 0
         anchors.fill: parent
         color: "#1a7aa2f7"
         border.width: 2
@@ -488,7 +532,7 @@ PanelWindow {
     }
 
     Rectangle {
-        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && toolbar.hoverWindowGeometry.length > 0
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && pointerArea.containsMouse && toolbar.hoverWindowGeometryGlobal.length > 0
         x: toolbar.hoverWindowX
         y: toolbar.hoverWindowY
         width: toolbar.hoverWindowW
@@ -517,5 +561,25 @@ PanelWindow {
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
         cursorShape: Qt.BlankCursor
+    }
+
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
+        x: Math.round(pointerArea.mouseX)
+        y: Math.round(pointerArea.mouseY - 8)
+        width: 1
+        height: 17
+        color: "#cce6f8ff"
+        opacity: 0.9
+    }
+
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
+        x: Math.round(pointerArea.mouseX - 8)
+        y: Math.round(pointerArea.mouseY)
+        width: 17
+        height: 1
+        color: "#cce6f8ff"
+        opacity: 0.9
     }
 }

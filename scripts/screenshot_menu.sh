@@ -31,8 +31,12 @@ make_temp_output() {
 
 freeze_output_path() {
     local runtime_dir
+    local monitor_key
     runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
-    printf "%s/quickshell-screenshot-freeze.png\n" "$runtime_dir"
+    monitor_key="${1:-default}"
+    monitor_key="$(printf "%s" "$monitor_key" | tr -c 'A-Za-z0-9._-' '_' )"
+    [ -n "$monitor_key" ] || monitor_key="default"
+    printf "%s/quickshell-screenshot-freeze-%s.png\n" "$runtime_dir" "$monitor_key"
 }
 
 resolve_window_geometry_at() {
@@ -81,6 +85,29 @@ window_boxes_hyprland() {
         | select((.size[0] // 0) > 0 and (.size[1] // 0) > 0)
         | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1]) \((.title // .class // "Window") | gsub("\\n"; " "))"
     '
+}
+
+active_monitor_name() {
+    if ! command -v hyprctl >/dev/null 2>&1; then
+        return 1
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        return 1
+    fi
+
+    monitor_name="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.monitor // empty')"
+    if [ -n "$monitor_name" ]; then
+        printf "%s\n" "$monitor_name"
+        return 0
+    fi
+
+    monitor_name="$(hyprctl -j monitors 2>/dev/null | jq -r 'map(select(.focused == true)) | .[0].name // empty')"
+    if [ -n "$monitor_name" ]; then
+        printf "%s\n" "$monitor_name"
+        return 0
+    fi
+
+    return 1
 }
 
 pick_geometry() {
@@ -195,12 +222,24 @@ capture_geometry() {
 
 capture_fullscreen() {
     mode="${1:-fullscreen}"
+    geometry="${2:-}"
+    output_name="${3:-}"
     require_tool grim
 
     out_file="$(make_temp_output)"
     [ -n "$out_file" ] || error "failed to allocate output file"
 
-    if ! grim_capture "$out_file" >/dev/null 2>&1; then
+    if [ -n "$output_name" ]; then
+        if ! grim_capture -o "$output_name" "$out_file" >/dev/null 2>&1; then
+            rm -f "$out_file"
+            error "grim capture failed"
+        fi
+    elif [ -n "$geometry" ]; then
+        if ! grim_capture -g "$geometry" "$out_file" >/dev/null 2>&1; then
+            rm -f "$out_file"
+            error "grim capture failed"
+        fi
+    elif ! grim_capture "$out_file" >/dev/null 2>&1; then
         rm -f "$out_file"
         error "grim capture failed"
     fi
@@ -215,10 +254,21 @@ capture_fullscreen() {
 }
 
 freeze_frame() {
+    geometry="${1:-}"
+    monitor_key="${2:-default}"
+    output_name="${3:-}"
     require_tool grim
 
-    out_file="$(freeze_output_path)"
-    if ! grim_capture "$out_file" >/dev/null 2>&1; then
+    out_file="$(freeze_output_path "$monitor_key")"
+    if [ -n "$output_name" ]; then
+        if ! grim_capture -o "$output_name" "$out_file" >/dev/null 2>&1; then
+            error "failed to freeze screen"
+        fi
+    elif [ -n "$geometry" ]; then
+        if ! grim_capture -g "$geometry" "$out_file" >/dev/null 2>&1; then
+            error "failed to freeze screen"
+        fi
+    elif ! grim_capture "$out_file" >/dev/null 2>&1; then
         error "failed to freeze screen"
     fi
 
@@ -237,10 +287,17 @@ case "${1:-}" in
         capture_geometry "${2:-}" "${3:-region}"
         ;;
     capture-fullscreen)
-        capture_fullscreen "${2:-fullscreen}"
+        capture_fullscreen "${2:-fullscreen}" "${3:-}" "${4:-}"
         ;;
     freeze-frame)
-        freeze_frame
+        freeze_frame "${2:-}" "${3:-}" "${4:-}"
+        ;;
+    active-monitor)
+        if monitor_name="$(active_monitor_name)" && [ -n "$monitor_name" ]; then
+            echo "ok|$monitor_name"
+        else
+            echo "none"
+        fi
         ;;
     window-at)
         if geom="$(resolve_window_geometry_at "${2:-0}" "${3:-0}")" && [ -n "$geom" ]; then

@@ -21,7 +21,14 @@ ShellRoot {
     WifiHoverMenu {}
     AudioHoverMenu {}
     BatteryHoverMenu {}
-    ScreenshotToolbar {}
+    Variants {
+        model: Quickshell.screens
+
+        ScreenshotToolbar {
+            property var modelData
+            screen: modelData
+        }
+    }
     ScreenshotViewer {}
     Variants {
         model: Quickshell.screens

@@ -3,6 +3,7 @@ import QtQuick
 
 QtObject {
     property string popupMonitorName: ""
+    property bool screenshotOverlayOpen: false
     property bool showWifiSettings: false
     property bool showWifiHoverMenu: false
     property real wifiIconY: 0

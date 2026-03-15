@@ -4,6 +4,7 @@ import QtCore
 import QtQuick.Controls
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../theme"
@@ -30,6 +31,7 @@ PanelWindow {
     property bool panActive: false
     property real panLastSurfaceX: 0
     property real panLastSurfaceY: 0
+    property var resolvedScreen: null
 
     anchors {
         top: true
@@ -38,12 +40,32 @@ PanelWindow {
         right: true
     }
 
+    screen: resolvedScreen
+
     color: "#99000000"
     visible: visibleState
     exclusiveZone: -1
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+    function screenForMonitorName(name) {
+        const wanted = String(name || "").trim();
+        const screens = Quickshell.screens || [];
+        if (!screens.length)
+            return null;
+
+        if (!wanted)
+            return screens[0];
+
+        for (let i = 0; i < screens.length; i++) {
+            const mon = Hyprland.monitorFor(screens[i]);
+            if (String(mon?.name || "") === wanted)
+                return screens[i];
+        }
+
+        return screens[0];
+    }
 
     function toFileUrl(path) {
         const value = String(path || "");
@@ -73,6 +95,7 @@ PanelWindow {
     }
 
     function openViewer(imagePath, mode) {
+        resolvedScreen = screenForMonitorName(GlobalState.popupMonitorName);
         sourcePath = toLocalPath(imagePath);
         captureMode = String(mode || "window");
         visibleState = sourcePath.length > 0;
