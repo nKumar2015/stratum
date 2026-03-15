@@ -558,14 +558,6 @@ PanelWindow {
                     }
                 }
 
-                Text {
-                    text: "Picked: " + viewer.colorToHex(viewer.annotationColor)
-                    color: Theme.text
-                    font.family: Theme.font
-                    font.pixelSize: 11
-                    Layout.leftMargin: 8
-                }
-
                 Item {
                     Layout.fillWidth: true
                 }
@@ -577,30 +569,29 @@ PanelWindow {
                     font.pixelSize: 11
                 }
 
-                Repeater {
-                    model: [2, 3, 5, 8]
-                    delegate: Rectangle {
-                        required property var modelData
-                        Layout.preferredWidth: 30
-                        Layout.preferredHeight: 20
-                        radius: 5
-                        color: viewer.penSize === modelData ? Theme.activeWs : Theme.black
-                        border.width: 1
-                        border.color: Theme.grey
+                Slider {
+                    id: penSizeSlider
+                    Layout.preferredWidth: 120
+                    from: 1
+                    to: 16
+                    stepSize: 1
+                    value: viewer.penSize
+                    onMoved: viewer.penSize = Math.round(value)
+                }
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: String(modelData)
-                            color: Theme.text
-                            font.family: Theme.font
-                            font.pixelSize: 10
-                        }
+                Binding {
+                    target: penSizeSlider
+                    property: "value"
+                    value: viewer.penSize
+                    when: !penSizeSlider.pressed
+                }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: viewer.penSize = modelData
-                        }
-                    }
+                Text {
+                    text: String(viewer.penSize)
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: 11
+                    Layout.preferredWidth: 18
                 }
 
                 Text {
