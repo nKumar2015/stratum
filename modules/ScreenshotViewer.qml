@@ -125,6 +125,24 @@ PanelWindow {
         clearStatusTimer.restart();
     }
 
+    function statusForPostAction(action) {
+        const key = String(action || "");
+        if (key === "copy")
+            return "Copied to clipboard";
+        if (key === "save" || key === "save-as" || key === "save-to")
+            return "Saved screenshot";
+        if (key === "copy-text")
+            return "Copied text to clipboard";
+        return "Done";
+    }
+
+    function saveAsError(message) {
+        const detail = String(message || "").trim();
+        if (!detail)
+            return "Save As failed";
+        return "Save As failed: " + detail;
+    }
+
     function colorToHex(c) {
         const r = Math.round(c.r * 255).toString(16).padStart(2, "0");
         const g = Math.round(c.g * 255).toString(16).padStart(2, "0");
@@ -355,23 +373,7 @@ PanelWindow {
                 }
 
                 const action = parts[1] || "";
-                const payload = parts[2] || "";
-                if (action === "copy") {
-                    viewer.showStatus("Copied to clipboard", false);
-                    return;
-                }
-
-                if (action === "save") {
-                    viewer.showStatus("Saved screenshot", false);
-                    return;
-                }
-
-                if (action === "save-as") {
-                    viewer.showStatus("Saved screenshot", false);
-                    return;
-                }
-
-                viewer.showStatus("Done", false);
+                viewer.showStatus(viewer.statusForPostAction(action), false);
             }
         }
     }
@@ -387,13 +389,13 @@ PanelWindow {
 
                 const result = this.text.trim();
                 if (!result) {
-                    viewer.showStatus("Save As failed: empty response", true);
+                    viewer.showStatus(viewer.saveAsError("empty response"), true);
                     return;
                 }
 
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
-                    viewer.showStatus(message || "Save As failed", true);
+                    viewer.showStatus(viewer.saveAsError(message), true);
                     return;
                 }
 
@@ -401,14 +403,14 @@ PanelWindow {
                     return;
 
                 if (!result.startsWith("ok|")) {
-                    viewer.showStatus("Save As failed", true);
+                    viewer.showStatus(viewer.saveAsError("unexpected response"), true);
                     return;
                 }
 
                 const selectedUri = result.substring(3).trim();
                 const selectedPath = viewer.toLocalPath(selectedUri);
                 if (!selectedPath) {
-                    viewer.showStatus("Save As failed: invalid destination", true);
+                    viewer.showStatus(viewer.saveAsError("invalid destination"), true);
                     return;
                 }
 
