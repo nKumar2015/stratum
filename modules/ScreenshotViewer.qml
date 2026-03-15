@@ -400,7 +400,7 @@ PanelWindow {
                 if (result === "cancel")
                     return;
 
-                if (!result.startsWith("ok\n")) {
+                if (!result.startsWith("ok|")) {
                     viewer.showStatus("Save As failed", true);
                     return;
                 }
