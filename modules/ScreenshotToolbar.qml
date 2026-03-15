@@ -404,6 +404,7 @@ PanelWindow {
         anchors.fill: parent
         enabled: toolbar.visibleState && toolbar.freezeReady && !toolbar.isCapturing
         hoverEnabled: true
+        cursorShape: Qt.BlankCursor
 
         onPressed: function(mouse) {
             toolbar.pointerDown = true;

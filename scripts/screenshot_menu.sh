@@ -12,6 +12,11 @@ error() {
     exit 0
 }
 
+# Intentionally do not pass '-c' so the cursor is never included.
+grim_capture() {
+    grim "$@"
+}
+
 require_tool() {
     if ! command -v "$1" >/dev/null 2>&1; then
         error "$1 not found"
@@ -140,7 +145,7 @@ capture() {
     fi
 
     if [ "$mode" = "fullscreen" ]; then
-        if ! grim "$out_file" >/dev/null 2>&1; then
+        if ! grim_capture "$out_file" >/dev/null 2>&1; then
             rm -f "$out_file"
             error "grim capture failed"
         fi
@@ -149,7 +154,7 @@ capture() {
             rm -f "$out_file"
             error "selection cancelled"
         fi
-        if ! grim -g "$geom" "$out_file" >/dev/null 2>&1; then
+        if ! grim_capture -g "$geom" "$out_file" >/dev/null 2>&1; then
             rm -f "$out_file"
             error "grim capture failed"
         fi
@@ -174,7 +179,7 @@ capture_geometry() {
     out_file="$(make_temp_output)"
     [ -n "$out_file" ] || error "failed to allocate output file"
 
-    if ! grim -g "$geom" "$out_file" >/dev/null 2>&1; then
+    if ! grim_capture -g "$geom" "$out_file" >/dev/null 2>&1; then
         rm -f "$out_file"
         error "grim capture failed"
     fi
@@ -195,7 +200,7 @@ capture_fullscreen() {
     out_file="$(make_temp_output)"
     [ -n "$out_file" ] || error "failed to allocate output file"
 
-    if ! grim "$out_file" >/dev/null 2>&1; then
+    if ! grim_capture "$out_file" >/dev/null 2>&1; then
         rm -f "$out_file"
         error "grim capture failed"
     fi
@@ -213,7 +218,7 @@ freeze_frame() {
     require_tool grim
 
     out_file="$(freeze_output_path)"
-    if ! grim "$out_file" >/dev/null 2>&1; then
+    if ! grim_capture "$out_file" >/dev/null 2>&1; then
         error "failed to freeze screen"
     fi
 
