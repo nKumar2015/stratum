@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
@@ -16,8 +15,6 @@ PanelWindow {
     property string pendingGeometry: ""
     property string pendingMode: ""
     property string lastCapturePath: ""
-    property string statusMessage: ""
-    property bool statusError: false
     property real hoverWindowX: 0
     property real hoverWindowY: 0
     property real hoverWindowW: 0
@@ -119,18 +116,8 @@ PanelWindow {
         dragH = Math.max(1, absDy);
     }
 
-    function showStatus(message, isError) {
-        statusMessage = String(message || "");
-        statusError = !!isError;
-        if (!statusMessage)
-            return;
-        clearStatusTimer.restart();
-    }
-
     function openToolbar() {
         visibleState = true;
-        statusMessage = "";
-        statusError = false;
         resetSelectionState();
     }
 
@@ -151,8 +138,6 @@ PanelWindow {
         const chosenCommand = String(commandName || "capture-fullscreen");
         const chosenMode = String(mode || "fullscreen");
         const chosenGeometry = String(geometry || "");
-        statusMessage = "";
-        statusError = false;
         pendingCommand = chosenCommand;
         pendingMode = chosenMode;
         pendingGeometry = chosenGeometry;
@@ -182,16 +167,6 @@ PanelWindow {
 
     function dispatchViewerOpen(path, mode) {
         GlobalState.screenshotViewerOpenRequested(path, mode);
-    }
-
-    Timer {
-        id: clearStatusTimer
-        interval: 2400
-        repeat: false
-        onTriggered: {
-            toolbar.statusMessage = "";
-            toolbar.statusError = false;
-        }
     }
 
     Timer {
@@ -243,14 +218,19 @@ PanelWindow {
 
                 if (!result) {
                     toolbar.visibleState = true;
-                    toolbar.showStatus("Capture failed: empty response", true);
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Capture failed",
+                        body: "Empty response from capture process",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
                     return;
                 }
 
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
                     toolbar.visibleState = true;
-                    toolbar.showStatus(message || "Capture failed", true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
@@ -264,7 +244,13 @@ PanelWindow {
                 const parts = result.split("|");
                 if (parts.length < 4 || parts[0] !== "ok") {
                     toolbar.visibleState = true;
-                    toolbar.showStatus("Capture failed: invalid response", true);
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Capture failed",
+                        body: "Invalid response from capture process",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
                     return;
                 }
 
@@ -272,13 +258,17 @@ PanelWindow {
                 const captureMode = parts[2] || toolbar.selectedMode;
                 if (!imagePath) {
                     toolbar.visibleState = true;
-                    toolbar.showStatus("Capture failed: no file path", true);
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Capture failed",
+                        body: "No file path returned",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
                     return;
                 }
 
                 toolbar.lastCapturePath = imagePath;
-                toolbar.statusMessage = "";
-                toolbar.statusError = false;
                 toolbar.visibleState = false;
                 GlobalState.addNotification({
                     appName: "Screenshot",
@@ -316,34 +306,8 @@ PanelWindow {
     IpcHandler {
         target: "screenshot"
 
-        function openToolbar(): void {
+        function start(): void {
             toolbar.openToolbar();
-        }
-
-        function toggle(): void {
-            if (toolbar.visibleState)
-                toolbar.closeToolbar();
-            else
-                toolbar.openToolbar();
-        }
-
-        function close(): void {
-            toolbar.closeToolbar();
-        }
-
-        function capture(mode): void {
-            const chosenMode = String(mode || "window");
-            if (chosenMode === "region") {
-                if (!toolbar.visibleState)
-                    toolbar.openToolbar();
-                return;
-            }
-            if (chosenMode === "fullscreen") {
-                toolbar.runCapture("capture-fullscreen", "fullscreen", "");
-                return;
-            }
-            if (!toolbar.visibleState)
-                toolbar.openToolbar();
         }
     }
 
@@ -394,28 +358,6 @@ PanelWindow {
     }
 
     Rectangle {
-        width: 320
-        height: 32
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: 20
-        radius: 8
-        color: "#aa000000"
-        border.width: 1
-        border.color: "#66ffffff"
-        visible: toolbar.visibleState
-
-        Text {
-            anchors.centerIn: parent
-            text: toolbar.pointerDown ? "Release to capture" : "Click window, drag region, or click empty for fullscreen"
-            color: Theme.text
-            font.family: Theme.font
-            font.pixelSize: 11
-            font.bold: true
-        }
-    }
-
-    Rectangle {
         visible: toolbar.visibleState && !toolbar.dragActive && toolbar.hoverWindowGeometry.length > 0
         x: toolbar.hoverWindowX
         y: toolbar.hoverWindowY
@@ -437,28 +379,5 @@ PanelWindow {
         border.width: 2
         border.color: "#cfe0ffff"
         radius: 3
-    }
-
-    Rectangle {
-        visible: toolbar.visibleState && toolbar.statusMessage.length > 0
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
-        anchors.topMargin: 104
-        radius: 8
-        color: toolbar.statusError ? "#662222" : "#1c2c1c"
-        border.width: 1
-        border.color: toolbar.statusError ? "#aa4444" : "#3f8f3f"
-        width: statusText.implicitWidth + 20
-        height: 30
-
-        Text {
-            id: statusText
-            anchors.centerIn: parent
-            text: toolbar.statusMessage
-            color: Theme.text
-            font.family: Theme.font
-            font.pixelSize: 11
-            font.bold: true
-        }
     }
 }
