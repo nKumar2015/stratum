@@ -768,8 +768,10 @@ PanelWindow {
                                     }
                                 }
 
-                                const cx = ox + (half * cellW) + (cellW / 2);
-                                const cy = oy + (half * cellH) + (cellH / 2);
+                                const targetCellX = viewer.clamp(centerX - sx, 0, sampleSize - 1);
+                                const targetCellY = viewer.clamp(centerY - sy, 0, sampleSize - 1);
+                                const cx = ox + (targetCellX * cellW) + (cellW / 2);
+                                const cy = oy + (targetCellY * cellH) + (cellH / 2);
                                 ctx.strokeStyle = "#ffffff";
                                 ctx.lineWidth = 1;
                                 ctx.beginPath();

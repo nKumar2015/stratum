@@ -12,6 +12,7 @@ PanelWindow {
     property bool visibleState: false
     property bool isCapturing: false
     property bool suppressOverlayVisuals: false
+    property bool hideCursorForCapture: false
     property bool freezeReady: false
     property string freezeFramePath: ""
     property string pendingCommand: ""
@@ -154,6 +155,7 @@ PanelWindow {
     function closeToolbar() {
         visibleState = false;
         suppressOverlayVisuals = false;
+        hideCursorForCapture = false;
         freezeReady = false;
         if (!isCapturing) {
             pendingMode = "";
@@ -174,6 +176,7 @@ PanelWindow {
         pendingMode = chosenMode;
         pendingGeometry = chosenGeometry;
         suppressOverlayVisuals = true;
+        hideCursorForCapture = true;
         delayedCaptureTimer.restart();
     }
 
@@ -261,6 +264,7 @@ PanelWindow {
             onStreamFinished: {
                 toolbar.isCapturing = false;
                 toolbar.suppressOverlayVisuals = false;
+                toolbar.hideCursorForCapture = false;
                 const result = this.text.trim();
 
                 if (!result) {
@@ -505,5 +509,13 @@ PanelWindow {
         border.width: 2
         border.color: "#cfe0ffff"
         radius: 3
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        enabled: toolbar.visibleState && toolbar.hideCursorForCapture
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        cursorShape: Qt.BlankCursor
     }
 }
