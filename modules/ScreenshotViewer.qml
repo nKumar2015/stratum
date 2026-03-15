@@ -186,25 +186,16 @@ PanelWindow {
                 const payload = parts[2] || "";
                 if (action === "copy") {
                     viewer.showStatus("Copied to clipboard", false);
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Copied to clipboard",
-                        body: payload,
-                        urgency: 1,
-                        category: "screenshot"
-                    });
                     return;
                 }
 
                 if (action === "save") {
                     viewer.showStatus("Saved screenshot", false);
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Saved screenshot",
-                        body: payload,
-                        urgency: 1,
-                        category: "screenshot"
-                    });
+                    return;
+                }
+
+                if (action === "save-as") {
+                    viewer.showStatus("Saved screenshot", false);
                     return;
                 }
 
@@ -342,6 +333,30 @@ PanelWindow {
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.startPostAction("save")
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredHeight: 32
+                    Layout.preferredWidth: 104
+                    radius: 8
+                    color: viewer.isWorking ? Theme.hover : Theme.activeWs
+                    border.width: 1
+                    border.color: Theme.activeWs
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: viewer.isWorking ? "Working" : "Save As"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: !viewer.isWorking
+                        onClicked: viewer.startPostAction("save-as")
                     }
                 }
 

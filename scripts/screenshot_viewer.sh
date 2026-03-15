@@ -69,6 +69,51 @@ save_only() {
     echo "ok|save|$target_path"
 }
 
+choose_save_path() {
+    default_path="$1"
+
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --file-selection --save --confirm-overwrite --filename="$default_path" 2>/dev/null
+        return $?
+    fi
+
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --getsavefilename "$default_path" "*.png" 2>/dev/null
+        return $?
+    fi
+
+    return 1
+}
+
+save_as() {
+    image_path="$1"
+    target_dir="$HOME/Pictures/Screenshots"
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    default_path="$target_dir/Screenshot-$timestamp.png"
+
+    mkdir -p "$target_dir" || error "failed to create screenshot directory"
+
+    chosen_path="$(choose_save_path "$default_path")"
+    if [ $? -ne 0 ] || [ -z "$chosen_path" ]; then
+        error "save-as cancelled"
+    fi
+
+    chosen_path="$(normalize_path "$chosen_path")"
+    case "$chosen_path" in
+        *.png) ;;
+        *) chosen_path="$chosen_path.png" ;;
+    esac
+
+    target_parent="$(dirname "$chosen_path")"
+    mkdir -p "$target_parent" || error "failed to create destination directory"
+
+    if ! cp -- "$image_path" "$chosen_path"; then
+        error "failed to save screenshot"
+    fi
+
+    echo "ok|save-as|$chosen_path"
+}
+
 save_and_copy() {
     image_path="$1"
     target_path="$(save_only "$image_path" | awk -F'|' '/^ok\|save\|/ {print $3}')"
@@ -102,6 +147,9 @@ case "$action" in
         ;;
     save)
         save_only "$image_path"
+        ;;
+    save-as)
+        save_as "$image_path"
         ;;
     save-copy)
         save_and_copy "$image_path"
