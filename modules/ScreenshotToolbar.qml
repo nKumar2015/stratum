@@ -11,6 +11,8 @@ PanelWindow {
 
     property bool visibleState: false
     property bool isCapturing: false
+    property bool freezeReady: false
+    property string freezeFramePath: ""
     property string pendingCommand: ""
     property string pendingGeometry: ""
     property string pendingMode: ""
@@ -52,6 +54,15 @@ PanelWindow {
         if (mode === "fullscreen")
             return "Fullscreen";
         return mode;
+    }
+
+    function toFileUrl(path) {
+        const value = String(path || "");
+        if (!value)
+            return "";
+        if (value.startsWith("file://"))
+            return value;
+        return "file://" + encodeURI(value);
     }
 
     function resetSelectionState() {
@@ -118,11 +129,18 @@ PanelWindow {
 
     function openToolbar() {
         visibleState = true;
+        freezeReady = false;
+        freezeFramePath = "";
         resetSelectionState();
+        if (!freezeProc.running) {
+            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame"];
+            freezeProc.running = true;
+        }
     }
 
     function closeToolbar() {
         visibleState = false;
+        freezeReady = false;
         if (!isCapturing) {
             pendingMode = "";
             pendingGeometry = "";
@@ -197,10 +215,10 @@ PanelWindow {
     Timer {
         id: hoverPollTimer
         interval: 45
-        running: toolbar.visibleState && !toolbar.pointerDown && !toolbar.dragActive
+        running: toolbar.visibleState && toolbar.freezeReady && !toolbar.pointerDown && !toolbar.dragActive
         repeat: true
         onTriggered: {
-            if (!toolbar.visibleState || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
+            if (!toolbar.visibleState || !toolbar.freezeReady || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
                 return;
 
             windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(Math.round(pointerArea.mouseX)), String(Math.round(pointerArea.mouseY))];
@@ -255,7 +273,7 @@ PanelWindow {
                 }
 
                 const imagePath = parts[1] || "";
-                const captureMode = parts[2] || toolbar.selectedMode;
+                const captureMode = parts[2] || "fullscreen";
                 if (!imagePath) {
                     toolbar.visibleState = true;
                     GlobalState.addNotification({
@@ -278,6 +296,62 @@ PanelWindow {
                     category: "screenshot"
                 });
                 toolbar.dispatchViewerOpen(imagePath, captureMode);
+            }
+        }
+    }
+
+    Process {
+        id: freezeProc
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                if (!toolbar.visibleState)
+                    return;
+
+                if (!result) {
+                    toolbar.freezeReady = false;
+                    toolbar.closeToolbar();
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Start failed",
+                        body: "Could not freeze screen",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
+                    return;
+                }
+
+                if (result.startsWith("__ERROR__|")) {
+                    const message = result.substring("__ERROR__|".length);
+                    toolbar.freezeReady = false;
+                    toolbar.closeToolbar();
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Start failed",
+                        body: message || "Could not freeze screen",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
+                    return;
+                }
+
+                const parts = result.split("|");
+                if (parts.length < 2 || parts[0] !== "ok") {
+                    toolbar.freezeReady = false;
+                    toolbar.closeToolbar();
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Start failed",
+                        body: "Invalid freeze response",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
+                    return;
+                }
+
+                toolbar.freezeFramePath = parts[1] || "";
+                toolbar.freezeReady = toolbar.freezeFramePath.length > 0;
             }
         }
     }
@@ -322,7 +396,7 @@ PanelWindow {
     MouseArea {
         id: pointerArea
         anchors.fill: parent
-        enabled: toolbar.visibleState
+        enabled: toolbar.visibleState && toolbar.freezeReady && !toolbar.isCapturing
         hoverEnabled: true
 
         onPressed: function(mouse) {
@@ -355,6 +429,15 @@ PanelWindow {
             toolbar.pointerDown = false;
             toolbar.dragActive = false;
         }
+    }
+
+    Image {
+        anchors.fill: parent
+        visible: toolbar.visibleState && toolbar.freezeReady && toolbar.freezeFramePath.length > 0
+        source: toolbar.toFileUrl(toolbar.freezeFramePath)
+        fillMode: Image.PreserveAspectCrop
+        smooth: false
+        cache: false
     }
 
     Rectangle {

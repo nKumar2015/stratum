@@ -24,6 +24,12 @@ make_temp_output() {
     mktemp "$runtime_dir/quickshell-screenshot-XXXXXX.png" 2>/dev/null || mktemp "/tmp/quickshell-screenshot-XXXXXX.png"
 }
 
+freeze_output_path() {
+    local runtime_dir
+    runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+    printf "%s/quickshell-screenshot-freeze.png\n" "$runtime_dir"
+}
+
 resolve_window_geometry_at() {
     px="$1"
     py="$2"
@@ -203,6 +209,21 @@ capture_fullscreen() {
     echo "ok|$out_file|$mode|$ts"
 }
 
+freeze_frame() {
+    require_tool grim
+
+    out_file="$(freeze_output_path)"
+    if ! grim "$out_file" >/dev/null 2>&1; then
+        error "failed to freeze screen"
+    fi
+
+    if [ ! -s "$out_file" ]; then
+        error "freeze image is empty"
+    fi
+
+    echo "ok|$out_file"
+}
+
 case "${1:-}" in
     capture)
         capture "${2:-window}"
@@ -212,6 +233,9 @@ case "${1:-}" in
         ;;
     capture-fullscreen)
         capture_fullscreen "${2:-fullscreen}"
+        ;;
+    freeze-frame)
+        freeze_frame
         ;;
     window-at)
         if geom="$(resolve_window_geometry_at "${2:-0}" "${3:-0}")" && [ -n "$geom" ]; then
