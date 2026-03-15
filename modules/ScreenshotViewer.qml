@@ -199,6 +199,14 @@ PanelWindow {
         return Math.round(clamp(y * pickerSampleScaleY, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
     }
 
+    function sampleToDisplayX(x) {
+        return clamp(x / Math.max(0.0001, pickerSampleScaleX), 0, Math.max(0, imageDrawSurface.width - 1));
+    }
+
+    function sampleToDisplayY(y) {
+        return clamp(y / Math.max(0.0001, pickerSampleScaleY), 0, Math.max(0, imageDrawSurface.height - 1));
+    }
+
     function pickColorAt(x, y) {
         colorSampleCanvas.requestPaint();
         const sx = toSampleX(x);
@@ -207,7 +215,12 @@ PanelWindow {
         if (!ctx)
             return;
 
-        const px = ctx.getImageData(sx, sy, 1, 1).data;
+        let px;
+        try {
+            px = ctx.getImageData(sx, sy, 1, 1).data;
+        } catch (_error) {
+            return;
+        }
         if (!px || px.length < 3)
             return;
 
@@ -657,7 +670,7 @@ PanelWindow {
 
                         MouseArea {
                             anchors.fill: parent
-                            cursorShape: Qt.CrossCursor
+                            cursorShape: viewer.colorPickerActive ? Qt.BlankCursor : Qt.CrossCursor
 
                             onPressed: function(mouse) {
                                 if (viewer.colorPickerActive) {
@@ -756,19 +769,31 @@ PanelWindow {
                             onPaint: {
                                 const ctx = getContext("2d");
                                 ctx.clearRect(0, 0, width, height);
+                                ctx.imageSmoothingEnabled = false;
                                 const sampleCtx = colorSampleCanvas.getContext("2d");
                                 if (!sampleCtx)
                                     return;
 
-                                const sampleSize = 13;
+                                const maxW = Math.max(1, Math.round(colorSampleCanvas.canvasSize.width));
+                                const maxH = Math.max(1, Math.round(colorSampleCanvas.canvasSize.height));
+                                const sampleSize = Math.max(1, Math.min(13, maxW, maxH));
                                 const half = Math.floor(sampleSize / 2);
                                 const centerX = viewer.toSampleX(viewer.pickerHoverX);
                                 const centerY = viewer.toSampleY(viewer.pickerHoverY);
-                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.canvasSize.width - sampleSize));
-                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.canvasSize.height - sampleSize));
-                                const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
-                                const cellW = Math.floor(width / sampleSize);
-                                const cellH = Math.floor(height / sampleSize);
+                                const sx = Math.round(viewer.clamp(centerX - half, 0, Math.max(0, maxW - sampleSize)));
+                                const sy = Math.round(viewer.clamp(centerY - half, 0, Math.max(0, maxH - sampleSize)));
+                                let data;
+                                try {
+                                    data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
+                                } catch (_error) {
+                                    return;
+                                }
+
+                                if (!data || data.length < sampleSize * sampleSize * 4)
+                                    return;
+
+                                const cellW = Math.max(1, Math.floor(width / sampleSize));
+                                const cellH = Math.max(1, Math.floor(height / sampleSize));
                                 const drawW = cellW * sampleSize;
                                 const drawH = cellH * sampleSize;
                                 const ox = Math.floor((width - drawW) / 2);
@@ -795,6 +820,42 @@ PanelWindow {
                                 ctx.lineTo(ox + drawW, cy + 0.5);
                                 ctx.stroke();
                             }
+                        }
+                    }
+
+                    Item {
+                        visible: viewer.colorPickerActive
+                        width: imageDrawSurface.width
+                        height: imageDrawSurface.height
+
+                        readonly property real displayX: viewer.sampleToDisplayX(viewer.toSampleX(viewer.pickerHoverX))
+                        readonly property real displayY: viewer.sampleToDisplayY(viewer.toSampleY(viewer.pickerHoverY))
+
+                        Rectangle {
+                            x: Math.round(parent.displayX)
+                            y: 0
+                            width: 1
+                            height: parent.height
+                            color: "#ffffffff"
+                        }
+
+                        Rectangle {
+                            x: 0
+                            y: Math.round(parent.displayY)
+                            width: parent.width
+                            height: 1
+                            color: "#ffffffff"
+                        }
+
+                        Rectangle {
+                            x: Math.round(parent.displayX) - 4
+                            y: Math.round(parent.displayY) - 4
+                            width: 9
+                            height: 9
+                            radius: 5
+                            color: "transparent"
+                            border.width: 1
+                            border.color: "#ffffffff"
                         }
                     }
                 }
