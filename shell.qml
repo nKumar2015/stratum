@@ -21,6 +21,8 @@ ShellRoot {
     WifiHoverMenu {}
     AudioHoverMenu {}
     BatteryHoverMenu {}
+    ScreenshotToolbar {}
+    ScreenshotViewer {}
     PanelWindow {
         id: rootPanelWindow
         anchors.top: true

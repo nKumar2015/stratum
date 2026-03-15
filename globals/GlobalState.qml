@@ -31,6 +31,7 @@ QtObject {
 
     signal notificationActionRequested(int notificationId, string actionKey, string replyText)
     signal notificationDismissRequested(int notificationId, bool expired)
+    signal screenshotViewerOpenRequested(string imagePath, string captureMode)
 
     function normalizeProgress(value) {
         const parsed = Number(value);
