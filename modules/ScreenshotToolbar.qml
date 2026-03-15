@@ -145,10 +145,8 @@ PanelWindow {
         freezeReady = false;
         freezeFramePath = "";
         resetSelectionState();
-        if (!freezeProc.running) {
-            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame"];
-            freezeProc.running = true;
-        }
+        if (!freezeProc.running)
+            freezeStartTimer.restart();
     }
 
     function closeToolbar() {
@@ -198,6 +196,18 @@ PanelWindow {
 
     function dispatchViewerOpen(path, mode) {
         GlobalState.screenshotViewerOpenRequested(path, mode);
+    }
+
+    Timer {
+        id: freezeStartTimer
+        interval: 80
+        repeat: false
+        onTriggered: {
+            if (!toolbar.visibleState || freezeProc.running)
+                return;
+            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame"];
+            freezeProc.running = true;
+        }
     }
 
     Timer {
@@ -402,11 +412,13 @@ PanelWindow {
     MouseArea {
         id: pointerArea
         anchors.fill: parent
-        enabled: toolbar.visibleState && toolbar.freezeReady && !toolbar.isCapturing
+        enabled: toolbar.visibleState && !toolbar.isCapturing
         hoverEnabled: true
         cursorShape: Qt.BlankCursor
 
         onPressed: function(mouse) {
+            if (!toolbar.freezeReady)
+                return;
             toolbar.pointerDown = true;
             toolbar.dragActive = false;
             toolbar.pressX = mouse.x;
@@ -418,6 +430,8 @@ PanelWindow {
         }
 
         onPositionChanged: function(mouse) {
+            if (!toolbar.freezeReady)
+                return;
             if (toolbar.pointerDown)
                 toolbar.updateDragRect(mouse.x, mouse.y);
         }
