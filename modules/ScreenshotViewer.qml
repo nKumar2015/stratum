@@ -186,6 +186,7 @@ PanelWindow {
     }
 
     function pickColorAt(x, y) {
+        colorSampleCanvas.requestPaint();
         const sx = Math.round(clamp(x, 0, Math.max(0, colorSampleCanvas.width - 1)));
         const sy = Math.round(clamp(y, 0, Math.max(0, colorSampleCanvas.height - 1)));
         const ctx = colorSampleCanvas.getContext("2d");
@@ -607,6 +608,9 @@ PanelWindow {
                         fillMode: Image.Stretch
                         smooth: true
                         cache: false
+
+                        onStatusChanged: colorSampleCanvas.requestPaint()
+                        onSourceChanged: colorSampleCanvas.requestPaint()
                     }
 
                     Canvas {
@@ -699,6 +703,9 @@ PanelWindow {
                         anchors.fill: parent
                         visible: false
 
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+
                         onPaint: {
                             const ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
@@ -724,12 +731,33 @@ PanelWindow {
 
                             onPaint: {
                                 const ctx = getContext("2d");
-                                const sampleSize = 18;
-                                const sx = viewer.clamp(viewer.pickerHoverX - sampleSize / 2, 0, Math.max(0, imageDrawSurface.width - sampleSize));
-                                const sy = viewer.clamp(viewer.pickerHoverY - sampleSize / 2, 0, Math.max(0, imageDrawSurface.height - sampleSize));
                                 ctx.clearRect(0, 0, width, height);
-                                ctx.imageSmoothingEnabled = false;
-                                ctx.drawImage(drawImageBase, sx, sy, sampleSize, sampleSize, 0, 0, width, height);
+                                const sampleSize = 17;
+                                const half = Math.floor(sampleSize / 2);
+                                const centerX = Math.round(viewer.pickerHoverX);
+                                const centerY = Math.round(viewer.pickerHoverY);
+                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.width - sampleSize));
+                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.height - sampleSize));
+
+                                const sampleCtx = colorSampleCanvas.getContext("2d");
+                                if (!sampleCtx)
+                                    return;
+
+                                const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
+                                const cellW = width / sampleSize;
+                                const cellH = height / sampleSize;
+
+                                for (let y = 0; y < sampleSize; y++) {
+                                    for (let x = 0; x < sampleSize; x++) {
+                                        const idx = (y * sampleSize + x) * 4;
+                                        const r = data[idx];
+                                        const g = data[idx + 1];
+                                        const b = data[idx + 2];
+                                        const a = data[idx + 3] / 255;
+                                        ctx.fillStyle = "rgba(" + r + "," + g + "," + b + "," + a + ")";
+                                        ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+                                    }
+                                }
 
                                 ctx.strokeStyle = "#ffffff";
                                 ctx.lineWidth = 1;
