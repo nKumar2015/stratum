@@ -44,8 +44,26 @@ PanelWindow {
         return "file://" + encodeURI(value);
     }
 
+    function toLocalPath(pathOrUrl) {
+        let value = String(pathOrUrl || "").trim();
+        if (!value)
+            return "";
+
+        if (value.startsWith("file://")) {
+            value = value.substring("file://".length);
+            value = "/" + value.replace(/^\/+/, "");
+        }
+
+        try {
+            value = decodeURIComponent(value);
+        } catch (_error) {
+        }
+
+        return value;
+    }
+
     function openViewer(imagePath, mode) {
-        sourcePath = String(imagePath || "");
+        sourcePath = toLocalPath(imagePath);
         captureMode = String(mode || "window");
         visibleState = sourcePath.length > 0;
         statusMessage = "";
@@ -111,7 +129,7 @@ PanelWindow {
             return;
         }
 
-        postProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, sourcePath];
+        postProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, toLocalPath(sourcePath)];
         postProc.running = true;
     }
 
@@ -178,11 +196,11 @@ PanelWindow {
                     return;
                 }
 
-                if (action === "save-copy") {
-                    viewer.showStatus("Saved and copied", false);
+                if (action === "save") {
+                    viewer.showStatus("Saved screenshot", false);
                     GlobalState.addNotification({
                         appName: "Screenshot",
-                        summary: "Saved and copied",
+                        summary: "Saved screenshot",
                         body: payload,
                         urgency: 1,
                         category: "screenshot"
@@ -305,7 +323,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 122
+                    Layout.preferredWidth: 104
                     radius: 8
                     color: viewer.isWorking ? Theme.hover : Theme.activeWs
                     border.width: 1
@@ -313,7 +331,7 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: viewer.isWorking ? "Working" : "Save + Copy"
+                        text: viewer.isWorking ? "Working" : "Save"
                         color: Theme.text
                         font.family: Theme.font
                         font.pixelSize: 11
@@ -323,7 +341,7 @@ PanelWindow {
                     MouseArea {
                         anchors.fill: parent
                         enabled: !viewer.isWorking
-                        onClicked: viewer.startPostAction("save-copy")
+                        onClicked: viewer.startPostAction("save")
                     }
                 }
 

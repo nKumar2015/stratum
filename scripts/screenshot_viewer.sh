@@ -6,13 +6,32 @@ error() {
     exit 0
 }
 
+normalize_path() {
+    value="${1:-}"
+    [ -n "$value" ] || {
+        echo ""
+        return 0
+    }
+
+    case "$value" in
+        file://*)
+            value="${value#file://}"
+            value="/${value#/}"
+            ;;
+    esac
+
+    printf "%s\n" "$value"
+}
+
 require_file() {
-    if [ -z "${1:-}" ]; then
+    target_path="$(normalize_path "${1:-}")"
+    if [ -z "$target_path" ]; then
         error "missing image path"
     fi
-    if [ ! -f "$1" ]; then
+    if [ ! -f "$target_path" ]; then
         error "image file not found"
     fi
+    printf "%s\n" "$target_path"
 }
 
 copy_to_clipboard() {
@@ -35,7 +54,7 @@ copy_to_clipboard() {
     error "no clipboard tool found (install wl-clipboard or xclip)"
 }
 
-save_and_copy() {
+save_only() {
     image_path="$1"
     target_dir="$HOME/Pictures/Screenshots"
     timestamp="$(date +%Y%m%d-%H%M%S)"
@@ -44,6 +63,16 @@ save_and_copy() {
     mkdir -p "$target_dir" || error "failed to create screenshot directory"
 
     if ! cp -- "$image_path" "$target_path"; then
+        error "failed to save screenshot"
+    fi
+
+    echo "ok|save|$target_path"
+}
+
+save_and_copy() {
+    image_path="$1"
+    target_path="$(save_only "$image_path" | awk -F'|' '/^ok\|save\|/ {print $3}')"
+    if [ -z "$target_path" ]; then
         error "failed to save screenshot"
     fi
 
@@ -65,12 +94,14 @@ save_and_copy() {
 }
 
 action="${1:-}"
-image_path="${2:-}"
-require_file "$image_path"
+image_path="$(require_file "${2:-}")"
 
 case "$action" in
     copy)
         copy_to_clipboard "$image_path"
+        ;;
+    save)
+        save_only "$image_path"
         ;;
     save-copy)
         save_and_copy "$image_path"
