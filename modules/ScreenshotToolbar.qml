@@ -13,6 +13,7 @@ PanelWindow {
     property bool visibleState: false
     property string selectedMode: "window"
     property bool isCapturing: false
+    property string pendingMode: ""
     property string lastCapturePath: ""
     property string statusMessage: ""
     property bool statusError: false
@@ -58,7 +59,8 @@ PanelWindow {
 
     function closeToolbar() {
         visibleState = false;
-        isCapturing = false;
+        if (!isCapturing)
+            pendingMode = "";
     }
 
     function runCapture(mode) {
@@ -69,9 +71,9 @@ PanelWindow {
         selectedMode = chosenMode;
         statusMessage = "";
         statusError = false;
-        captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture", chosenMode];
-        isCapturing = true;
-        captureProc.running = true;
+        pendingMode = chosenMode;
+        visibleState = false;
+        delayedCaptureTimer.restart();
     }
 
     function dispatchViewerOpen(path, mode) {
@@ -88,6 +90,22 @@ PanelWindow {
         }
     }
 
+    Timer {
+        id: delayedCaptureTimer
+        interval: 24
+        repeat: false
+        onTriggered: {
+            const nextMode = toolbar.pendingMode;
+            if (!nextMode)
+                return;
+
+            toolbar.pendingMode = "";
+            toolbar.isCapturing = true;
+            captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture", nextMode];
+            captureProc.running = true;
+        }
+    }
+
     Process {
         id: captureProc
         running: false
@@ -97,12 +115,14 @@ PanelWindow {
                 const result = this.text.trim();
 
                 if (!result) {
+                    toolbar.visibleState = true;
                     toolbar.showStatus("Capture failed: empty response", true);
                     return;
                 }
 
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
+                    toolbar.visibleState = true;
                     toolbar.showStatus(message || "Capture failed", true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
@@ -116,6 +136,7 @@ PanelWindow {
 
                 const parts = result.split("|");
                 if (parts.length < 4 || parts[0] !== "ok") {
+                    toolbar.visibleState = true;
                     toolbar.showStatus("Capture failed: invalid response", true);
                     return;
                 }
@@ -123,6 +144,7 @@ PanelWindow {
                 const imagePath = parts[1] || "";
                 const captureMode = parts[2] || toolbar.selectedMode;
                 if (!imagePath) {
+                    toolbar.visibleState = true;
                     toolbar.showStatus("Capture failed: no file path", true);
                     return;
                 }
@@ -183,8 +205,8 @@ PanelWindow {
     }
 
     Rectangle {
-        width: Math.max(460, controlsLayout.implicitWidth + 24)
-        height: 70
+        width: Math.max(520, controlsLayout.implicitWidth + 24)
+        height: 84
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: 26
@@ -205,6 +227,8 @@ PanelWindow {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
+            anchors.topMargin: 8
+            anchors.bottomMargin: 8
             spacing: 8
 
             Repeater {
@@ -236,7 +260,8 @@ PanelWindow {
 
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: toolbar.selectedMode = modelData.key
+                        enabled: !toolbar.isCapturing
+                        onClicked: toolbar.runCapture(modelData.key)
                     }
                 }
             }
@@ -257,31 +282,23 @@ PanelWindow {
                     font.pixelSize: 12
                     font.bold: true
                 }
-            }
-
-            Rectangle {
-                Layout.preferredHeight: 38
-                Layout.preferredWidth: 96
-                radius: 8
-                color: toolbar.isCapturing ? Theme.hover : Theme.activeWs
-                border.width: 1
-                border.color: Theme.activeWs
-
-                Text {
-                    anchors.centerIn: parent
-                    text: toolbar.isCapturing ? "Capturing" : "Capture"
-                    color: Theme.text
-                    font.family: Theme.font
-                    font.pixelSize: 12
-                    font.bold: true
-                }
 
                 MouseArea {
                     anchors.fill: parent
-                    enabled: !toolbar.isCapturing
-                    onClicked: toolbar.runCapture(toolbar.selectedMode)
+                    enabled: false
                 }
             }
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 8
+            text: toolbar.isCapturing ? "Select on screen..." : "Click a mode, then release mouse to capture"
+            color: Theme.hover
+            font.family: Theme.font
+            font.pixelSize: 10
+            font.bold: true
         }
     }
 

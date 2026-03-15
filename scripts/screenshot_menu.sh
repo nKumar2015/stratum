@@ -1,6 +1,12 @@
 #!/bin/sh
 set -u
 
+SLURP_BACKGROUND="#00000066"
+SLURP_BORDER="#7aa2f7ff"
+SLURP_SELECTION="#7aa2f744"
+SLURP_BOX="#101520dd"
+SLURP_BORDER_WIDTH="2"
+
 error() {
     echo "__ERROR__|$1"
     exit 0
@@ -45,16 +51,35 @@ pick_geometry() {
             ;;
         region)
             require_tool slurp
-            slurp -f "%x,%y %wx%h"
+            slurp \
+                -b "$SLURP_BACKGROUND" \
+                -c "$SLURP_BORDER" \
+                -s "$SLURP_SELECTION" \
+                -B "$SLURP_BOX" \
+                -w "$SLURP_BORDER_WIDTH" \
+                -f "%x,%y %wx%h"
             return $?
             ;;
         window)
             require_tool slurp
             if boxes="$(window_boxes_hyprland)" && [ -n "$boxes" ]; then
-                printf "%s\n" "$boxes" | slurp -r -f "%x,%y %wx%h"
+                printf "%s\n" "$boxes" | slurp \
+                    -r \
+                    -b "$SLURP_BACKGROUND" \
+                    -c "$SLURP_BORDER" \
+                    -s "$SLURP_SELECTION" \
+                    -B "$SLURP_BOX" \
+                    -w "$SLURP_BORDER_WIDTH" \
+                    -f "%x,%y %wx%h"
                 return $?
             fi
-            slurp -f "%x,%y %wx%h"
+            slurp \
+                -b "$SLURP_BACKGROUND" \
+                -c "$SLURP_BORDER" \
+                -s "$SLURP_SELECTION" \
+                -B "$SLURP_BOX" \
+                -w "$SLURP_BORDER_WIDTH" \
+                -f "%x,%y %wx%h"
             return $?
             ;;
         *)
