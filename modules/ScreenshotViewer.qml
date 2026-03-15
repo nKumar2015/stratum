@@ -191,8 +191,8 @@ PanelWindow {
 
     function pickColorAt(x, y) {
         colorSampleCanvas.requestPaint();
-        const sx = Math.round(clamp(x, 0, Math.max(0, colorSampleCanvas.width - 1)));
-        const sy = Math.round(clamp(y, 0, Math.max(0, colorSampleCanvas.height - 1)));
+        const sx = Math.round(clamp(x, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
+        const sy = Math.round(clamp(y, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
         const ctx = colorSampleCanvas.getContext("2d");
         if (!ctx)
             return;
@@ -709,14 +709,17 @@ PanelWindow {
                         id: colorSampleCanvas
                         anchors.fill: parent
                         visible: false
+                        canvasSize: Qt.size(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)))
 
                         onWidthChanged: requestPaint()
                         onHeightChanged: requestPaint()
 
                         onPaint: {
                             const ctx = getContext("2d");
-                            ctx.clearRect(0, 0, width, height);
-                            ctx.drawImage(drawImageBase, 0, 0, width, height);
+                            const cw = colorSampleCanvas.canvasSize.width;
+                            const ch = colorSampleCanvas.canvasSize.height;
+                            ctx.clearRect(0, 0, cw, ch);
+                            ctx.drawImage(drawImageBase, 0, 0, cw, ch);
                             zoomCanvas.requestPaint();
                         }
                     }
@@ -747,8 +750,8 @@ PanelWindow {
                                 const half = Math.floor(sampleSize / 2);
                                 const centerX = Math.round(viewer.pickerHoverX);
                                 const centerY = Math.round(viewer.pickerHoverY);
-                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.width - sampleSize));
-                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.height - sampleSize));
+                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.canvasSize.width - sampleSize));
+                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.canvasSize.height - sampleSize));
                                 const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
                                 const cellW = width / sampleSize;
                                 const cellH = height / sampleSize;
