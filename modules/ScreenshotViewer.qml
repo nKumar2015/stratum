@@ -26,7 +26,8 @@ PanelWindow {
     property string statusMessage: ""
     property bool statusError: false
     property var annotationStrokes: []
-    readonly property real pickerSampleScale: Math.max(1, Number(Screen.devicePixelRatio || 1))
+    readonly property real pickerSampleScaleX: colorSampleCanvas.canvasSize.width / Math.max(1, imageDrawSurface.width)
+    readonly property real pickerSampleScaleY: colorSampleCanvas.canvasSize.height / Math.max(1, imageDrawSurface.height)
 
     anchors {
         top: true
@@ -191,11 +192,11 @@ PanelWindow {
     }
 
     function toSampleX(x) {
-        return Math.round(clamp(x * pickerSampleScale, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
+        return Math.round(clamp(x * pickerSampleScaleX, 0, Math.max(0, colorSampleCanvas.canvasSize.width - 1)));
     }
 
     function toSampleY(y) {
-        return Math.round(clamp(y * pickerSampleScale, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
+        return Math.round(clamp(y * pickerSampleScaleY, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
     }
 
     function pickColorAt(x, y) {
@@ -718,7 +719,10 @@ PanelWindow {
                         id: colorSampleCanvas
                         anchors.fill: parent
                         visible: false
-                        canvasSize: Qt.size(Math.max(1, Math.round(width * viewer.pickerSampleScale)), Math.max(1, Math.round(height * viewer.pickerSampleScale)))
+                        canvasSize: Qt.size(
+                            Math.max(1, Math.round((drawImageBase.sourceSize.width > 0 ? drawImageBase.sourceSize.width : width * Screen.devicePixelRatio))),
+                            Math.max(1, Math.round((drawImageBase.sourceSize.height > 0 ? drawImageBase.sourceSize.height : height * Screen.devicePixelRatio)))
+                        )
 
                         onWidthChanged: requestPaint()
                         onHeightChanged: requestPaint()
