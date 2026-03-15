@@ -359,7 +359,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 84
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: Theme.black
                     border.width: 1
@@ -367,10 +367,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Clear"
+                        text: "󰃢"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -383,7 +383,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 112
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: viewer.colorPickerActive ? Theme.activeWs : Theme.black
                     border.width: 1
@@ -391,10 +391,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Pick Color"
+                        text: "󰏘"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -407,7 +407,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 104
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: viewer.isWorking ? Theme.hover : Theme.activeWs
                     border.width: 1
@@ -415,10 +415,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: viewer.isWorking ? "Working" : "Copy"
+                        text: viewer.isWorking ? "󰔛" : "󰆏"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -431,7 +431,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 104
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: viewer.isWorking ? Theme.hover : Theme.activeWs
                     border.width: 1
@@ -439,10 +439,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: viewer.isWorking ? "Working" : "Save"
+                        text: viewer.isWorking ? "󰔛" : "󰆓"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -455,7 +455,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 104
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: viewer.isWorking ? Theme.hover : Theme.activeWs
                     border.width: 1
@@ -463,10 +463,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: viewer.isWorking ? "Working" : "Save As"
+                        text: viewer.isWorking ? "󰔛" : "󰉋"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -479,7 +479,7 @@ PanelWindow {
 
                 Rectangle {
                     Layout.preferredHeight: 32
-                    Layout.preferredWidth: 74
+                    Layout.preferredWidth: 42
                     radius: 8
                     color: Theme.black
                     border.width: 1
@@ -487,10 +487,10 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "Close"
+                        text: "󰅖"
                         color: Theme.text
                         font.family: Theme.font
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         font.bold: true
                     }
 
@@ -668,7 +668,6 @@ PanelWindow {
                                 if (viewer.colorPickerActive) {
                                     viewer.pickerHoverX = mouse.x;
                                     viewer.pickerHoverY = mouse.y;
-                                    zoomCanvas.requestPaint();
                                     return;
                                 }
 
@@ -725,40 +724,32 @@ PanelWindow {
                         x: viewer.clamp(viewer.pickerHoverX + 18, 0, Math.max(0, imageDrawSurface.width - width))
                         y: viewer.clamp(viewer.pickerHoverY + 18, 0, Math.max(0, imageDrawSurface.height - height))
 
-                        Canvas {
-                            id: zoomCanvas
+                        Image {
                             anchors.fill: parent
+                            source: drawImageBase.source
+                            smooth: false
+                            fillMode: Image.Stretch
 
+                            sourceClipRect: {
+                                const sampleSize = 17;
+                                const half = Math.floor(sampleSize / 2);
+                                const srcW = Math.max(1, drawImageBase.sourceSize.width);
+                                const srcH = Math.max(1, drawImageBase.sourceSize.height);
+                                const normX = viewer.clamp(viewer.pickerHoverX / Math.max(1, imageDrawSurface.width), 0, 1);
+                                const normY = viewer.clamp(viewer.pickerHoverY / Math.max(1, imageDrawSurface.height), 0, 1);
+                                const centerX = Math.round(normX * (srcW - 1));
+                                const centerY = Math.round(normY * (srcH - 1));
+                                const clipX = viewer.clamp(centerX - half, 0, Math.max(0, srcW - sampleSize));
+                                const clipY = viewer.clamp(centerY - half, 0, Math.max(0, srcH - sampleSize));
+                                return Qt.rect(clipX, clipY, sampleSize, sampleSize);
+                            }
+                        }
+
+                        Canvas {
+                            anchors.fill: parent
                             onPaint: {
                                 const ctx = getContext("2d");
                                 ctx.clearRect(0, 0, width, height);
-                                const sampleSize = 17;
-                                const half = Math.floor(sampleSize / 2);
-                                const centerX = Math.round(viewer.pickerHoverX);
-                                const centerY = Math.round(viewer.pickerHoverY);
-                                const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.width - sampleSize));
-                                const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.height - sampleSize));
-
-                                const sampleCtx = colorSampleCanvas.getContext("2d");
-                                if (!sampleCtx)
-                                    return;
-
-                                const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
-                                const cellW = width / sampleSize;
-                                const cellH = height / sampleSize;
-
-                                for (let y = 0; y < sampleSize; y++) {
-                                    for (let x = 0; x < sampleSize; x++) {
-                                        const idx = (y * sampleSize + x) * 4;
-                                        const r = data[idx];
-                                        const g = data[idx + 1];
-                                        const b = data[idx + 2];
-                                        const a = data[idx + 3] / 255;
-                                        ctx.fillStyle = "rgba(" + r + "," + g + "," + b + "," + a + ")";
-                                        ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
-                                    }
-                                }
-
                                 ctx.strokeStyle = "#ffffff";
                                 ctx.lineWidth = 1;
                                 ctx.beginPath();
