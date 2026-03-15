@@ -425,7 +425,7 @@ PanelWindow {
         anchors.fill: parent
         enabled: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.isCapturing
         hoverEnabled: true
-        cursorShape: Qt.BlankCursor
+        cursorShape: Qt.CrossCursor
 
         onPressed: function(mouse) {
             if (!toolbar.freezeReady)
@@ -472,6 +472,15 @@ PanelWindow {
         sourceSize.height: Math.max(1, Math.round(height * Screen.devicePixelRatio))
         smooth: false
         cache: false
+    }
+
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && toolbar.hoverWindowGeometry.length === 0
+        anchors.fill: parent
+        color: "#1a7aa2f7"
+        border.width: 2
+        border.color: "#88bcd6ff"
+        radius: 0
     }
 
     Rectangle {

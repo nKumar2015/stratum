@@ -727,8 +727,8 @@ PanelWindow {
                     Rectangle {
                         id: zoomLens
                         visible: viewer.colorPickerActive
-                        width: 96
-                        height: 96
+                        width: 104
+                        height: 104
                         radius: 8
                         border.width: 1
                         border.color: Theme.activeWs
@@ -753,24 +753,30 @@ PanelWindow {
                                 const sx = viewer.clamp(centerX - half, 0, Math.max(0, colorSampleCanvas.canvasSize.width - sampleSize));
                                 const sy = viewer.clamp(centerY - half, 0, Math.max(0, colorSampleCanvas.canvasSize.height - sampleSize));
                                 const data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
-                                const cellW = width / sampleSize;
-                                const cellH = height / sampleSize;
+                                const cellW = Math.floor(width / sampleSize);
+                                const cellH = Math.floor(height / sampleSize);
+                                const drawW = cellW * sampleSize;
+                                const drawH = cellH * sampleSize;
+                                const ox = Math.floor((width - drawW) / 2);
+                                const oy = Math.floor((height - drawH) / 2);
 
                                 for (let y = 0; y < sampleSize; y++) {
                                     for (let x = 0; x < sampleSize; x++) {
                                         const idx = (y * sampleSize + x) * 4;
                                         ctx.fillStyle = "rgba(" + data[idx] + "," + data[idx + 1] + "," + data[idx + 2] + "," + (data[idx + 3] / 255) + ")";
-                                        ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+                                        ctx.fillRect(ox + x * cellW, oy + y * cellH, cellW, cellH);
                                     }
                                 }
 
+                                const cx = ox + (half * cellW) + (cellW / 2);
+                                const cy = oy + (half * cellH) + (cellH / 2);
                                 ctx.strokeStyle = "#ffffff";
                                 ctx.lineWidth = 1;
                                 ctx.beginPath();
-                                ctx.moveTo(width / 2, 0);
-                                ctx.lineTo(width / 2, height);
-                                ctx.moveTo(0, height / 2);
-                                ctx.lineTo(width, height / 2);
+                                ctx.moveTo(cx + 0.5, oy);
+                                ctx.lineTo(cx + 0.5, oy + drawH);
+                                ctx.moveTo(ox, cy + 0.5);
+                                ctx.lineTo(ox + drawW, cy + 0.5);
                                 ctx.stroke();
                             }
                         }
