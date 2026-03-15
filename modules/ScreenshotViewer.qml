@@ -18,6 +18,10 @@ PanelWindow {
     property color annotationColor: "#ff3b30"
     property int penSize: 3
     property bool isWorking: false
+    property bool colorPickerActive: false
+    property real pickerHoverX: 0
+    property real pickerHoverY: 0
+    property string pickedColorHex: ""
     property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
     property bool statusError: false
@@ -76,6 +80,7 @@ PanelWindow {
 
     function closeViewer() {
         visibleState = false;
+        colorPickerActive = false;
         statusMessage = "";
         statusError = false;
         isWorking = false;
@@ -168,6 +173,36 @@ PanelWindow {
         saveAsDialog.open();
     }
 
+    function toggleColorPicker() {
+        if (isWorking)
+            return;
+        colorPickerActive = !colorPickerActive;
+        if (colorPickerActive)
+            showStatus("Click image to pick color", false);
+    }
+
+    function clamp(value, minValue, maxValue) {
+        return Math.max(minValue, Math.min(maxValue, value));
+    }
+
+    function pickColorAt(x, y) {
+        const sx = Math.round(clamp(x, 0, Math.max(0, colorSampleCanvas.width - 1)));
+        const sy = Math.round(clamp(y, 0, Math.max(0, colorSampleCanvas.height - 1)));
+        const ctx = colorSampleCanvas.getContext("2d");
+        if (!ctx)
+            return;
+
+        const px = ctx.getImageData(sx, sy, 1, 1).data;
+        if (!px || px.length < 3)
+            return;
+
+        const toHex = n => Number(n || 0).toString(16).padStart(2, "0");
+        const hex = "#" + toHex(px[0]) + toHex(px[1]) + toHex(px[2]);
+        pickedColorHex = hex;
+        colorCopyProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", "copy-text", hex];
+        colorCopyProc.running = true;
+    }
+
     Timer {
         id: clearStatusTimer
         interval: 2600
@@ -235,6 +270,28 @@ PanelWindow {
                 }
 
                 viewer.showStatus("Done", false);
+            }
+        }
+    }
+
+    Process {
+        id: colorCopyProc
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                if (!result) {
+                    viewer.showStatus("Failed to copy color", true);
+                    return;
+                }
+
+                if (result.startsWith("__ERROR__|")) {
+                    const message = result.substring("__ERROR__|".length);
+                    viewer.showStatus(message || "Failed to copy color", true);
+                    return;
+                }
+
+                viewer.showStatus("Copied color " + viewer.pickedColorHex, false);
             }
         }
     }
@@ -320,6 +377,30 @@ PanelWindow {
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.clearAnnotations()
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredHeight: 32
+                    Layout.preferredWidth: 112
+                    radius: 8
+                    color: viewer.colorPickerActive ? Theme.activeWs : Theme.black
+                    border.width: 1
+                    border.color: viewer.colorPickerActive ? Theme.activeWs : Theme.grey
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Pick Color"
+                        color: Theme.text
+                        font.family: Theme.font
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: !viewer.isWorking
+                        onClicked: viewer.toggleColorPicker()
                     }
                 }
 
@@ -520,6 +601,7 @@ PanelWindow {
                     clip: true
 
                     Image {
+                        id: drawImageBase
                         anchors.fill: parent
                         source: screenshotImage.source
                         fillMode: Image.Stretch
@@ -560,6 +642,12 @@ PanelWindow {
                             cursorShape: Qt.CrossCursor
 
                             onPressed: function(mouse) {
+                                if (viewer.colorPickerActive) {
+                                    viewer.pickColorAt(mouse.x, mouse.y);
+                                    viewer.colorPickerActive = false;
+                                    return;
+                                }
+
                                 const strokes = viewer.annotationStrokes.slice();
                                 const stroke = {
                                     color: viewer.colorToHex(viewer.annotationColor),
@@ -573,6 +661,13 @@ PanelWindow {
                             }
 
                             onPositionChanged: function(mouse) {
+                                if (viewer.colorPickerActive) {
+                                    viewer.pickerHoverX = mouse.x;
+                                    viewer.pickerHoverY = mouse.y;
+                                    zoomCanvas.requestPaint();
+                                    return;
+                                }
+
                                 if (!(mouse.buttons & Qt.LeftButton))
                                     return;
 
@@ -593,6 +688,57 @@ PanelWindow {
 
                             onReleased: {
                                 paintCanvas.currentStrokeIndex = -1;
+                            }
+
+                            hoverEnabled: true
+                        }
+                    }
+
+                    Canvas {
+                        id: colorSampleCanvas
+                        anchors.fill: parent
+                        visible: false
+
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.drawImage(drawImageBase, 0, 0, width, height);
+                        }
+                    }
+
+                    Rectangle {
+                        id: zoomLens
+                        visible: viewer.colorPickerActive
+                        width: 128
+                        height: 128
+                        radius: 8
+                        border.width: 1
+                        border.color: Theme.activeWs
+                        color: Theme.black
+                        x: viewer.clamp(viewer.pickerHoverX + 18, 0, Math.max(0, imageDrawSurface.width - width))
+                        y: viewer.clamp(viewer.pickerHoverY + 18, 0, Math.max(0, imageDrawSurface.height - height))
+
+                        Canvas {
+                            id: zoomCanvas
+                            anchors.fill: parent
+
+                            onPaint: {
+                                const ctx = getContext("2d");
+                                const sampleSize = 18;
+                                const sx = viewer.clamp(viewer.pickerHoverX - sampleSize / 2, 0, Math.max(0, imageDrawSurface.width - sampleSize));
+                                const sy = viewer.clamp(viewer.pickerHoverY - sampleSize / 2, 0, Math.max(0, imageDrawSurface.height - sampleSize));
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.imageSmoothingEnabled = false;
+                                ctx.drawImage(drawImageBase, sx, sy, sampleSize, sampleSize, 0, 0, width, height);
+
+                                ctx.strokeStyle = "#ffffff";
+                                ctx.lineWidth = 1;
+                                ctx.beginPath();
+                                ctx.moveTo(width / 2, 0);
+                                ctx.lineTo(width / 2, height);
+                                ctx.moveTo(0, height / 2);
+                                ctx.lineTo(width, height / 2);
+                                ctx.stroke();
                             }
                         }
                     }

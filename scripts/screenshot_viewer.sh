@@ -54,6 +54,26 @@ copy_to_clipboard() {
     error "no clipboard tool found (install wl-clipboard or xclip)"
 }
 
+copy_text_to_clipboard() {
+    text_value="$1"
+
+    if command -v wl-copy >/dev/null 2>&1; then
+        if printf "%s" "$text_value" | wl-copy >/dev/null 2>&1; then
+            echo "ok|copy-text|$text_value"
+            return 0
+        fi
+    fi
+
+    if command -v xclip >/dev/null 2>&1; then
+        if printf "%s" "$text_value" | xclip -selection clipboard >/dev/null 2>&1; then
+            echo "ok|copy-text|$text_value"
+            return 0
+        fi
+    fi
+
+    error "no clipboard tool found (install wl-clipboard or xclip)"
+}
+
 save_only() {
     image_path="$1"
     target_dir="$HOME/Pictures/Screenshots"
@@ -92,6 +112,11 @@ save_to_path() {
 }
 
 action="${1:-}"
+if [ "$action" = "copy-text" ]; then
+    copy_text_to_clipboard "${2:-}"
+    exit 0
+fi
+
 image_path="$(require_file "${2:-}")"
 destination_path="${3:-}"
 
