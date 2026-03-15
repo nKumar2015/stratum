@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtCore
 import QtQuick.Dialogs
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
@@ -26,6 +27,11 @@ PanelWindow {
     property string statusMessage: ""
     property bool statusError: false
     property var annotationStrokes: []
+    property real imageZoom: 1.0
+    readonly property real minImageZoom: 1.0
+    readonly property real maxImageZoom: 8.0
+    property real imagePanX: 0
+    property real imagePanY: 0
     readonly property real pickerSampleScaleX: colorSampleCanvas.canvasSize.width / Math.max(1, imageDrawSurface.width)
     readonly property real pickerSampleScaleY: colorSampleCanvas.canvasSize.height / Math.max(1, imageDrawSurface.height)
 
@@ -77,6 +83,9 @@ PanelWindow {
         statusMessage = "";
         statusError = false;
         annotationStrokes = [];
+        imageZoom = 1.0;
+        imagePanX = 0;
+        imagePanY = 0;
         paintCanvas.requestPaint();
     }
 
@@ -183,7 +192,6 @@ PanelWindow {
             showStatus("Click image to pick color", false);
             pickerHoverX = 0;
             pickerHoverY = 0;
-            zoomCanvas.requestPaint();
         }
     }
 
@@ -199,12 +207,59 @@ PanelWindow {
         return Math.round(clamp(y * pickerSampleScaleY, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
     }
 
-    function sampleToDisplayX(x) {
-        return clamp(x / Math.max(0.0001, pickerSampleScaleX), 0, Math.max(0, imageDrawSurface.width - 1));
+    function clampPanForZoom(zoomValue, proposedPanX, proposedPanY) {
+        const baseW = Math.max(0, screenshotImage.paintedWidth);
+        const baseH = Math.max(0, screenshotImage.paintedHeight);
+        const scaledW = baseW * zoomValue;
+        const scaledH = baseH * zoomValue;
+
+        let nextPanX = proposedPanX;
+        let nextPanY = proposedPanY;
+
+        if (scaledW <= renderSurface.width)
+            nextPanX = 0;
+        else {
+            const limitX = (scaledW - renderSurface.width) / 2;
+            nextPanX = clamp(nextPanX, -limitX, limitX);
+        }
+
+        if (scaledH <= renderSurface.height)
+            nextPanY = 0;
+        else {
+            const limitY = (scaledH - renderSurface.height) / 2;
+            nextPanY = clamp(nextPanY, -limitY, limitY);
+        }
+
+        return { x: nextPanX, y: nextPanY };
     }
 
-    function sampleToDisplayY(y) {
-        return clamp(y / Math.max(0.0001, pickerSampleScaleY), 0, Math.max(0, imageDrawSurface.height - 1));
+    function setImageZoom(nextZoom, focusX, focusY) {
+        const baseW = Math.max(0, screenshotImage.paintedWidth);
+        const baseH = Math.max(0, screenshotImage.paintedHeight);
+        if (baseW <= 0 || baseH <= 0)
+            return;
+
+        const oldZoom = imageZoom;
+        const clampedZoom = clamp(Number(nextZoom || 1), minImageZoom, maxImageZoom);
+        const fx = (typeof focusX === "number") ? focusX : (renderSurface.width / 2);
+        const fy = (typeof focusY === "number") ? focusY : (renderSurface.height / 2);
+
+        const oldPosX = (renderSurface.width - (baseW * oldZoom)) / 2 + imagePanX;
+        const oldPosY = (renderSurface.height - (baseH * oldZoom)) / 2 + imagePanY;
+        const contentX = (fx - oldPosX) / Math.max(0.0001, oldZoom);
+        const contentY = (fy - oldPosY) / Math.max(0.0001, oldZoom);
+
+        const newPosX = fx - contentX * clampedZoom;
+        const newPosY = fy - contentY * clampedZoom;
+        const centeredPosX = (renderSurface.width - (baseW * clampedZoom)) / 2;
+        const centeredPosY = (renderSurface.height - (baseH * clampedZoom)) / 2;
+        const unclampedPanX = newPosX - centeredPosX;
+        const unclampedPanY = newPosY - centeredPosY;
+        const clampedPan = clampPanForZoom(clampedZoom, unclampedPanX, unclampedPanY);
+
+        imageZoom = clampedZoom;
+        imagePanX = clampedPan.x;
+        imagePanY = clampedPan.y;
     }
 
     function pickColorAt(x, y) {
@@ -602,6 +657,40 @@ PanelWindow {
                         }
                     }
                 }
+
+                Text {
+                    text: "Zoom"
+                    color: Theme.hover
+                    font.family: Theme.font
+                    font.pixelSize: 11
+                    Layout.leftMargin: 8
+                }
+
+                Slider {
+                    id: zoomSlider
+                    Layout.preferredWidth: 170
+                    from: viewer.minImageZoom
+                    to: viewer.maxImageZoom
+                    stepSize: 0.1
+                    value: viewer.minImageZoom
+                    enabled: screenshotImage.status === Image.Ready
+                    onMoved: viewer.setImageZoom(value, renderSurface.width / 2, renderSurface.height / 2)
+                }
+
+                Binding {
+                    target: zoomSlider
+                    property: "value"
+                    value: viewer.imageZoom
+                    when: !zoomSlider.pressed
+                }
+
+                Text {
+                    text: Math.round(viewer.imageZoom * 100) + "%"
+                    color: Theme.text
+                    font.family: Theme.font
+                    font.pixelSize: 11
+                    Layout.preferredWidth: 42
+                }
             }
 
             Item {
@@ -609,6 +698,9 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
+
+                onWidthChanged: viewer.setImageZoom(viewer.imageZoom, width / 2, height / 2)
+                onHeightChanged: viewer.setImageZoom(viewer.imageZoom, width / 2, height / 2)
 
                 Image {
                     id: screenshotImage
@@ -622,11 +714,13 @@ PanelWindow {
                 Item {
                     id: imageDrawSurface
                     visible: screenshotImage.status === Image.Ready
-                    x: screenshotImage.x + (screenshotImage.width - screenshotImage.paintedWidth) / 2
-                    y: screenshotImage.y + (screenshotImage.height - screenshotImage.paintedHeight) / 2
+                    x: (renderSurface.width - (width * viewer.imageZoom)) / 2 + viewer.imagePanX
+                    y: (renderSurface.height - (height * viewer.imageZoom)) / 2 + viewer.imagePanY
                     width: screenshotImage.paintedWidth
                     height: screenshotImage.paintedHeight
                     clip: true
+                    scale: viewer.imageZoom
+                    transformOrigin: Item.TopLeft
 
                     Image {
                         id: drawImageBase
@@ -670,13 +764,31 @@ PanelWindow {
 
                         MouseArea {
                             anchors.fill: parent
-                            cursorShape: viewer.colorPickerActive ? Qt.BlankCursor : Qt.CrossCursor
+                            cursorShape: Qt.CrossCursor
+                            acceptedButtons: Qt.LeftButton
+                            hoverEnabled: true
+
+                            onWheel: function(wheel) {
+                                if (!(wheel.modifiers & Qt.ControlModifier)) {
+                                    wheel.accepted = false;
+                                    return;
+                                }
+
+                                const dy = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.pixelDelta.y;
+                                if (dy === 0) {
+                                    wheel.accepted = true;
+                                    return;
+                                }
+
+                                const zoomStep = dy > 0 ? 0.15 : -0.15;
+                                viewer.setImageZoom(viewer.imageZoom + zoomStep, wheel.x, wheel.y);
+                                wheel.accepted = true;
+                            }
 
                             onPressed: function(mouse) {
                                 if (viewer.colorPickerActive) {
                                     viewer.pickerHoverX = mouse.x;
                                     viewer.pickerHoverY = mouse.y;
-                                    zoomCanvas.requestPaint();
                                     viewer.pickColorAt(mouse.x, mouse.y);
                                     viewer.colorPickerActive = false;
                                     return;
@@ -698,7 +810,6 @@ PanelWindow {
                                 if (viewer.colorPickerActive) {
                                     viewer.pickerHoverX = mouse.x;
                                     viewer.pickerHoverY = mouse.y;
-                                    zoomCanvas.requestPaint();
                                     return;
                                 }
 
@@ -723,8 +834,6 @@ PanelWindow {
                             onReleased: {
                                 paintCanvas.currentStrokeIndex = -1;
                             }
-
-                            hoverEnabled: true
                         }
                     }
 
@@ -747,115 +856,6 @@ PanelWindow {
                             ctx.clearRect(0, 0, cw, ch);
                             ctx.imageSmoothingEnabled = false;
                             ctx.drawImage(drawImageBase, 0, 0, cw, ch);
-                            zoomCanvas.requestPaint();
-                        }
-                    }
-
-                    Rectangle {
-                        id: zoomLens
-                        visible: viewer.colorPickerActive
-                        width: 104
-                        height: 104
-                        radius: 8
-                        border.width: 1
-                        border.color: Theme.activeWs
-                        color: Theme.black
-                        x: viewer.clamp(viewer.pickerHoverX + 18, 0, Math.max(0, imageDrawSurface.width - width))
-                        y: viewer.clamp(viewer.pickerHoverY + 18, 0, Math.max(0, imageDrawSurface.height - height))
-
-                        Canvas {
-                            id: zoomCanvas
-                            anchors.fill: parent
-                            onPaint: {
-                                const ctx = getContext("2d");
-                                ctx.clearRect(0, 0, width, height);
-                                ctx.imageSmoothingEnabled = false;
-                                const sampleCtx = colorSampleCanvas.getContext("2d");
-                                if (!sampleCtx)
-                                    return;
-
-                                const maxW = Math.max(1, Math.round(colorSampleCanvas.canvasSize.width));
-                                const maxH = Math.max(1, Math.round(colorSampleCanvas.canvasSize.height));
-                                const sampleSize = Math.max(1, Math.min(13, maxW, maxH));
-                                const half = Math.floor(sampleSize / 2);
-                                const centerX = viewer.toSampleX(viewer.pickerHoverX);
-                                const centerY = viewer.toSampleY(viewer.pickerHoverY);
-                                const sx = Math.round(viewer.clamp(centerX - half, 0, Math.max(0, maxW - sampleSize)));
-                                const sy = Math.round(viewer.clamp(centerY - half, 0, Math.max(0, maxH - sampleSize)));
-                                let data;
-                                try {
-                                    data = sampleCtx.getImageData(sx, sy, sampleSize, sampleSize).data;
-                                } catch (_error) {
-                                    return;
-                                }
-
-                                if (!data || data.length < sampleSize * sampleSize * 4)
-                                    return;
-
-                                const cellW = Math.max(1, Math.floor(width / sampleSize));
-                                const cellH = Math.max(1, Math.floor(height / sampleSize));
-                                const drawW = cellW * sampleSize;
-                                const drawH = cellH * sampleSize;
-                                const ox = Math.floor((width - drawW) / 2);
-                                const oy = Math.floor((height - drawH) / 2);
-
-                                for (let y = 0; y < sampleSize; y++) {
-                                    for (let x = 0; x < sampleSize; x++) {
-                                        const idx = (y * sampleSize + x) * 4;
-                                        ctx.fillStyle = "rgba(" + data[idx] + "," + data[idx + 1] + "," + data[idx + 2] + "," + (data[idx + 3] / 255) + ")";
-                                        ctx.fillRect(ox + x * cellW, oy + y * cellH, cellW, cellH);
-                                    }
-                                }
-
-                                const targetCellX = viewer.clamp(centerX - sx, 0, sampleSize - 1);
-                                const targetCellY = viewer.clamp(centerY - sy, 0, sampleSize - 1);
-                                const cx = ox + (targetCellX * cellW) + (cellW / 2);
-                                const cy = oy + (targetCellY * cellH) + (cellH / 2);
-                                ctx.strokeStyle = "#ffffff";
-                                ctx.lineWidth = 1;
-                                ctx.beginPath();
-                                ctx.moveTo(cx + 0.5, oy);
-                                ctx.lineTo(cx + 0.5, oy + drawH);
-                                ctx.moveTo(ox, cy + 0.5);
-                                ctx.lineTo(ox + drawW, cy + 0.5);
-                                ctx.stroke();
-                            }
-                        }
-                    }
-
-                    Item {
-                        visible: viewer.colorPickerActive
-                        width: imageDrawSurface.width
-                        height: imageDrawSurface.height
-
-                        readonly property real displayX: viewer.sampleToDisplayX(viewer.toSampleX(viewer.pickerHoverX))
-                        readonly property real displayY: viewer.sampleToDisplayY(viewer.toSampleY(viewer.pickerHoverY))
-
-                        Rectangle {
-                            x: Math.round(parent.displayX)
-                            y: 0
-                            width: 1
-                            height: parent.height
-                            color: "#ffffffff"
-                        }
-
-                        Rectangle {
-                            x: 0
-                            y: Math.round(parent.displayY)
-                            width: parent.width
-                            height: 1
-                            color: "#ffffffff"
-                        }
-
-                        Rectangle {
-                            x: Math.round(parent.displayX) - 4
-                            y: Math.round(parent.displayY) - 4
-                            width: 9
-                            height: 9
-                            radius: 5
-                            color: "transparent"
-                            border.width: 1
-                            border.color: "#ffffffff"
                         }
                     }
                 }
