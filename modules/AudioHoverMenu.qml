@@ -29,9 +29,14 @@ PanelWindow {
     margins.left: 44
     margins.top: {
         const iconY = GlobalState.audioIconY;
-        if (iconY <= 0)
-            return 100;
-        return Math.max(8, Math.round(iconY - implicitHeight / 2));
+        const minTop = 8;
+        const bottomInset = 8;
+        const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2);
+        const screenHeight = hoverMenu.screen ? hoverMenu.screen.height : 0;
+        if (screenHeight <= 0)
+            return Math.max(minTop, desiredTop);
+        const maxTop = Math.max(minTop, screenHeight - implicitHeight - bottomInset);
+        return Math.max(minTop, Math.min(desiredTop, maxTop));
     }
 
     exclusiveZone: -1
@@ -510,7 +515,8 @@ PanelWindow {
                     required property var modelData
 
                     Layout.fillWidth: true
-                    height: 34
+                    Layout.topMargin: index === 0 ? 0 : -6
+                    height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultOutput
                     color: outputHover.containsMouse ? Theme.grey : "transparent"
@@ -583,7 +589,8 @@ PanelWindow {
                     required property var modelData
 
                     Layout.fillWidth: true
-                    height: 34
+                    Layout.topMargin: index === 0 ? 0 : -6
+                    height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultInput
                     color: inputHover.containsMouse ? Theme.grey : "transparent"

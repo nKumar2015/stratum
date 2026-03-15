@@ -29,9 +29,14 @@ PanelWindow {
     margins.left: 44
     margins.top: {
         const iconY = GlobalState.wifiIconY;
-        if (iconY <= 0)
-            return 100;
-        return Math.max(8, Math.round(iconY - implicitHeight / 2));
+        const minTop = 8;
+        const bottomInset = 8;
+        const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2);
+        const screenHeight = hoverMenu.screen ? hoverMenu.screen.height : 0;
+        if (screenHeight <= 0)
+            return Math.max(minTop, desiredTop);
+        const maxTop = Math.max(minTop, screenHeight - implicitHeight - bottomInset);
+        return Math.max(minTop, Math.min(desiredTop, maxTop));
     }
 
     exclusiveZone: -1
