@@ -11,6 +11,7 @@ PanelWindow {
 
     property bool visibleState: false
     property bool isCapturing: false
+    property bool suppressOverlayVisuals: false
     property bool freezeReady: false
     property string freezeFramePath: ""
     property string pendingCommand: ""
@@ -142,6 +143,7 @@ PanelWindow {
 
     function openToolbar() {
         visibleState = true;
+        suppressOverlayVisuals = false;
         freezeReady = false;
         freezeFramePath = "";
         resetSelectionState();
@@ -151,6 +153,7 @@ PanelWindow {
 
     function closeToolbar() {
         visibleState = false;
+        suppressOverlayVisuals = false;
         freezeReady = false;
         if (!isCapturing) {
             pendingMode = "";
@@ -170,7 +173,7 @@ PanelWindow {
         pendingCommand = chosenCommand;
         pendingMode = chosenMode;
         pendingGeometry = chosenGeometry;
-        visibleState = false;
+        suppressOverlayVisuals = true;
         delayedCaptureTimer.restart();
     }
 
@@ -212,7 +215,7 @@ PanelWindow {
 
     Timer {
         id: delayedCaptureTimer
-        interval: 160
+        interval: 120
         repeat: false
         onTriggered: {
             const nextCommand = toolbar.pendingCommand;
@@ -225,6 +228,8 @@ PanelWindow {
             toolbar.pendingMode = "";
             toolbar.pendingGeometry = "";
             toolbar.isCapturing = true;
+            toolbar.freezeReady = false;
+            toolbar.resetSelectionState();
 
             if (nextCommand === "capture-geometry")
                 captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-geometry", nextGeometry, nextMode];
@@ -238,10 +243,10 @@ PanelWindow {
     Timer {
         id: hoverPollTimer
         interval: 45
-        running: toolbar.visibleState && toolbar.freezeReady && !toolbar.pointerDown && !toolbar.dragActive
+        running: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.pointerDown && !toolbar.dragActive
         repeat: true
         onTriggered: {
-            if (!toolbar.visibleState || !toolbar.freezeReady || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
+            if (!toolbar.visibleState || toolbar.suppressOverlayVisuals || !toolbar.freezeReady || toolbar.pointerDown || toolbar.dragActive || windowAtProc.running)
                 return;
 
             windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(Math.round(pointerArea.mouseX)), String(Math.round(pointerArea.mouseY))];
@@ -255,10 +260,12 @@ PanelWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 toolbar.isCapturing = false;
+                toolbar.suppressOverlayVisuals = false;
                 const result = this.text.trim();
 
                 if (!result) {
                     toolbar.visibleState = true;
+                    toolbar.freezeReady = true;
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
@@ -272,6 +279,7 @@ PanelWindow {
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
                     toolbar.visibleState = true;
+                    toolbar.freezeReady = true;
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
@@ -285,6 +293,7 @@ PanelWindow {
                 const parts = result.split("|");
                 if (parts.length < 4 || parts[0] !== "ok") {
                     toolbar.visibleState = true;
+                    toolbar.freezeReady = true;
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
@@ -299,6 +308,7 @@ PanelWindow {
                 const captureMode = parts[2] || "fullscreen";
                 if (!imagePath) {
                     toolbar.visibleState = true;
+                    toolbar.freezeReady = true;
                     GlobalState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
@@ -368,6 +378,7 @@ PanelWindow {
 
                 toolbar.freezeFramePath = parts[1] || "";
                 toolbar.freezeReady = toolbar.freezeFramePath.length > 0;
+                toolbar.suppressOverlayVisuals = false;
             }
         }
     }
@@ -412,7 +423,7 @@ PanelWindow {
     MouseArea {
         id: pointerArea
         anchors.fill: parent
-        enabled: toolbar.visibleState && !toolbar.isCapturing
+        enabled: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.isCapturing
         hoverEnabled: true
         cursorShape: Qt.BlankCursor
 
@@ -454,7 +465,7 @@ PanelWindow {
 
     Image {
         anchors.fill: parent
-        visible: toolbar.visibleState && toolbar.freezeReady && toolbar.freezeFramePath.length > 0
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && toolbar.freezeFramePath.length > 0
         source: toolbar.toFileUrl(toolbar.freezeFramePath)
         fillMode: Image.Stretch
         sourceSize.width: Math.max(1, Math.round(width * Screen.devicePixelRatio))
@@ -464,7 +475,7 @@ PanelWindow {
     }
 
     Rectangle {
-        visible: toolbar.visibleState && !toolbar.dragActive && toolbar.hoverWindowGeometry.length > 0
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.dragActive && toolbar.hoverWindowGeometry.length > 0
         x: toolbar.hoverWindowX
         y: toolbar.hoverWindowY
         width: toolbar.hoverWindowW
@@ -476,7 +487,7 @@ PanelWindow {
     }
 
     Rectangle {
-        visible: toolbar.visibleState && toolbar.dragActive
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.dragActive
         x: toolbar.dragX
         y: toolbar.dragY
         width: toolbar.dragW
