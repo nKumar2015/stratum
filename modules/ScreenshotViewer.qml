@@ -115,6 +115,16 @@ PanelWindow {
         paintCanvas.requestPaint();
     }
 
+    function undoLastAnnotation() {
+        const strokes = viewer.annotationStrokes || [];
+        if (!strokes.length)
+            return;
+
+        annotationStrokes = strokes.slice(0, strokes.length - 1);
+        paintCanvas.currentStrokeIndex = -1;
+        paintCanvas.requestPaint();
+    }
+
     function hasAnnotations() {
         return (annotationStrokes || []).length > 0;
     }
@@ -353,6 +363,14 @@ PanelWindow {
         onActivated: {
             if (viewer.visibleState)
                 viewer.closeViewer();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Z"
+        onActivated: {
+            if (viewer.visibleState && !viewer.isWorking)
+                viewer.undoLastAnnotation();
         }
     }
 
