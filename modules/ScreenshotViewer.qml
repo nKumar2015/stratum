@@ -32,6 +32,9 @@ PanelWindow {
     readonly property real maxImageZoom: 8.0
     property real imagePanX: 0
     property real imagePanY: 0
+    property bool panActive: false
+    property real panLastSurfaceX: 0
+    property real panLastSurfaceY: 0
     readonly property real pickerSampleScaleX: colorSampleCanvas.canvasSize.width / Math.max(1, imageDrawSurface.width)
     readonly property real pickerSampleScaleY: colorSampleCanvas.canvasSize.height / Math.max(1, imageDrawSurface.height)
 
@@ -86,12 +89,14 @@ PanelWindow {
         imageZoom = 1.0;
         imagePanX = 0;
         imagePanY = 0;
+        panActive = false;
         paintCanvas.requestPaint();
     }
 
     function closeViewer() {
         visibleState = false;
         colorPickerActive = false;
+        panActive = false;
         statusMessage = "";
         statusError = false;
         isWorking = false;
@@ -207,6 +212,10 @@ PanelWindow {
         return Math.round(clamp(y * pickerSampleScaleY, 0, Math.max(0, colorSampleCanvas.canvasSize.height - 1)));
     }
 
+    function mapPaintToSurface(paintItem, x, y) {
+        return paintItem.mapToItem(renderSurface, x, y);
+    }
+
     function clampPanForZoom(zoomValue, proposedPanX, proposedPanY) {
         const baseW = Math.max(0, screenshotImage.paintedWidth);
         const baseH = Math.max(0, screenshotImage.paintedHeight);
@@ -262,13 +271,42 @@ PanelWindow {
         imagePanY = clampedPan.y;
     }
 
+    function startPan(surfaceX, surfaceY) {
+        panActive = true;
+        panLastSurfaceX = surfaceX;
+        panLastSurfaceY = surfaceY;
+    }
+
+    function updatePan(surfaceX, surfaceY) {
+        if (!panActive)
+            return;
+
+        const dx = surfaceX - panLastSurfaceX;
+        const dy = surfaceY - panLastSurfaceY;
+        panLastSurfaceX = surfaceX;
+        panLastSurfaceY = surfaceY;
+
+        const clampedPan = clampPanForZoom(imageZoom, imagePanX + dx, imagePanY + dy);
+        imagePanX = clampedPan.x;
+        imagePanY = clampedPan.y;
+    }
+
+    function stopPan() {
+        panActive = false;
+    }
+
     function pickColorAt(x, y) {
-        colorSampleCanvas.requestPaint();
         const sx = toSampleX(x);
         const sy = toSampleY(y);
         const ctx = colorSampleCanvas.getContext("2d");
         if (!ctx)
             return;
+
+        const cw = colorSampleCanvas.canvasSize.width;
+        const ch = colorSampleCanvas.canvasSize.height;
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(drawImageBase, 0, 0, cw, ch);
 
         let px;
         try {
@@ -765,7 +803,7 @@ PanelWindow {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.CrossCursor
-                            acceptedButtons: Qt.LeftButton
+                            acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                             hoverEnabled: true
 
                             onWheel: function(wheel) {
@@ -780,16 +818,29 @@ PanelWindow {
                                     return;
                                 }
 
+                                const surfacePos = viewer.mapPaintToSurface(this, wheel.x, wheel.y);
                                 const zoomStep = dy > 0 ? 0.15 : -0.15;
-                                viewer.setImageZoom(viewer.imageZoom + zoomStep, wheel.x, wheel.y);
+                                viewer.setImageZoom(viewer.imageZoom + zoomStep, surfacePos.x, surfacePos.y);
                                 wheel.accepted = true;
                             }
 
                             onPressed: function(mouse) {
+                                const surfacePos = viewer.mapPaintToSurface(this, mouse.x, mouse.y);
+                                const imagePos = {
+                                    x: viewer.clamp(mouse.x, 0, Math.max(0, imageDrawSurface.width - 1)),
+                                    y: viewer.clamp(mouse.y, 0, Math.max(0, imageDrawSurface.height - 1))
+                                };
+
+                                if (mouse.button === Qt.MiddleButton || ((mouse.modifiers & Qt.ControlModifier) && !viewer.colorPickerActive)) {
+                                    viewer.startPan(surfacePos.x, surfacePos.y);
+                                    paintCanvas.currentStrokeIndex = -1;
+                                    return;
+                                }
+
                                 if (viewer.colorPickerActive) {
-                                    viewer.pickerHoverX = mouse.x;
-                                    viewer.pickerHoverY = mouse.y;
-                                    viewer.pickColorAt(mouse.x, mouse.y);
+                                    viewer.pickerHoverX = imagePos.x;
+                                    viewer.pickerHoverY = imagePos.y;
+                                    viewer.pickColorAt(imagePos.x, imagePos.y);
                                     viewer.colorPickerActive = false;
                                     return;
                                 }
@@ -798,7 +849,7 @@ PanelWindow {
                                 const stroke = {
                                     color: viewer.colorToHex(viewer.annotationColor),
                                     size: viewer.penSize,
-                                    points: [{ x: mouse.x, y: mouse.y }]
+                                    points: [{ x: imagePos.x, y: imagePos.y }]
                                 };
                                 strokes.push(stroke);
                                 viewer.annotationStrokes = strokes;
@@ -807,9 +858,20 @@ PanelWindow {
                             }
 
                             onPositionChanged: function(mouse) {
+                                const surfacePos = viewer.mapPaintToSurface(this, mouse.x, mouse.y);
+                                const imagePos = {
+                                    x: viewer.clamp(mouse.x, 0, Math.max(0, imageDrawSurface.width - 1)),
+                                    y: viewer.clamp(mouse.y, 0, Math.max(0, imageDrawSurface.height - 1))
+                                };
+
+                                if (viewer.panActive) {
+                                    viewer.updatePan(surfacePos.x, surfacePos.y);
+                                    return;
+                                }
+
                                 if (viewer.colorPickerActive) {
-                                    viewer.pickerHoverX = mouse.x;
-                                    viewer.pickerHoverY = mouse.y;
+                                    viewer.pickerHoverX = imagePos.x;
+                                    viewer.pickerHoverY = imagePos.y;
                                     return;
                                 }
 
@@ -825,13 +887,23 @@ PanelWindow {
                                 if (!stroke || !stroke.points)
                                     return;
 
-                                stroke.points.push({ x: mouse.x, y: mouse.y });
+                                stroke.points.push({ x: imagePos.x, y: imagePos.y });
                                 strokes[idx] = stroke;
                                 viewer.annotationStrokes = strokes;
                                 paintCanvas.requestPaint();
                             }
 
                             onReleased: {
+                                if (viewer.panActive) {
+                                    viewer.stopPan();
+                                    paintCanvas.currentStrokeIndex = -1;
+                                    return;
+                                }
+                                paintCanvas.currentStrokeIndex = -1;
+                            }
+
+                            onCanceled: {
+                                viewer.stopPan();
                                 paintCanvas.currentStrokeIndex = -1;
                             }
                         }
