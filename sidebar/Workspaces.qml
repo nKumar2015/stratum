@@ -70,11 +70,12 @@ Item {
                 property int wsId: Number(modelData)
                 property var ws: Hyprland.workspaces.values.find(w => w.id === wsId)
                 property bool isActive: wsRoot.monitor?.activeWorkspace?.id === wsId
+                property bool hasOpenWindows: (ws?.toplevels?.values?.length || 0) > 0
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredHeight: 20
 
                 text: wsId
-                color: isActive ? Theme.activeWs : (ws ? Theme.defaultWs : Theme.inactiveWs)
+                color: isActive ? Theme.activeWs : (hasOpenWindows ? Theme.defaultWs : Theme.inactiveWs)
                 font {
                     pixelSize: 15
                     bold: true
