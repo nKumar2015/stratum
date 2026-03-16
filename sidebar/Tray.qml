@@ -117,66 +117,67 @@ Flow {
             }
         }
     }
+    ColumnLayout {
+        Repeater {
+            model: SystemTray.items
 
-    Repeater {
-        model: SystemTray.items
+            delegate: Rectangle {
+                id: trayIconWrap
+                required property var modelData
 
-        delegate: Rectangle {
-            id: trayIconWrap
-            required property var modelData
+                implicitWidth: 24
+                implicitHeight: 24
+                color: mouseArea.containsMouse ? "#313244" : "transparent"
+                radius: 4
 
-            implicitWidth: 24
-            implicitHeight: 24
-            color: mouseArea.containsMouse ? "#313244" : "transparent"
-            radius: 4
-
-            // Replaced QtQuick Image with Quickshell IconImage
-            IconImage {
-                anchors.centerIn: parent
-                implicitWidth: 18
-                implicitHeight: 18
-                source: modelData.icon ? modelData.icon : Quickshell.iconPath(modelData.id, "application-x-executable")
-            }
-
-            MouseArea {
-                id: mouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                onContainsMouseChanged: {
-                    if (menuOpener.menu === modelData.menu) {
-                        customMenu.sourceIconHovered = containsMouse;
-
-                        if (!containsMouse && customMenu.visible) {
-                            customMenu.checkHoverStatus();
-                        }
-                    }
+                // Replaced QtQuick Image with Quickshell IconImage
+                IconImage {
+                    anchors.centerIn: parent
+                    implicitWidth: 18
+                    implicitHeight: 18
+                    source: modelData.icon ? modelData.icon : Quickshell.iconPath(modelData.id, "application-x-executable")
                 }
 
-                onClicked: mouse => {
-                    if (mouse.button === Qt.LeftButton) {
-                        modelData.activate();
-                    } else if (mouse.button === Qt.RightButton) {
-                        if (modelData.hasMenu) {
-                            menuOpener.menu = modelData.menu;
-                            customMenu.sourceIconHovered = true;
-                            let parentWindow = trayRoot.panelWindow;
+                MouseArea {
+                    id: mouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                            if (parentWindow) {
-                                customMenu.anchor.window = parentWindow;
-                                let baseRect = parentWindow.itemRect(trayIconWrap);
-                                let shiftX = 10;
-                                customMenu.anchor.rect = Qt.rect(baseRect.x + shiftX, baseRect.y, baseRect.width, baseRect.height);
-                                customMenu.anchor.edges = Edges.Right;
-                                customMenu.anchor.gravity = Edges.Right;
-                                customMenu.visible = true;
-                            } else {
-                                console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.");
+                    onContainsMouseChanged: {
+                        if (menuOpener.menu === modelData.menu) {
+                            customMenu.sourceIconHovered = containsMouse;
+
+                            if (!containsMouse && customMenu.visible) {
+                                customMenu.checkHoverStatus();
                             }
-                        } else {
-                            // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
-                            modelData.secondaryActivate();
+                        }
+                    }
+
+                    onClicked: mouse => {
+                        if (mouse.button === Qt.LeftButton) {
+                            modelData.activate();
+                        } else if (mouse.button === Qt.RightButton) {
+                            if (modelData.hasMenu) {
+                                menuOpener.menu = modelData.menu;
+                                customMenu.sourceIconHovered = true;
+                                let parentWindow = trayRoot.panelWindow;
+
+                                if (parentWindow) {
+                                    customMenu.anchor.window = parentWindow;
+                                    let baseRect = parentWindow.itemRect(trayIconWrap);
+                                    let shiftX = 10;
+                                    customMenu.anchor.rect = Qt.rect(baseRect.x + shiftX, baseRect.y, baseRect.width, baseRect.height);
+                                    customMenu.anchor.edges = Edges.Right;
+                                    customMenu.anchor.gravity = Edges.Right;
+                                    customMenu.visible = true;
+                                } else {
+                                    console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.");
+                                }
+                            } else {
+                                // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
+                                modelData.secondaryActivate();
+                            }
                         }
                     }
                 }
