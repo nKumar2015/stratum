@@ -775,6 +775,22 @@ PanelWindow {
                                         font.pixelSize: 10
                                         font.bold: true
                                     }
+
+                                    Text {
+                                        text: "|"
+                                        color: Theme.inactiveWs
+                                        font.family: Theme.font
+                                        font.pixelSize: 10
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: dashboard.gpuSource
+                                        color: Theme.inactiveWs
+                                        font.family: Theme.font
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                    }
                                 }
 
                                 Text {
@@ -783,13 +799,6 @@ PanelWindow {
                                     font.family: Theme.font
                                     font.pixelSize: 17
                                     font.bold: true
-                                }
-
-                                Text {
-                                    text: dashboard.gpuSource
-                                    color: Theme.inactiveWs
-                                    font.family: Theme.font
-                                    font.pixelSize: 9
                                 }
 
                                 Rectangle {
