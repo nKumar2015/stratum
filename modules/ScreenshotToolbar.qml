@@ -563,23 +563,43 @@ PanelWindow {
         cursorShape: Qt.BlankCursor
     }
 
+    // Crosshair white outline – vertical
     Rectangle {
         visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
-        x: Math.round(pointerArea.mouseX)
-        y: Math.round(pointerArea.mouseY - 8)
-        width: 1
-        height: 17
-        color: "#cce6f8ff"
-        opacity: 0.9
+        x: Math.round(pointerArea.mouseX) - 2
+        y: Math.round(pointerArea.mouseY) - 11
+        width: 5
+        height: 23
+        color: "white"
     }
 
+    // Crosshair white outline – horizontal
     Rectangle {
         visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
-        x: Math.round(pointerArea.mouseX - 8)
-        y: Math.round(pointerArea.mouseY)
-        width: 17
-        height: 1
-        color: "#cce6f8ff"
-        opacity: 0.9
+        x: Math.round(pointerArea.mouseX) - 11
+        y: Math.round(pointerArea.mouseY) - 2
+        width: 23
+        height: 5
+        color: "white"
+    }
+
+    // Crosshair black fill – vertical
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
+        x: Math.round(pointerArea.mouseX) - 1
+        y: Math.round(pointerArea.mouseY) - 10
+        width: 3
+        height: 21
+        color: "black"
+    }
+
+    // Crosshair black fill – horizontal
+    Rectangle {
+        visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && !toolbar.hideCursorForCapture && !toolbar.isCapturing && pointerArea.containsMouse
+        x: Math.round(pointerArea.mouseX) - 10
+        y: Math.round(pointerArea.mouseY) - 1
+        width: 21
+        height: 3
+        color: "black"
     }
 }
