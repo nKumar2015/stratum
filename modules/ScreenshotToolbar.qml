@@ -516,8 +516,8 @@ PanelWindow {
         visible: toolbar.visibleState && !toolbar.suppressOverlayVisuals && toolbar.freezeReady && toolbar.freezeFramePath.length > 0
         source: toolbar.toFileUrl(toolbar.freezeFramePath)
         fillMode: Image.Stretch
-        sourceSize.width: Math.max(1, Math.round(width * Screen.devicePixelRatio))
-        sourceSize.height: Math.max(1, Math.round(height * Screen.devicePixelRatio))
+        sourceSize.width: Math.max(1, Math.round(width))
+        sourceSize.height: Math.max(1, Math.round(height))
         smooth: false
         cache: false
     }
