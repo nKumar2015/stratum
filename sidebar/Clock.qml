@@ -59,6 +59,7 @@ ColumnLayout {
 
     MouseArea {
         id: batteryHover
+        anchors.fill: parent
         hoverEnabled: true
         onClicked: GlobalState.showDashboardMenu = true
     }
