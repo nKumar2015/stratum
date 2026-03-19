@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "../theme"
+import "../globals"
 
 ColumnLayout {
     id: clockRoot
@@ -54,5 +55,11 @@ ColumnLayout {
             bold: false
             family: Theme.font
         }
+    }
+
+    MouseArea {
+        id: batteryHover
+        hoverEnabled: true
+        onClicked: GlobalState.showDashboardMenu = true
     }
 }
