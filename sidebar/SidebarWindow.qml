@@ -44,7 +44,7 @@ PanelWindow {
 
             Text {
                 text: ""
-                color: Theme.defaultWs
+                color: Theme.surfaceCon_tainerHighest
                 font.pixelSize: 20
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -68,9 +68,9 @@ PanelWindow {
                 Layout.preferredWidth: 30
                 Layout.preferredHeight: 86
                 radius: 15
-                color: Theme.black
+                color: Theme.surfaceCon_tainerLowest
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 ColumnLayout {
                     anchors.fill: parent

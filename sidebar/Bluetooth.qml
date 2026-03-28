@@ -61,7 +61,7 @@ Item {
     Text {
         anchors.centerIn: parent
         text: root.icon
-        color: bluetoothHover.containsMouse ? Theme.blue : Theme.text
+        color: bluetoothHover.containsMouse ? Theme.primary : Theme.on_Surface
         font.pixelSize: 20
 
         Behavior on color {

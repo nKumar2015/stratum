@@ -148,7 +148,7 @@ PanelWindow {
         radius: 12
         color: Theme.background
         border.width: 1
-        border.color: Theme.notificationBorder
+        border.color: Theme.outlineVariant
         visible: GlobalState.showNotificationCenter
 
         HoverHandler {
@@ -177,7 +177,7 @@ PanelWindow {
 
                 Text {
                     text: "Notifications"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.pixelSize: 14
                     font.bold: true
                     font.family: Theme.font
@@ -188,14 +188,14 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: GlobalState.doNotDisturb ? Theme.notificationCritical : Theme.black
+                    color: GlobalState.doNotDisturb ? Theme.error : Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: GlobalState.doNotDisturb ? Theme.notificationCritical : Theme.grey
+                    border.color: GlobalState.doNotDisturb ? Theme.error : Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: GlobalState.doNotDisturb ? "󰂛" : "󰂚"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.font
@@ -211,14 +211,14 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.black
+                    color: Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰄬"
-                        color: Theme.white
+                        color: Theme.on_Surface
                         font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.font
@@ -234,14 +234,14 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.black
+                    color: Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰃢"
-                        color: Theme.white
+                        color: Theme.on_Surface
                         font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.font
@@ -257,14 +257,14 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.black
+                    color: Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰅖"
-                        color: Theme.white
+                        color: Theme.on_Surface
                         font.pixelSize: 13
                         font.bold: true
                         font.family: Theme.font
@@ -286,7 +286,7 @@ PanelWindow {
                 color: Theme.background
                 radius: 10
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 Flickable {
                     id: listFlick

@@ -449,7 +449,7 @@ PanelWindow {
         radius: 14
         color: Theme.background
         border.width: 1
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         visible: viewer.visibleState
 
         MouseArea {
@@ -469,7 +469,7 @@ PanelWindow {
 
                 Text {
                     text: "Screenshot Viewer"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 14
                     font.bold: true
@@ -477,7 +477,7 @@ PanelWindow {
 
                 Text {
                     text: "Mode: " + viewer.captureMode
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
@@ -491,14 +491,14 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.black
+                    color: Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰃢"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 14
                         font.bold: true
@@ -515,14 +515,14 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.hover : Theme.activeWs
+                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
                     border.width: 1
-                    border.color: Theme.activeWs
+                    border.color: Theme.primary
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰆏"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 14
                         font.bold: true
@@ -539,14 +539,14 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.hover : Theme.activeWs
+                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
                     border.width: 1
-                    border.color: Theme.activeWs
+                    border.color: Theme.primary
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰆓"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 14
                         font.bold: true
@@ -563,14 +563,14 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.hover : Theme.activeWs
+                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
                     border.width: 1
-                    border.color: Theme.activeWs
+                    border.color: Theme.primary
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰉋"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 14
                         font.bold: true
@@ -587,14 +587,14 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.black
+                    color: Theme.surfaceCon_tainerLowest
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰅖"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 14
                         font.bold: true
@@ -614,7 +614,7 @@ PanelWindow {
 
                 Text {
                     text: "Annotation color"
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -628,7 +628,7 @@ PanelWindow {
                         radius: 10
                         color: modelData
                         border.width: viewer.annotationColor == modelData ? 2 : 1
-                        border.color: viewer.annotationColor == modelData ? Theme.activeWs : Theme.grey
+                        border.color: viewer.annotationColor == modelData ? Theme.primary : Theme.outlineVariant
 
                         MouseArea {
                             anchors.fill: parent
@@ -643,7 +643,7 @@ PanelWindow {
 
                 Text {
                     text: "Pen"
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -667,7 +667,7 @@ PanelWindow {
 
                 Text {
                     text: String(viewer.penSize)
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.preferredWidth: 18
@@ -675,7 +675,7 @@ PanelWindow {
 
                 Text {
                     text: "Zoom"
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
@@ -701,7 +701,7 @@ PanelWindow {
 
                 Text {
                     text: Math.round(viewer.imageZoom * 100) + "%"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.preferredWidth: 42
@@ -878,7 +878,7 @@ PanelWindow {
                 Text {
                     anchors.centerIn: parent
                     text: viewer.statusMessage
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     font.bold: true

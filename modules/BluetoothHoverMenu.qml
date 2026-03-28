@@ -176,7 +176,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.background
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
         radius: 10
 
@@ -201,7 +201,7 @@ PanelWindow {
 
                 Text {
                     text: "󰂯  Quick Connect"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 13
                     font.bold: true
@@ -213,7 +213,7 @@ PanelWindow {
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.red : Theme.text
+                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
                     font.pixelSize: 13
                     font.family: Theme.font
 
@@ -235,14 +235,14 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             // ── Status line (shown only when non-empty) ─────────────────
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.blue
+                color: Theme.primary
                 font.pixelSize: 11
                 font.family: Theme.font
                 Layout.fillWidth: true
@@ -253,7 +253,7 @@ PanelWindow {
             Text {
                 visible: hoverMenu.loading && hoverMenu.devices.length === 0
                 text: "Loading..."
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -263,7 +263,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.devices.length === 0 && hoverMenu.statusMsg.length === 0
                 text: "No paired devices"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -279,7 +279,7 @@ PanelWindow {
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: rowHover.containsMouse ? Theme.grey : "transparent"
+                    color: rowHover.containsMouse ? Theme.outlineVariant : "transparent"
 
                     property bool isConnected: modelData.connected === "yes"
                     property bool isPending: hoverMenu.pendingMac === modelData.mac
@@ -292,14 +292,14 @@ PanelWindow {
 
                         Text {
                             text: isConnected ? "󰂱" : "󰂯"
-                            color: isConnected ? Theme.blue : Theme.text
+                            color: isConnected ? Theme.primary : Theme.on_Surface
                             font.pixelSize: 15
                             font.family: Theme.font
                         }
 
                         Text {
                             text: modelData.name
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 12
                             font.family: Theme.font
                             elide: Text.ElideRight
@@ -310,9 +310,9 @@ PanelWindow {
                             text: isPending ? "󰔟" : (isConnected ? "●" : "○")
                             color: {
                                 if (isPending)
-                                    return Theme.yellow;
+                                    return Theme.tertiary;
                                 if (isConnected)
-                                    return Theme.green;
+                                    return Theme.secondary;
                                 return "#5c6370";
                             }
                             font.pixelSize: isPending ? 14 : 10
@@ -340,7 +340,7 @@ PanelWindow {
             Text {
                 visible: hoverMenu.devices.length > 6
                 text: "+" + (hoverMenu.devices.length - 6) + " more in full settings"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 11
                 font.family: Theme.font
@@ -349,13 +349,13 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             // ── Footer: open full settings ───────────────────────────────
             Text {
                 text: "Open full settings →"
-                color: fullMenuHover.containsMouse ? Theme.blue : Theme.text
+                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
                 font.pixelSize: 11
                 font.family: Theme.font
                 opacity: fullMenuHover.containsMouse ? 1.0 : 0.6

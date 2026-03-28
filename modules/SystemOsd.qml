@@ -192,7 +192,7 @@ PanelWindow {
         opacity: osd.osdOpacity
         radius: 12
         color: Qt.rgba(0.07, 0.07, 0.11, 0.95)
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
 
         ColumnLayout {
@@ -206,14 +206,14 @@ PanelWindow {
 
                 Text {
                     text: osd.iconGlyph
-                    color: Theme.activeWs
+                    color: Theme.primary
                     font.pixelSize: 22
                     font.family: Theme.font
                 }
 
                 Text {
                     text: osd.titleText
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.pixelSize: 13
                     font.bold: true
                     font.family: Theme.font
@@ -222,7 +222,7 @@ PanelWindow {
 
                 Text {
                     text: osd.valueText
-                    color: osd.channel === "brightness" ? Theme.yellow : Theme.blue
+                    color: osd.channel === "brightness" ? Theme.tertiary : Theme.primary
                     font.pixelSize: 12
                     font.bold: true
                     font.family: Theme.font
@@ -233,13 +233,13 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 9
                 radius: 5
-                color: Theme.black
+                color: Theme.surfaceCon_tainerLowest
 
                 Rectangle {
                     width: parent.width * osd.progressRatio
                     height: parent.height
                     radius: parent.radius
-                    color: osd.channel === "brightness" ? Theme.yellow : Theme.activeWs
+                    color: osd.channel === "brightness" ? Theme.tertiary : Theme.primary
 
                     Behavior on width {
                         NumberAnimation {

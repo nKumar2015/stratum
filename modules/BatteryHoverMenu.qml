@@ -97,10 +97,10 @@ PanelWindow {
 
     function projectedColor() {
         if (batteryState === "fully-charged")
-            return Theme.green;
+            return Theme.secondary;
         if (batteryState === "pending-charge")
-            return Theme.yellow;
-        return Theme.text;
+            return Theme.tertiary;
+        return Theme.on_Surface;
     }
 
     function loadStatus() {
@@ -213,7 +213,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.background
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
         radius: 10
 
@@ -233,7 +233,7 @@ PanelWindow {
 
                 Text {
                     text: "󰂄  Battery"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 13
                     font.bold: true
@@ -243,7 +243,7 @@ PanelWindow {
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.red : Theme.text
+                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
                     font.pixelSize: 13
                     font.family: Theme.font
 
@@ -265,7 +265,7 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             RowLayout {
@@ -273,7 +273,7 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.stateText() + " · " + hoverMenu.batteryPct + "%"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.pixelSize: 12
                     font.family: Theme.font
                     font.bold: true
@@ -284,7 +284,7 @@ PanelWindow {
                 Text {
                     text: hoverMenu.loading ? "Loading..." : ""
                     visible: hoverMenu.loading
-                    color: Theme.text
+                    color: Theme.on_Surface
                     opacity: 0.5
                     font.pixelSize: 11
                     font.family: Theme.font
@@ -297,7 +297,7 @@ PanelWindow {
 
                 Text {
                     text: "Screen On"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     opacity: 0.6
                     font.pixelSize: 11
                     font.bold: true
@@ -308,7 +308,7 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.screenOnTime
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.pixelSize: 11
                     font.family: Theme.font
                 }
@@ -320,7 +320,7 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.projectedLabel()
-                    color: Theme.text
+                    color: Theme.on_Surface
                     opacity: 0.6
                     font.pixelSize: 11
                     font.bold: true
@@ -353,7 +353,7 @@ PanelWindow {
 
                 Text {
                     text: "󱐋  Rate"
-                    color: Theme.green
+                    color: Theme.secondary
                     opacity: 0.85
                     font.pixelSize: 11
                     font.bold: true
@@ -364,7 +364,7 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.chargingInfo
-                    color: Theme.green
+                    color: Theme.secondary
                     font.pixelSize: 11
                     font.bold: true
                     font.family: Theme.font
@@ -374,13 +374,13 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
                 opacity: 0.7
             }
 
             Text {
                 text: "Power Mode"
-                color: Theme.text
+                color: Theme.on_Surface
                 font.pixelSize: 11
                 font.bold: true
                 font.family: Theme.font
@@ -405,14 +405,14 @@ PanelWindow {
                         Layout.fillWidth: true
                         height: 30
                         radius: 6
-                        color: selected ? Theme.activeWs : (modeHover.containsMouse ? Theme.grey : Theme.black)
+                        color: selected ? Theme.primary : (modeHover.containsMouse ? Theme.outlineVariant : Theme.surfaceCon_tainerLowest)
                         border.width: 1
-                        border.color: selected ? Theme.activeWs : Theme.grey
+                        border.color: selected ? Theme.primary : Theme.outlineVariant
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.label
-                            color: selected ? Theme.black : Theme.text
+                            color: selected ? Theme.surfaceCon_tainerLowest : Theme.on_Surface
                             font.pixelSize: 10
                             font.family: Theme.font
                             font.bold: true
@@ -433,7 +433,7 @@ PanelWindow {
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.blue
+                color: Theme.primary
                 font.pixelSize: 11
                 font.family: Theme.font
                 opacity: 0.9

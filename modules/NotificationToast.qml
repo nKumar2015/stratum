@@ -32,7 +32,9 @@ Item {
     readonly property bool visualLoading: hasImageSource && visualImage.status === Image.Loading
     readonly property bool visualReady: (hasImageSource && visualImage.status === Image.Ready) || (!hasImageSource && hasAppIconSource)
     readonly property string iconGlyph: urgency >= 2 ? "" : (urgency <= 0 ? "" : "")
-    readonly property color accentColor: urgency >= 2 ? Theme.notificationCritical : (urgency <= 0 ? Theme.notificationLow : Theme.notificationNormal)
+    readonly property color accentColor: urgency >= 2 ? Theme.error : (urgency <= 0 ? Theme.tertiary : Theme.primary)
+    readonly property color accentContainerColor: urgency >= 2 ? Theme.errorCon_tainer : (urgency <= 0 ? Theme.tertiaryCon_tainer : Theme.primaryCon_tainer)
+    readonly property color onAccentContainerColor: urgency >= 2 ? Theme.on_ErrorContainer : (urgency <= 0 ? Theme.on_TertiaryContainer : Theme.on_PrimaryContainer)
     readonly property string inlineReplyPreviewText: String(notification.lastInlineReplyText || "")
     readonly property var interactiveActions: {
         const actions = notification.actions || [];
@@ -82,12 +84,12 @@ Item {
         id: bg
         anchors.fill: parent
         topLeftRadius: 0
-        topRightRadius: 8
+        topRightRadius: 12
         bottomLeftRadius: 0
-        bottomRightRadius: 8
-        color: Theme.background
+        bottomRightRadius: 12
+        color: Theme.surfaceCon_tainerHigh
         border.width: 1
-        border.color: root.hovered ? root.accentColor : (root.showDismissedState && root.dismissed ? Theme.grey : Theme.notificationBorder)
+        border.color: root.hovered ? Theme.outline : Theme.outlineVariant
         opacity: root.showDismissedState && root.dismissed ? 0.72 : 1.0
 
         Behavior on border.color {
@@ -133,8 +135,9 @@ Item {
                 Layout.preferredWidth: 20
                 Layout.preferredHeight: 20
                 radius: 5
-                color: "transparent"
-                border.width: 0
+                color: Theme.surfaceCon_tainerHighest
+                border.width: 1
+                border.color: Theme.outlineVariant
                 visible: root.visualReady || root.visualLoading
 
                 Image {
@@ -167,7 +170,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 text: String(notification.summary || "Notification")
-                color: Theme.text
+                color: Theme.on_Surface
                 elide: Text.ElideRight
                 font.pixelSize: 12
                 font.bold: true
@@ -176,7 +179,7 @@ Item {
 
             Text {
                 text: String(notification.appName || "")
-                color: Theme.notificationMuted
+                color: Theme.on_SurfaceVariant
                 font.pixelSize: 10
                 font.family: Theme.font
                 visible: text.length > 0
@@ -186,20 +189,22 @@ Item {
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 radius: 9
-                color: "transparent"
+                color: dismissHover.containsMouse ? Theme.surfaceCon_tainer : Theme.surfaceCon_tainerHighest
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 Text {
                     anchors.centerIn: parent
                     text: "✕"
-                    color: Theme.text
+                    color: Theme.on_SurfaceVariant
                     font.pixelSize: 10
                     font.family: Theme.font
                 }
 
                 MouseArea {
+                    id: dismissHover
                     anchors.fill: parent
+                    hoverEnabled: true
                     onClicked: root.dismissRequested(Number(notification.id || 0))
                 }
             }
@@ -208,7 +213,7 @@ Item {
         Text {
             Layout.fillWidth: true
             text: String(notification.body || "")
-            color: Theme.white
+            color: Theme.on_Surface
             wrapMode: Text.Wrap
             maximumLineCount: compact ? 3 : 6
             elide: Text.ElideRight
@@ -220,7 +225,7 @@ Item {
         Text {
             Layout.fillWidth: true
             text: String(notification.category || "")
-            color: Theme.notificationMuted
+            color: Theme.on_SurfaceVariant
             elide: Text.ElideRight
             font.pixelSize: 10
             font.family: Theme.font
@@ -236,9 +241,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 6
                 radius: 3
-                color: Theme.black
+                color: Theme.surfaceCon_tainerHighest
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 Rectangle {
                     anchors.top: parent.top
@@ -253,7 +258,7 @@ Item {
             Text {
                 Layout.alignment: Qt.AlignRight
                 text: root.progressValue + "%"
-                color: Theme.notificationMuted
+                color: Theme.on_SurfaceVariant
                 font.pixelSize: 10
                 font.family: Theme.font
                 visible: !root.compact
@@ -273,15 +278,14 @@ Item {
                     Layout.preferredHeight: 24
                     Layout.preferredWidth: Math.max(74, actionText.implicitWidth + 18)
                     radius: 7
-                    color: "transparent"
-                    border.width: 1
-                    border.color: root.accentColor
+                    color: root.accentContainerColor
+                    border.width: 0
 
                     Text {
                         id: actionText
                         anchors.centerIn: parent
                         text: String(modelData.label || "Action")
-                        color: root.accentColor
+                        color: root.onAccentContainerColor
                         font.pixelSize: 10
                         font.bold: true
                         font.family: Theme.font
@@ -307,9 +311,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.black
+                color: Theme.surfaceCon_tainerHighest
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 TextInput {
                     id: replyInput
@@ -317,9 +321,9 @@ Item {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
-                    color: Theme.text
-                    selectionColor: Theme.activeWs
-                    selectedTextColor: Theme.black
+                    color: Theme.on_Surface
+                    selectionColor: Theme.primary
+                    selectedTextColor: Theme.on_Primary
                     font.pixelSize: 11
                     font.family: Theme.font
                     clip: true
@@ -341,7 +345,7 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 8
                     text: replyInput.placeholderText
-                    color: Theme.notificationMuted
+                    color: Theme.on_SurfaceVariant
                     visible: replyInput.text.length === 0 && !replyInput.activeFocus
                     font.pixelSize: 10
                     font.family: Theme.font
@@ -352,14 +356,13 @@ Item {
                 Layout.preferredWidth: 52
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.black
-                border.width: 1
-                border.color: root.accentColor
+                color: root.accentContainerColor
+                border.width: 0
 
                 Text {
                     anchors.centerIn: parent
                     text: "Send"
-                    color: root.accentColor
+                    color: root.onAccentContainerColor
                     font.pixelSize: 10
                     font.bold: true
                     font.family: Theme.font
@@ -391,9 +394,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.black
+                color: Theme.surfaceCon_tainerHighest
                 border.width: 1
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
 
                 RowLayout {
                     anchors.fill: parent
@@ -403,7 +406,7 @@ Item {
 
                     Text {
                         text: "Reply:"
-                        color: Theme.notificationMuted
+                        color: Theme.on_SurfaceVariant
                         font.pixelSize: 10
                         font.family: Theme.font
                     }
@@ -411,7 +414,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         text: root.inlineReplyPreviewText.length > 0 ? root.inlineReplyPreviewText : "(no reply sent)"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         elide: Text.ElideRight
                         wrapMode: Text.NoWrap
                         clip: true

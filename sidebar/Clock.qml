@@ -28,7 +28,7 @@ ColumnLayout {
 
     Text {
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[0] : "--"
-        color: Theme.activeWs // Using your active workspace color for emphasis
+        color: Theme.primary // Using your active workspace color for emphasis
         font {
             pixelSize: 18
             bold: true
@@ -38,7 +38,7 @@ ColumnLayout {
 
     Text {
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[1] : "--"
-        color: Theme.defaultWs
+        color: Theme.surfaceCon_tainerHighest
         font {
             pixelSize: 18
             bold: true
@@ -49,7 +49,7 @@ ColumnLayout {
     Text {
         horizontalAlignment: Text.AlignHCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[2] : "--"
-        color: Theme.inactiveWs // Use a dimmer color so it doesn't distract
+        color: Theme.surfaceCon_tainerLow // Use a dimmer color so it doesn't distract
         font {
             pixelSize: 18
             bold: false

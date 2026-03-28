@@ -75,7 +75,7 @@ Item {
                 Layout.preferredHeight: 20
 
                 text: wsId
-                color: isActive ? Theme.activeWs : (hasOpenWindows ? Theme.defaultWs : Theme.inactiveWs)
+                color: isActive ? Theme.primary : (hasOpenWindows ? Theme.surfaceCon_tainerHighest : Theme.surfaceCon_tainerLow)
                 font {
                     pixelSize: 15
                     bold: true
@@ -89,7 +89,7 @@ Item {
                     width: 14
                     height: 2
                     radius: 2
-                    color: Theme.activeWs
+                    color: Theme.primary
                 }
 
                 Behavior on color {

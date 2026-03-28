@@ -326,7 +326,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.background
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
         radius: 10
 
@@ -346,7 +346,7 @@ PanelWindow {
 
                 Text {
                     text: "󰕾  Audio"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 13
                     font.bold: true
@@ -356,7 +356,7 @@ PanelWindow {
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.red : Theme.text
+                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
                     font.pixelSize: 13
                     font.family: Theme.font
 
@@ -374,13 +374,13 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             Text {
                 visible: hoverMenu.loading
                 text: "Loading devices..."
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -389,7 +389,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length > 0
                 text: hoverMenu.errorMsg
-                color: Theme.red
+                color: Theme.error
                 font.pixelSize: 12
                 font.family: Theme.font
             }
@@ -397,7 +397,7 @@ PanelWindow {
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.blue
+                color: Theme.primary
                 font.pixelSize: 11
                 font.family: Theme.font
                 opacity: 0.9
@@ -414,7 +414,7 @@ PanelWindow {
 
                     Text {
                         text: hoverMenu.currentMuted || hoverMenu.currentVolume === 0 ? "󰖁" : (hoverMenu.currentVolume < 34 ? "󰕿" : (hoverMenu.currentVolume < 67 ? "󰖀" : "󰕾"))
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 13
                     }
@@ -434,13 +434,13 @@ PanelWindow {
                             width: volumeSlider.availableWidth
                             height: 4
                             radius: 2
-                            color: Theme.grey
+                            color: Theme.outlineVariant
 
                             Rectangle {
                                 width: volumeSlider.visualPosition * parent.width
                                 height: parent.height
                                 radius: 2
-                                color: Theme.blue
+                                color: Theme.primary
                             }
                         }
 
@@ -450,7 +450,7 @@ PanelWindow {
                             implicitWidth: 12
                             implicitHeight: 12
                             radius: 6
-                            color: volumeSlider.pressed ? Theme.blue : Theme.text
+                            color: volumeSlider.pressed ? Theme.primary : Theme.on_Surface
                         }
 
                         onValueChanged: {
@@ -471,7 +471,7 @@ PanelWindow {
 
                     Text {
                         text: Math.round(volumeSlider.value) + "%"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 10
                         opacity: 0.75
@@ -484,7 +484,7 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 opacity: 0.5
             }
@@ -492,7 +492,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 text: "󰕾  Output"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.75
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -502,7 +502,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.outputDevices.length === 0
                 text: "No output devices"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 11
                 font.family: Theme.font
@@ -519,7 +519,7 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultOutput
-                    color: outputHover.containsMouse ? Theme.grey : "transparent"
+                    color: outputHover.containsMouse ? Theme.outlineVariant : "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -529,14 +529,14 @@ PanelWindow {
 
                         Text {
                             text: selected ? "◉" : "○"
-                            color: selected ? Theme.blue : Theme.text
+                            color: selected ? Theme.primary : Theme.on_Surface
                             font.pixelSize: 12
                             font.family: Theme.font
                         }
 
                         Text {
                             text: hoverMenu.deviceLabel(modelData.name, modelData.description)
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 11
                             font.family: Theme.font
                             elide: Text.ElideRight
@@ -558,7 +558,7 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 opacity: 0.5
             }
@@ -566,7 +566,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 text: "󰍬  Input"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.75
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -576,7 +576,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.inputDevices.length === 0
                 text: "No input devices"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 11
                 font.family: Theme.font
@@ -593,7 +593,7 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultInput
-                    color: inputHover.containsMouse ? Theme.grey : "transparent"
+                    color: inputHover.containsMouse ? Theme.outlineVariant : "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -603,14 +603,14 @@ PanelWindow {
 
                         Text {
                             text: selected ? "◉" : "○"
-                            color: selected ? Theme.green : Theme.text
+                            color: selected ? Theme.secondary : Theme.on_Surface
                             font.pixelSize: 12
                             font.family: Theme.font
                         }
 
                         Text {
                             text: hoverMenu.deviceLabel(modelData.name, modelData.description)
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 11
                             font.family: Theme.font
                             elide: Text.ElideRight

@@ -46,16 +46,16 @@ ColumnLayout {
 
     function getBatteryColor() {
         if (!UPower.displayDevice.ready)
-            return Theme.inactiveWs;
+            return Theme.surfaceCon_tainerLow;
         if (UPower.displayDevice.state === UPowerDeviceState.Charging)
-            return Theme.green;
+            return Theme.secondary;
         if (UPower.displayDevice.state === UPowerDeviceState.FullyCharged)
-            return Theme.green;
+            return Theme.secondary;
         if (UPower.displayDevice.state === UPowerDeviceState.PendingCharge)
-            return Theme.green;
+            return Theme.secondary;
         if (UPower.displayDevice.percentage <= 0.20)
-            return Theme.red;
-        return Theme.activeWs;
+            return Theme.error;
+        return Theme.primary;
     }
 
     // THE FIX 2: Wrap the rotated text in a fixed-size bounding box

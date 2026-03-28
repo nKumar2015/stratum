@@ -62,7 +62,7 @@ Item {
     Text {
         anchors.centerIn: parent
         text: root.icon
-        color: wifiHover.containsMouse ? Theme.blue : Theme.text
+        color: wifiHover.containsMouse ? Theme.primary : Theme.on_Surface
         font.pixelSize: 20
 
         Behavior on color {

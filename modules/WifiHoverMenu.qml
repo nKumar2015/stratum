@@ -145,7 +145,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.background
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
         radius: 10
 
@@ -168,7 +168,7 @@ PanelWindow {
 
                 Text {
                     text: "  Network"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 13
                     font.bold: true
@@ -178,7 +178,7 @@ PanelWindow {
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.red : Theme.text
+                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
                     font.pixelSize: 13
                     font.family: Theme.font
 
@@ -196,14 +196,14 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             // ── Loading ────────────────────────────────────────────────
             Text {
                 visible: hoverMenu.loading
                 text: "Loading..."
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -213,7 +213,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length > 0
                 text: hoverMenu.errorMsg
-                color: Theme.red
+                color: Theme.error
                 font.pixelSize: 12
                 font.family: Theme.font
                 Layout.fillWidth: true
@@ -224,7 +224,7 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.connections.length === 0
                 text: "Not connected"
-                color: Theme.text
+                color: Theme.on_Surface
                 opacity: 0.45
                 font.pixelSize: 12
                 font.family: Theme.font
@@ -246,7 +246,7 @@ PanelWindow {
                         visible: index > 0
                         Layout.fillWidth: true
                         height: 1
-                        color: Theme.grey
+                        color: Theme.outlineVariant
                         opacity: 0.5
                     }
 
@@ -257,14 +257,14 @@ PanelWindow {
 
                         Text {
                             text: modelData.type === "ethernet" ? "\udb80\ude00" : "󰤨"
-                            color: Theme.blue
+                            color: Theme.primary
                             font.pixelSize: 16
                             font.family: Theme.font
                         }
 
                         Text {
                             text: modelData.ssid.length > 0 ? modelData.ssid : (modelData.type === "ethernet" ? "Ethernet" : "Unknown")
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 13
                             font.family: Theme.font
                             font.bold: true
@@ -276,7 +276,7 @@ PanelWindow {
                         Text {
                             visible: modelData.type === "wifi" && modelData.signalPct >= 0
                             text: hoverMenu.signalBars(modelData.signalPct)
-                            color: modelData.signalPct >= 50 ? Theme.green : Theme.yellow
+                            color: modelData.signalPct >= 50 ? Theme.secondary : Theme.tertiary
                             font.pixelSize: 11
                             font.family: Theme.font
                             font.letterSpacing: -1
@@ -291,7 +291,7 @@ PanelWindow {
 
                         Text {
                             text: "IP"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             opacity: 0.5
                             font.pixelSize: 11
                             font.family: Theme.font
@@ -300,7 +300,7 @@ PanelWindow {
 
                         Text {
                             text: modelData.ipAddress
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 11
                             font.family: Theme.font
                             elide: Text.ElideRight
@@ -316,7 +316,7 @@ PanelWindow {
 
                         Text {
                             text: "GW"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             opacity: 0.5
                             font.pixelSize: 11
                             font.family: Theme.font
@@ -325,7 +325,7 @@ PanelWindow {
 
                         Text {
                             text: modelData.gateway
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.pixelSize: 11
                             font.family: Theme.font
                             elide: Text.ElideRight
@@ -341,7 +341,7 @@ PanelWindow {
 
                         Text {
                             text: "Signal"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             opacity: 0.5
                             font.pixelSize: 11
                             font.family: Theme.font
@@ -350,7 +350,7 @@ PanelWindow {
 
                         Text {
                             text: modelData.signalPct + "%"
-                            color: modelData.signalPct >= 50 ? Theme.green : Theme.yellow
+                            color: modelData.signalPct >= 50 ? Theme.secondary : Theme.tertiary
                             font.pixelSize: 11
                             font.family: Theme.font
                         }
@@ -361,13 +361,13 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Theme.grey
+                color: Theme.outlineVariant
             }
 
             // ── Footer ─────────────────────────────────────────────────
             Text {
                 text: "Open full settings →"
-                color: fullMenuHover.containsMouse ? Theme.blue : Theme.text
+                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
                 font.pixelSize: 11
                 font.family: Theme.font
                 opacity: fullMenuHover.containsMouse ? 1.0 : 0.6

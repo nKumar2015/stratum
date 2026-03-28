@@ -513,7 +513,7 @@ Window {
 
                 Text {
                     text: "Wi-Fi"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 18
                     font.bold: true
@@ -528,7 +528,7 @@ Window {
                     Layout.preferredWidth: 98
                     radius: 6
                     color: wifiToggleMouse.containsMouse ? "#263244" : "#1b2333"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     RowLayout {
@@ -537,14 +537,14 @@ Window {
 
                         Text {
                             text: wifiMenu.wifiEnabled ? "󰤨" : "󰤮"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                         }
 
                         Text {
                             text: wifiMenu.wifiEnabled ? "On" : "Off"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 12
                             font.bold: true
@@ -565,7 +565,7 @@ Window {
                     Layout.preferredWidth: 38
                     radius: 6
                     color: closeMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     StyledIconToolTip {
@@ -579,7 +579,7 @@ Window {
 
                         Text {
                             text: "󰅖"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                         }
@@ -599,7 +599,7 @@ Window {
                 Layout.preferredHeight: 170
                 color: Theme.background
                 radius: 8
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
                 border.width: 1
 
                 ColumnLayout {
@@ -613,7 +613,7 @@ Window {
 
                         Text {
                             text: wifiMenu.activeSsid ? "Connected to " + wifiMenu.activeSsid : "Not connected"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                             font.bold: true
@@ -628,7 +628,7 @@ Window {
                             Layout.preferredWidth: 38
                             radius: 6
                             color: !isEnabled ? "#23232d" : (topDisconnectMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.5
 
@@ -640,7 +640,7 @@ Window {
                             Text {
                                 anchors.centerIn: parent
                                 text: "󰖪"
-                                color: Theme.text
+                                color: Theme.on_Surface
                                 font.family: Theme.font
                                 font.pixelSize: 12
                             }
@@ -661,7 +661,7 @@ Window {
                             Layout.preferredWidth: 38
                             radius: 6
                             color: !isEnabled ? "#23232d" : (forgetMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.5
 
@@ -673,7 +673,7 @@ Window {
                             Text {
                                 anchors.centerIn: parent
                                 text: "󰆴"
-                                color: Theme.text
+                                color: Theme.on_Surface
                                 font.family: Theme.font
                                 font.pixelSize: 12
                             }
@@ -690,35 +690,35 @@ Window {
 
                     Text {
                         text: "State: " + (wifiMenu.activeState ? wifiMenu.activeState : (wifiMenu.wifiEnabled ? "idle" : "wifi disabled"))
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Signal: " + (wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A")
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Security: " + (wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A")
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "IP: " + (wifiMenu.activeIp ? wifiMenu.activeIp : "N/A")
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Gateway: " + (wifiMenu.activeGateway ? wifiMenu.activeGateway : "N/A")
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
@@ -736,7 +736,7 @@ Window {
                     Layout.preferredWidth: 38
                     radius: 6
                     color: refreshMouse.containsMouse ? "#243126" : "#19261b"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     StyledIconToolTip {
@@ -750,7 +750,7 @@ Window {
 
                         Text {
                             text: "󰑐"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                         }
@@ -770,7 +770,7 @@ Window {
 
                 Text {
                     text: wifiMenu.networks.length + " networks" + (wifiMenu.hiddenDuplicateCount > 0 ? "  •  " + wifiMenu.hiddenDuplicateCount + " hidden" : "")
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -783,7 +783,7 @@ Window {
                         width: 8
                         height: 8
                         radius: 4
-                        color: Theme.activeWs
+                        color: Theme.primary
                         opacity: 0.35
 
                         SequentialAnimation on opacity {
@@ -808,7 +808,7 @@ Window {
 
                     Text {
                         text: "Scanning"
-                        color: Theme.activeWs
+                        color: Theme.primary
                         font.family: Theme.font
                         font.pixelSize: 11
                     }
@@ -825,7 +825,7 @@ Window {
                     Layout.fillHeight: true
                     color: Theme.background
                     radius: 8
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     ScrollView {
@@ -851,7 +851,7 @@ Window {
                                     height: 56
                                     radius: 6
                                     color: wifiMenu.selectedSsid === modelData.ssid ? "#1d2434" : Theme.background
-                                    border.color: modelData.inUse === "*" ? Theme.activeWs : Theme.grey
+                                    border.color: modelData.inUse === "*" ? Theme.primary : Theme.outlineVariant
                                     border.width: 1
                                     opacity: 1
 
@@ -927,7 +927,7 @@ Window {
 
                                             Text {
                                                 text: modelData.ssid
-                                                color: Theme.text
+                                                color: Theme.on_Surface
                                                 font.family: Theme.font
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -935,7 +935,7 @@ Window {
 
                                             Text {
                                                 text: "Signal " + wifiMenu.signalBars(modelData.signal) + "  •  " + (modelData.security ? modelData.security : "Open") + (modelData.inUse === "*" ? "  •  Connected" : "")
-                                                color: Theme.hover
+                                                color: Theme.surfaceCon_tainer
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -948,7 +948,7 @@ Window {
 
                                         Text {
                                             text: "󰅂"
-                                            color: Theme.hover
+                                            color: Theme.surfaceCon_tainer
                                             font.family: Theme.font
                                             font.pixelSize: 12
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
@@ -966,7 +966,7 @@ Window {
                     Layout.fillHeight: true
                     color: "#141422"
                     radius: 8
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
                     opacity: wifiMenu.hasSelection ? 1 : 0
                     clip: true
@@ -994,7 +994,7 @@ Window {
 
                             Text {
                                 text: "Selected Network"
-                                color: Theme.text
+                                color: Theme.on_Surface
                                 font.family: Theme.font
                                 font.pixelSize: 12
                                 font.bold: true
@@ -1009,7 +1009,7 @@ Window {
                                 Layout.preferredHeight: 28
                                 radius: 5
                                 color: sideCloseMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
                                 border.width: 1
 
                                 RowLayout {
@@ -1018,14 +1018,14 @@ Window {
 
                                     Text {
                                         text: "󰅖"
-                                        color: Theme.text
+                                        color: Theme.on_Surface
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "Hide"
-                                        color: Theme.text
+                                        color: Theme.on_Surface
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -1043,7 +1043,7 @@ Window {
 
                         Text {
                             text: wifiMenu.selectedSsid
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -1052,21 +1052,21 @@ Window {
 
                         Text {
                             text: "Security: " + (wifiMenu.selectedSecurity ? wifiMenu.selectedSecurity : "Open")
-                            color: Theme.hover
+                            color: Theme.surfaceCon_tainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Signal: " + (wifiMenu.selectedSignal >= 0 ? wifiMenu.signalBars(wifiMenu.selectedSignal) : "N/A")
-                            color: Theme.hover
+                            color: Theme.surfaceCon_tainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Status: " + (wifiMenu.selectedInUse === "*" ? "Connected" : "Available")
-                            color: wifiMenu.selectedInUse === "*" ? Theme.green : Theme.hover
+                            color: wifiMenu.selectedInUse === "*" ? Theme.secondary : Theme.surfaceCon_tainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1074,14 +1074,14 @@ Window {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 1
-                            color: Theme.grey
+                            color: Theme.outlineVariant
                             opacity: 0.8
                         }
 
                         Text {
                             visible: wifiMenu.shouldShowPasswordField()
                             text: "Network Password"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 11
                             font.bold: true
@@ -1094,15 +1094,15 @@ Window {
                             placeholderText: "Enter password"
                             echoMode: TextInput.Password
                             enabled: visible
-                            color: Theme.text
-                            placeholderTextColor: Theme.hover
-                            selectionColor: Theme.activeWs
-                            selectedTextColor: Theme.black
+                            color: Theme.on_Surface
+                            placeholderTextColor: Theme.surfaceCon_tainer
+                            selectionColor: Theme.primary
+                            selectedTextColor: Theme.surfaceCon_tainerLowest
 
                             background: Rectangle {
                                 radius: 6
                                 color: passwordInput.enabled ? "#10101b" : "#1f1f29"
-                                border.color: passwordInput.activeFocus ? Theme.activeWs : Theme.grey
+                                border.color: passwordInput.activeFocus ? Theme.primary : Theme.outlineVariant
                                 border.width: 1
 
                                 Behavior on border.color {
@@ -1121,7 +1121,7 @@ Window {
                             Layout.fillWidth: true
                             radius: 6
                             color: !isEnabled ? "#23232d" : (connectMainMouse.containsMouse ? "#29503a" : "#1f3e2c")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
 
@@ -1131,14 +1131,14 @@ Window {
 
                                 Text {
                                     text: "󰖩"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
                                     text: wifiMenu.selectedInUse === "*" ? "Connected" : "Connect"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1164,7 +1164,7 @@ Window {
             Text {
                 Layout.fillWidth: true
                 text: wifiMenu.statusMessage
-                color: Theme.yellow
+                color: Theme.tertiary
                 font.family: Theme.font
                 font.pixelSize: 11
                 wrapMode: Text.Wrap

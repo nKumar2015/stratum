@@ -11,14 +11,14 @@ ToolTip {
 
     contentItem: Text {
         text: styledTip.text
-        color: Theme.text
+        color: Theme.on_Surface
         font.family: Theme.font
         font.pixelSize: 10
     }
 
     background: Rectangle {
         color: "#111824"
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
         border.width: 1
         radius: 5
     }

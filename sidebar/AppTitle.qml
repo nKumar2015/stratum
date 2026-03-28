@@ -63,7 +63,7 @@ Item {
             Text {
                 id: appText
                 text: displayWindow?.title || "\uf4a9  Desktop"
-                color: Theme.text
+                color: Theme.on_Surface
                 font.family: Theme.font
                 font.pixelSize: 14
 

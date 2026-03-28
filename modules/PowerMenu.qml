@@ -105,7 +105,7 @@ PanelWindow {
         anchors.centerIn: parent
 
         color: Theme.background
-        border.color: Theme.inactiveWs
+        border.color: Theme.surfaceCon_tainerLow
         border.width: 2
         radius: 12
 
@@ -132,7 +132,7 @@ PanelWindow {
                     Layout.preferredWidth: 140
                     Layout.preferredHeight: 140
                     color: Theme.background
-                    border.color: isActive ? Theme.activeWs : Theme.background
+                    border.color: isActive ? Theme.primary : Theme.background
                     border.width: 1
                     radius: 8
 
@@ -164,14 +164,14 @@ PanelWindow {
                                 anchors.fill: btnIcon
                                 colorization: 1.0
                                 brightness: 1
-                                colorizationColor: powerOption.isActive ? Theme.text : Theme.hover
+                                colorizationColor: powerOption.isActive ? Theme.on_Surface : Theme.surfaceCon_tainer
                             }
                         }
                         Text {
                             id: btnText
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: powerOption.modelData.name
-                            color: powerOption.isActive ? Theme.text : Theme.hover
+                            color: powerOption.isActive ? Theme.on_Surface : Theme.surfaceCon_tainer
                             font.pixelSize: 10
                             font.family: Theme.font
                             font.bold: true

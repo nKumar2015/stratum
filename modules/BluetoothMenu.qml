@@ -686,7 +686,7 @@ Window {
 
                 Text {
                     text: "Bluetooth"
-                    color: Theme.text
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 18
                     font.bold: true
@@ -701,7 +701,7 @@ Window {
                     Layout.preferredWidth: 98
                     radius: 6
                     color: btToggleMouse.containsMouse ? "#263244" : "#1b2333"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     RowLayout {
@@ -711,14 +711,14 @@ Window {
                         Text {
                             id: toggleIcon
                             text: bluetoothMenu.pendingAction === "toggle" ? "󰔟" : (bluetoothMenu.bluetoothEnabled ? "󰂯" : "󰂲")
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                         }
 
                         Text {
                             text: bluetoothMenu.pendingAction === "toggle" ? "Working" : (bluetoothMenu.bluetoothEnabled ? "On" : "Off")
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 12
                             font.bold: true
@@ -740,7 +740,7 @@ Window {
                     Layout.preferredWidth: 38
                     radius: 6
                     color: closeMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     StyledIconToolTip {
@@ -751,7 +751,7 @@ Window {
                     Text {
                         anchors.centerIn: parent
                         text: "󰅖"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 13
                     }
@@ -770,7 +770,7 @@ Window {
                 Layout.preferredHeight: 124
                 color: Theme.background
                 radius: 8
-                border.color: Theme.grey
+                border.color: Theme.outlineVariant
                 border.width: 1
 
                 ColumnLayout {
@@ -783,7 +783,7 @@ Window {
 
                         Text {
                             text: bluetoothMenu.activeName ? "Connected to " + bluetoothMenu.activeName : "No active Bluetooth device"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                             font.bold: true
@@ -798,7 +798,7 @@ Window {
                             Layout.preferredWidth: 38
                             radius: 6
                             color: !isEnabled ? "#23232d" : (topDisconnectMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.5
 
@@ -810,7 +810,7 @@ Window {
                             Text {
                                 anchors.centerIn: parent
                                 text: "󰖪"
-                                color: Theme.text
+                                color: Theme.on_Surface
                                 font.family: Theme.font
                                 font.pixelSize: 12
                             }
@@ -827,7 +827,7 @@ Window {
 
                     Text {
                         text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A") + "  •  Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A") + "  •  Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
-                        color: Theme.hover
+                        color: Theme.surfaceCon_tainer
                         font.family: Theme.font
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -846,7 +846,7 @@ Window {
                     Layout.preferredWidth: 38
                     radius: 6
                     color: refreshMouse.containsMouse ? "#243126" : "#19261b"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     StyledIconToolTip {
@@ -857,7 +857,7 @@ Window {
                     Text {
                         anchors.centerIn: parent
                         text: "󰑐"
-                        color: Theme.text
+                        color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 13
                     }
@@ -876,7 +876,7 @@ Window {
                     Layout.preferredWidth: 76
                     radius: 6
                     color: scanMouse.containsMouse ? "#243126" : "#19261b"
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
                     opacity: bluetoothMenu.bluetoothEnabled ? 1.0 : 0.6
 
@@ -886,14 +886,14 @@ Window {
 
                         Text {
                             text: "󰒓"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 13
                         }
 
                         Text {
                             text: "Scan"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 11
                             font.bold: true
@@ -915,7 +915,7 @@ Window {
 
                 Text {
                     text: bluetoothMenu.devices.length + " devices"
-                    color: Theme.hover
+                    color: Theme.surfaceCon_tainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -928,7 +928,7 @@ Window {
                         width: 8
                         height: 8
                         radius: 4
-                        color: Theme.activeWs
+                        color: Theme.primary
                         opacity: 0.35
 
                         SequentialAnimation on opacity {
@@ -953,7 +953,7 @@ Window {
 
                     Text {
                         text: "Loading"
-                        color: Theme.activeWs
+                        color: Theme.primary
                         font.family: Theme.font
                         font.pixelSize: 11
                     }
@@ -970,7 +970,7 @@ Window {
                     Layout.fillHeight: true
                     color: Theme.background
                     radius: 8
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
 
                     ScrollView {
@@ -996,7 +996,7 @@ Window {
                                     height: 56
                                     radius: 6
                                     color: bluetoothMenu.selectedMac === modelData.mac ? "#1d2434" : Theme.background
-                                    border.color: modelData.connected === "yes" ? Theme.activeWs : Theme.grey
+                                    border.color: modelData.connected === "yes" ? Theme.primary : Theme.outlineVariant
                                     border.width: 1
                                     opacity: 1
 
@@ -1071,7 +1071,7 @@ Window {
 
                                             Text {
                                                 text: modelData.name
-                                                color: Theme.text
+                                                color: Theme.on_Surface
                                                 font.family: Theme.font
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -1079,7 +1079,7 @@ Window {
 
                                             Text {
                                                 text: modelData.mac + "  •  " + (modelData.connected === "yes" ? "Connected" : "Disconnected") + "  •  Trusted " + modelData.trusted
-                                                color: Theme.hover
+                                                color: Theme.surfaceCon_tainer
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -1088,7 +1088,7 @@ Window {
 
                                         Text {
                                             text: "󰅂"
-                                            color: Theme.hover
+                                            color: Theme.surfaceCon_tainer
                                             font.family: Theme.font
                                             font.pixelSize: 12
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
@@ -1105,7 +1105,7 @@ Window {
                     Layout.fillHeight: true
                     color: "#141422"
                     radius: 8
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
                     border.width: 1
                     opacity: bluetoothMenu.hasSelection ? 1 : 0
                     clip: true
@@ -1133,7 +1133,7 @@ Window {
 
                             Text {
                                 text: "Selected Device"
-                                color: Theme.text
+                                color: Theme.on_Surface
                                 font.family: Theme.font
                                 font.pixelSize: 12
                                 font.bold: true
@@ -1148,7 +1148,7 @@ Window {
                                 Layout.preferredHeight: 28
                                 radius: 5
                                 color: sideCloseMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
                                 border.width: 1
 
                                 RowLayout {
@@ -1157,14 +1157,14 @@ Window {
 
                                     Text {
                                         text: "󰅖"
-                                        color: Theme.text
+                                        color: Theme.on_Surface
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "Hide"
-                                        color: Theme.text
+                                        color: Theme.on_Surface
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -1182,7 +1182,7 @@ Window {
 
                         Text {
                             text: bluetoothMenu.selectedName
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -1191,7 +1191,7 @@ Window {
 
                         Text {
                             text: "MAC: " + bluetoothMenu.selectedMac
-                            color: Theme.hover
+                            color: Theme.surfaceCon_tainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1202,7 +1202,7 @@ Window {
 
                             Text {
                                 text: "Connected: " + (bluetoothMenu.selectedConnected || "no")
-                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.green : Theme.hover
+                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.secondary : Theme.surfaceCon_tainer
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
@@ -1210,14 +1210,14 @@ Window {
 
                             Text {
                                 text: "•"
-                                color: Theme.grey
+                                color: Theme.outlineVariant
                                 font.family: Theme.font
                                 font.pixelSize: 11
                             }
 
                             Text {
                                 text: "Trusted: " + (bluetoothMenu.selectedTrusted || "no")
-                                color: Theme.hover
+                                color: Theme.surfaceCon_tainer
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
@@ -1228,7 +1228,7 @@ Window {
                         Text {
                             Layout.fillWidth: true
                             text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
-                            color: Theme.hover
+                            color: Theme.surfaceCon_tainer
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -1237,7 +1237,7 @@ Window {
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 1
-                            color: Theme.grey
+                            color: Theme.outlineVariant
                             opacity: 0.8
                         }
 
@@ -1247,7 +1247,7 @@ Window {
                             Layout.fillWidth: true
                             radius: 6
                             color: !isEnabled ? "#23232d" : (pairMainMouse.containsMouse ? "#2e4060" : "#1e2e45")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
                             visible: bluetoothMenu.selectedPaired !== "yes"
@@ -1258,14 +1258,14 @@ Window {
 
                                 Text {
                                     text: "󰌹"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
                                     text: "Pair"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1287,7 +1287,7 @@ Window {
                             Layout.fillWidth: true
                             radius: 6
                             color: !isEnabled ? "#23232d" : (connectMainMouse.containsMouse ? "#29503a" : "#1f3e2c")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
 
@@ -1297,14 +1297,14 @@ Window {
 
                                 Text {
                                     text: "󰖩"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
                                     text: bluetoothMenu.selectedConnected === "yes" ? "Connected" : "Connect"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1326,7 +1326,7 @@ Window {
                             Layout.fillWidth: true
                             radius: 6
                             color: !isEnabled ? "#23232d" : (disconnectMainMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
 
@@ -1336,14 +1336,14 @@ Window {
 
                                 Text {
                                     text: "󰖪"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
                                     text: "Disconnect"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1365,7 +1365,7 @@ Window {
                             Layout.fillWidth: true
                             radius: 6
                             color: !isEnabled ? "#23232d" : (removeMainMouse.containsMouse ? "#402024" : "#2f171a")
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
 
@@ -1375,14 +1375,14 @@ Window {
 
                                 Text {
                                     text: "󰆴"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
                                     text: "Remove"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1408,7 +1408,7 @@ Window {
             Text {
                 Layout.fillWidth: true
                 text: bluetoothMenu.statusMessage
-                color: Theme.yellow
+                color: Theme.tertiary
                 font.family: Theme.font
                 font.pixelSize: 11
                 wrapMode: Text.Wrap

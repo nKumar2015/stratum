@@ -96,7 +96,7 @@ Scope {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: lockRoot.timeString
-                        color: Theme.activeWs // Using your active workspace color for emphasis
+                        color: Theme.primary // Using your active workspace color for emphasis
                         font {
                             pixelSize: 50
                             bold: true
@@ -111,7 +111,7 @@ Scope {
                         radius: 60
                         color: "transparent"
                         border.width: 3
-                        border.color: Theme.blue
+                        border.color: Theme.primary
                         ClippingWrapperRectangle {
                             width: 120
                             height: 120
@@ -132,7 +132,7 @@ Scope {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: "Enter Password"
-                        color: Theme.white
+                        color: Theme.on_Surface
                         font.pixelSize: 20
                         font.bold: true
                         font.family: Theme.font
@@ -142,9 +142,9 @@ Scope {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: 300
                         Layout.preferredHeight: 50
-                        color: Theme.black
+                        color: Theme.surfaceCon_tainerLowest
                         radius: 8
-                        border.color: passwordInput.activeFocus ? Theme.blue : Theme.hover
+                        border.color: passwordInput.activeFocus ? Theme.primary : Theme.surfaceCon_tainer
                         border.width: 2
 
                         TextInput {
@@ -152,7 +152,7 @@ Scope {
                             anchors.fill: parent
                             anchors.margins: 14
                             verticalAlignment: TextInput.AlignVCenter
-                            color: Theme.white
+                            color: Theme.on_Surface
                             font.pixelSize: 18
                             echoMode: TextInput.Password
                             focus: true
@@ -182,7 +182,7 @@ Scope {
                         id: errorText
                         Layout.alignment: Qt.AlignHCenter
                         text: "Incorrect password, try again."
-                        color: Theme.red
+                        color: Theme.error
                         font.pixelSize: 14
                         visible: lockRoot.authFailed
                         font.family: Theme.font

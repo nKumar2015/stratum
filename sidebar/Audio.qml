@@ -97,7 +97,7 @@ Item {
     Text {
         anchors.centerIn: parent
         text: root.icon
-        color: audioHover.containsMouse ? Theme.blue : Theme.text
+        color: audioHover.containsMouse ? Theme.primary : Theme.on_Surface
         font.pixelSize: 20
 
         Behavior on color {

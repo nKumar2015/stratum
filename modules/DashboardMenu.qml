@@ -79,10 +79,10 @@ PanelWindow {
 
     function metricColor(percent) {
         if (percent >= 85)
-            return Theme.red;
+            return Theme.error;
         if (percent >= 65)
-            return Theme.yellow;
-        return Theme.green;
+            return Theme.tertiary;
+        return Theme.secondary;
     }
 
     function resetCalendarRows() {
@@ -615,7 +615,7 @@ PanelWindow {
         color: Theme.background
         radius: 14
         border.width: 1
-        border.color: Theme.grey
+        border.color: Theme.outlineVariant
 
         Behavior on anchors.topMargin {
             NumberAnimation {
@@ -642,7 +642,7 @@ PanelWindow {
 
                 Text {
                     text: dashboard.lastError
-                    color: Theme.red
+                    color: Theme.error
                     font.family: Theme.font
                     font.pixelSize: 10
                     elide: Text.ElideRight
@@ -666,7 +666,7 @@ PanelWindow {
                     color: Theme.background
                     radius: 10
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     ColumnLayout {
                         id: performanceColumn
@@ -676,7 +676,7 @@ PanelWindow {
 
                         Text {
                             text: "Performance"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -688,7 +688,7 @@ PanelWindow {
                             radius: 8
                             color: Theme.background
                             border.width: 1
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -700,14 +700,14 @@ PanelWindow {
 
                                     Text {
                                         text: ""
-                                        color: Theme.activeWs
+                                        color: Theme.primary
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "CPU"
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -726,7 +726,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.black
+                                    color: Theme.surfaceCon_tainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.cpuPercent / 100
@@ -751,7 +751,7 @@ PanelWindow {
                             radius: 8
                             color: Theme.background
                             border.width: 1
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -763,14 +763,14 @@ PanelWindow {
 
                                     Text {
                                         text: "󰢮"
-                                        color: Theme.activeWs
+                                        color: Theme.primary
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "GPU"
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -778,7 +778,7 @@ PanelWindow {
 
                                     Text {
                                         text: "|"
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                     }
@@ -786,7 +786,7 @@ PanelWindow {
                                     Text {
                                         Layout.fillWidth: true
                                         text: dashboard.gpuSource
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 9
                                         elide: Text.ElideRight
@@ -795,7 +795,7 @@ PanelWindow {
 
                                 Text {
                                     text: dashboard.gpuPercentText === "N/A" ? "N/A" : dashboard.gpuPercentText + "%"
-                                    color: dashboard.gpuPercentText === "N/A" ? Theme.inactiveWs : Theme.green
+                                    color: dashboard.gpuPercentText === "N/A" ? Theme.surfaceCon_tainerLow : Theme.secondary
                                     font.family: Theme.font
                                     font.pixelSize: 17
                                     font.bold: true
@@ -805,14 +805,14 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.black
+                                    color: Theme.surfaceCon_tainerLowest
                                     visible: dashboard.gpuPercentText !== "N/A"
 
                                     Rectangle {
                                         width: parent.width * dashboard.gpuPercentValue / 100
                                         height: parent.height
                                         radius: 3
-                                        color: Theme.green
+                                        color: Theme.secondary
 
                                         Behavior on width {
                                             NumberAnimation {
@@ -831,7 +831,7 @@ PanelWindow {
                             radius: 8
                             color: Theme.background
                             border.width: 1
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -843,14 +843,14 @@ PanelWindow {
 
                                     Text {
                                         text: "󰍛"
-                                        color: Theme.activeWs
+                                        color: Theme.primary
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "RAM"
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -859,7 +859,7 @@ PanelWindow {
 
                                 Text {
                                     text: dashboard.ramUsedGiB.toFixed(1) + " / " + dashboard.ramTotalGiB.toFixed(1) + " GiB"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                 }
@@ -876,7 +876,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.black
+                                    color: Theme.surfaceCon_tainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.ramPercent / 100
@@ -901,7 +901,7 @@ PanelWindow {
                             radius: 8
                             color: Theme.background
                             border.width: 1
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -913,14 +913,14 @@ PanelWindow {
 
                                     Text {
                                         text: ""
-                                        color: Theme.activeWs
+                                        color: Theme.primary
                                         font.family: Theme.font
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: "Storage"
-                                        color: Theme.inactiveWs
+                                        color: Theme.surfaceCon_tainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -929,7 +929,7 @@ PanelWindow {
 
                                 Text {
                                     text: dashboard.storageUsedGiB.toFixed(1) + " / " + dashboard.storageTotalGiB.toFixed(1) + " GiB"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                 }
@@ -946,7 +946,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.black
+                                    color: Theme.surfaceCon_tainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.storagePercent / 100
@@ -980,7 +980,7 @@ PanelWindow {
                     color: Theme.background
                     radius: 10
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     ColumnLayout {
                         id: calendarColumn
@@ -990,7 +990,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.calendarTitle.length > 0 ? dashboard.calendarTitle : "Calendar"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 16
                             font.bold: true
@@ -1029,7 +1029,7 @@ PanelWindow {
                                             anchors.fill: parent
                                             anchors.margins: 3
                                             text: dashboard.weekdayLabel(modelData)
-                                            color: Theme.defaultWs
+                                            color: Theme.surfaceCon_tainerHighest
                                             font.family: Theme.font
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1074,14 +1074,14 @@ PanelWindow {
                                             implicitWidth: dashboard.calendarCellWidth
                                             implicitHeight: dashboard.calendarCellHeight
                                             radius: 6
-                                            color: isToday ? Theme.activeWs : Theme.background
+                                            color: isToday ? Theme.primary : Theme.background
                                             border.width: isToday ? 1 : 0
-                                            border.color: Theme.activeWs
+                                            border.color: Theme.primary
 
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: String(dayValue)
-                                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.text : Theme.inactiveWs)
+                                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.on_Surface : Theme.surfaceCon_tainerLow)
                                                 font.family: Theme.font
                                                 font.pixelSize: 12
                                                 font.bold: isToday
@@ -1106,12 +1106,12 @@ PanelWindow {
                                 radius: 6
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "<<"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1132,12 +1132,12 @@ PanelWindow {
                                 radius: 6
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "<"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1158,12 +1158,12 @@ PanelWindow {
                                 radius: 6
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "Today"
-                                    color: Theme.activeWs
+                                    color: Theme.primary
                                     font.family: Theme.font
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1184,12 +1184,12 @@ PanelWindow {
                                 radius: 6
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: ">"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
                                     font.bold: true
@@ -1210,12 +1210,12 @@ PanelWindow {
                                 radius: 6
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: ">>"
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1244,7 +1244,7 @@ PanelWindow {
                     color: Theme.background
                     radius: 10
                     border.width: 1
-                    border.color: Theme.grey
+                    border.color: Theme.outlineVariant
 
                     ColumnLayout {
                         id: musicColumn
@@ -1254,7 +1254,7 @@ PanelWindow {
 
                         Text {
                             text: "Now Playing"
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -1269,7 +1269,7 @@ PanelWindow {
                             radius: 10
                             color: Theme.background
                             border.width: 1
-                            border.color: Theme.grey
+                            border.color: Theme.outlineVariant
                             clip: true
 
                             Image {
@@ -1285,7 +1285,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: "󰎆"
                                 visible: dashboard.musicArtUrl.length === 0
-                                color: Theme.inactiveWs
+                                color: Theme.surfaceCon_tainerLow
                                 font.family: Theme.font
                                 font.pixelSize: 36
                             }
@@ -1293,7 +1293,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicTitle
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 12
                             font.bold: true
@@ -1304,7 +1304,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicArtist
-                            color: Theme.defaultWs
+                            color: Theme.surfaceCon_tainerHighest
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -1314,7 +1314,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicAlbum
-                            color: Theme.inactiveWs
+                            color: Theme.surfaceCon_tainerLow
                             font.family: Theme.font
                             font.pixelSize: 10
                             elide: Text.ElideRight
@@ -1324,7 +1324,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicPosition + " / " + dashboard.musicLength
-                            color: Theme.text
+                            color: Theme.on_Surface
                             font.family: Theme.font
                             font.pixelSize: 10
                             horizontalAlignment: Text.AlignHCenter
@@ -1342,12 +1342,12 @@ PanelWindow {
                                 radius: 8
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: ""
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 16
                                 }
@@ -1364,12 +1364,12 @@ PanelWindow {
                                 radius: 8
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: dashboard.musicStatus === "Playing" ? "" : ""
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 16
                                 }
@@ -1386,12 +1386,12 @@ PanelWindow {
                                 radius: 8
                                 color: Theme.background
                                 border.width: 1
-                                border.color: Theme.grey
+                                border.color: Theme.outlineVariant
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: ""
-                                    color: Theme.text
+                                    color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 16
                                 }
