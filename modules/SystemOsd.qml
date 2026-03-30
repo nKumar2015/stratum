@@ -233,7 +233,7 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 9
                 radius: 5
-                color: Theme.surfaceCon_tainerLowest
+                color: Theme.surfaceContainerLowest
 
                 Rectangle {
                     width: parent.width * osd.progressRatio

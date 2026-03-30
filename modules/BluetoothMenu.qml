@@ -827,7 +827,7 @@ Window {
 
                     Text {
                         text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A") + "  •  Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A") + "  •  Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -915,7 +915,7 @@ Window {
 
                 Text {
                     text: bluetoothMenu.devices.length + " devices"
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -1079,7 +1079,7 @@ Window {
 
                                             Text {
                                                 text: modelData.mac + "  •  " + (modelData.connected === "yes" ? "Connected" : "Disconnected") + "  •  Trusted " + modelData.trusted
-                                                color: Theme.surfaceCon_tainer
+                                                color: Theme.surfaceContainer
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -1088,7 +1088,7 @@ Window {
 
                                         Text {
                                             text: "󰅂"
-                                            color: Theme.surfaceCon_tainer
+                                            color: Theme.surfaceContainer
                                             font.family: Theme.font
                                             font.pixelSize: 12
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
@@ -1191,7 +1191,7 @@ Window {
 
                         Text {
                             text: "MAC: " + bluetoothMenu.selectedMac
-                            color: Theme.surfaceCon_tainer
+                            color: Theme.surfaceContainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1202,7 +1202,7 @@ Window {
 
                             Text {
                                 text: "Connected: " + (bluetoothMenu.selectedConnected || "no")
-                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.secondary : Theme.surfaceCon_tainer
+                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.secondary : Theme.surfaceContainer
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
@@ -1217,7 +1217,7 @@ Window {
 
                             Text {
                                 text: "Trusted: " + (bluetoothMenu.selectedTrusted || "no")
-                                color: Theme.surfaceCon_tainer
+                                color: Theme.surfaceContainer
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
@@ -1228,7 +1228,7 @@ Window {
                         Text {
                             Layout.fillWidth: true
                             text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
-                            color: Theme.surfaceCon_tainer
+                            color: Theme.surfaceContainer
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight

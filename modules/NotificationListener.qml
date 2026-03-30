@@ -224,7 +224,7 @@ Scope {
             root.hintValue(notification, ["image_path"]),
             root.hintValue(notification, ["image-url"]),
             root.hintValue(notification, ["image_url"]),
-            root.hintValue(notification, ["icon_data"])
+            root.hintValue(notification, ["iCondata"])
         ];
 
         for (let i = 0; i < candidates.length; i++) {

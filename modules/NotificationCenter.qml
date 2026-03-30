@@ -188,7 +188,7 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: GlobalState.doNotDisturb ? Theme.error : Theme.surfaceCon_tainerLowest
+                    color: GlobalState.doNotDisturb ? Theme.error : Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: GlobalState.doNotDisturb ? Theme.error : Theme.outlineVariant
 
@@ -211,7 +211,7 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceCon_tainerLowest
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.outlineVariant
 
@@ -234,7 +234,7 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceCon_tainerLowest
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.outlineVariant
 
@@ -257,7 +257,7 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceCon_tainerLowest
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.outlineVariant
 

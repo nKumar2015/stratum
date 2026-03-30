@@ -33,7 +33,7 @@ Item {
     readonly property bool visualReady: (hasImageSource && visualImage.status === Image.Ready) || (!hasImageSource && hasAppIconSource)
     readonly property string iconGlyph: urgency >= 2 ? "" : (urgency <= 0 ? "" : "")
     readonly property color accentColor: urgency >= 2 ? Theme.error : (urgency <= 0 ? Theme.tertiary : Theme.primary)
-    readonly property color accentContainerColor: urgency >= 2 ? Theme.errorCon_tainer : (urgency <= 0 ? Theme.tertiaryCon_tainer : Theme.primaryCon_tainer)
+    readonly property color accentContainerColor: urgency >= 2 ? Theme.errorContainer : (urgency <= 0 ? Theme.tertiaryContainer : Theme.primaryContainer)
     readonly property color onAccentContainerColor: urgency >= 2 ? Theme.on_ErrorContainer : (urgency <= 0 ? Theme.on_TertiaryContainer : Theme.on_PrimaryContainer)
     readonly property string inlineReplyPreviewText: String(notification.lastInlineReplyText || "")
     readonly property var interactiveActions: {
@@ -87,7 +87,7 @@ Item {
         topRightRadius: 12
         bottomLeftRadius: 0
         bottomRightRadius: 12
-        color: Theme.surfaceCon_tainerHigh
+        color: Theme.surfaceContainerHigh
         border.width: 1
         border.color: root.hovered ? Theme.outline : Theme.outlineVariant
         opacity: root.showDismissedState && root.dismissed ? 0.72 : 1.0
@@ -135,7 +135,7 @@ Item {
                 Layout.preferredWidth: 20
                 Layout.preferredHeight: 20
                 radius: 5
-                color: Theme.surfaceCon_tainerHighest
+                color: Theme.surfaceContainerHighest
                 border.width: 1
                 border.color: Theme.outlineVariant
                 visible: root.visualReady || root.visualLoading
@@ -189,7 +189,7 @@ Item {
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 radius: 9
-                color: dismissHover.containsMouse ? Theme.surfaceCon_tainer : Theme.surfaceCon_tainerHighest
+                color: dismissHover.containsMouse ? Theme.surfaceContainer : Theme.surfaceContainerHighest
                 border.width: 1
                 border.color: Theme.outlineVariant
 
@@ -241,7 +241,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 6
                 radius: 3
-                color: Theme.surfaceCon_tainerHighest
+                color: Theme.surfaceContainerHighest
                 border.width: 1
                 border.color: Theme.outlineVariant
 
@@ -311,7 +311,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.surfaceCon_tainerHighest
+                color: Theme.surfaceContainerHighest
                 border.width: 1
                 border.color: Theme.outlineVariant
 
@@ -394,7 +394,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.surfaceCon_tainerHighest
+                color: Theme.surfaceContainerHighest
                 border.width: 1
                 border.color: Theme.outlineVariant
 

@@ -75,7 +75,7 @@ Item {
                 Layout.preferredHeight: 20
 
                 text: wsId
-                color: isActive ? Theme.primary : (hasOpenWindows ? Theme.surfaceCon_tainerHighest : Theme.surfaceCon_tainerLow)
+                color: isActive ? Theme.primary : (hasOpenWindows ? Theme.surfaceContainerHighest : Theme.surfaceContainerLow)
                 font {
                     pixelSize: 15
                     bold: true

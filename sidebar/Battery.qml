@@ -46,7 +46,7 @@ ColumnLayout {
 
     function getBatteryColor() {
         if (!UPower.displayDevice.ready)
-            return Theme.surfaceCon_tainerLow;
+            return Theme.surfaceContainerLow;
         if (UPower.displayDevice.state === UPowerDeviceState.Charging)
             return Theme.secondary;
         if (UPower.displayDevice.state === UPowerDeviceState.FullyCharged)

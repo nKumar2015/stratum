@@ -690,35 +690,35 @@ Window {
 
                     Text {
                         text: "State: " + (wifiMenu.activeState ? wifiMenu.activeState : (wifiMenu.wifiEnabled ? "idle" : "wifi disabled"))
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Signal: " + (wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A")
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Security: " + (wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A")
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "IP: " + (wifiMenu.activeIp ? wifiMenu.activeIp : "N/A")
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Gateway: " + (wifiMenu.activeGateway ? wifiMenu.activeGateway : "N/A")
-                        color: Theme.surfaceCon_tainer
+                        color: Theme.surfaceContainer
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
@@ -770,7 +770,7 @@ Window {
 
                 Text {
                     text: wifiMenu.networks.length + " networks" + (wifiMenu.hiddenDuplicateCount > 0 ? "  •  " + wifiMenu.hiddenDuplicateCount + " hidden" : "")
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -935,7 +935,7 @@ Window {
 
                                             Text {
                                                 text: "Signal " + wifiMenu.signalBars(modelData.signal) + "  •  " + (modelData.security ? modelData.security : "Open") + (modelData.inUse === "*" ? "  •  Connected" : "")
-                                                color: Theme.surfaceCon_tainer
+                                                color: Theme.surfaceContainer
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -948,7 +948,7 @@ Window {
 
                                         Text {
                                             text: "󰅂"
-                                            color: Theme.surfaceCon_tainer
+                                            color: Theme.surfaceContainer
                                             font.family: Theme.font
                                             font.pixelSize: 12
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
@@ -1052,21 +1052,21 @@ Window {
 
                         Text {
                             text: "Security: " + (wifiMenu.selectedSecurity ? wifiMenu.selectedSecurity : "Open")
-                            color: Theme.surfaceCon_tainer
+                            color: Theme.surfaceContainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Signal: " + (wifiMenu.selectedSignal >= 0 ? wifiMenu.signalBars(wifiMenu.selectedSignal) : "N/A")
-                            color: Theme.surfaceCon_tainer
+                            color: Theme.surfaceContainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Status: " + (wifiMenu.selectedInUse === "*" ? "Connected" : "Available")
-                            color: wifiMenu.selectedInUse === "*" ? Theme.secondary : Theme.surfaceCon_tainer
+                            color: wifiMenu.selectedInUse === "*" ? Theme.secondary : Theme.surfaceContainer
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1095,9 +1095,9 @@ Window {
                             echoMode: TextInput.Password
                             enabled: visible
                             color: Theme.on_Surface
-                            placeholderTextColor: Theme.surfaceCon_tainer
+                            placeholderTextColor: Theme.surfaceContainer
                             selectionColor: Theme.primary
-                            selectedTextColor: Theme.surfaceCon_tainerLowest
+                            selectedTextColor: Theme.surfaceContainerLowest
 
                             background: Rectangle {
                                 radius: 6

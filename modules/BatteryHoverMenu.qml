@@ -405,14 +405,14 @@ PanelWindow {
                         Layout.fillWidth: true
                         height: 30
                         radius: 6
-                        color: selected ? Theme.primary : (modeHover.containsMouse ? Theme.outlineVariant : Theme.surfaceCon_tainerLowest)
+                        color: selected ? Theme.primary : (modeHover.containsMouse ? Theme.outlineVariant : Theme.surfaceContainerLowest)
                         border.width: 1
                         border.color: selected ? Theme.primary : Theme.outlineVariant
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.label
-                            color: selected ? Theme.surfaceCon_tainerLowest : Theme.on_Surface
+                            color: selected ? Theme.surfaceContainerLowest : Theme.on_Surface
                             font.pixelSize: 10
                             font.family: Theme.font
                             font.bold: true

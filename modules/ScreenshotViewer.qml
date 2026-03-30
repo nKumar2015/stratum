@@ -477,7 +477,7 @@ PanelWindow {
 
                 Text {
                     text: "Mode: " + viewer.captureMode
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
@@ -491,7 +491,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceCon_tainerLowest
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.outlineVariant
 
@@ -515,7 +515,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
+                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
                     border.width: 1
                     border.color: Theme.primary
 
@@ -539,7 +539,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
+                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
                     border.width: 1
                     border.color: Theme.primary
 
@@ -563,7 +563,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceCon_tainer : Theme.primary
+                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
                     border.width: 1
                     border.color: Theme.primary
 
@@ -587,7 +587,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceCon_tainerLowest
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.outlineVariant
 
@@ -614,7 +614,7 @@ PanelWindow {
 
                 Text {
                     text: "Annotation color"
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -643,7 +643,7 @@ PanelWindow {
 
                 Text {
                     text: "Pen"
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -675,7 +675,7 @@ PanelWindow {
 
                 Text {
                     text: "Zoom"
-                    color: Theme.surfaceCon_tainer
+                    color: Theme.surfaceContainer
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8

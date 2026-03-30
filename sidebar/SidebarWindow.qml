@@ -44,7 +44,7 @@ PanelWindow {
 
             Text {
                 text: ""
-                color: Theme.surfaceCon_tainerHighest
+                color: Theme.surfaceContainerHighest
                 font.pixelSize: 20
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -68,7 +68,7 @@ PanelWindow {
                 Layout.preferredWidth: 30
                 Layout.preferredHeight: 86
                 radius: 15
-                color: Theme.surfaceCon_tainerLowest
+                color: Theme.surfaceContainerLowest
                 border.width: 1
                 border.color: Theme.outlineVariant
 

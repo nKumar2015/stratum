@@ -515,7 +515,7 @@ PanelWindow {
                     required property var modelData
 
                     Layout.fillWidth: true
-                    Layout.topMargin: index === 0 ? 0 : -6
+                    Layout.topMargin: -6
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultOutput
@@ -589,7 +589,7 @@ PanelWindow {
                     required property var modelData
 
                     Layout.fillWidth: true
-                    Layout.topMargin: index === 0 ? 0 : -6
+                    Layout.topMargin: -6
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultInput

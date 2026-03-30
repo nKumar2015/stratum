@@ -142,9 +142,9 @@ Scope {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: 300
                         Layout.preferredHeight: 50
-                        color: Theme.surfaceCon_tainerLowest
+                        color: Theme.surfaceContainerLowest
                         radius: 8
-                        border.color: passwordInput.activeFocus ? Theme.primary : Theme.surfaceCon_tainer
+                        border.color: passwordInput.activeFocus ? Theme.primary : Theme.surfaceContainer
                         border.width: 2
 
                         TextInput {

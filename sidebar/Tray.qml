@@ -61,7 +61,7 @@ Flow {
             implicitWidth: Math.max(120, menuLayout.implicitWidth + 8)
             implicitHeight: Math.max(32, menuLayout.implicitHeight + 8)
             color: Theme.background
-            border.color: Theme.surfaceCon_tainerLow
+            border.color: Theme.surfaceContainerLow
             border.width: 1
             radius: 6
 
@@ -78,7 +78,7 @@ Flow {
 
                         implicitWidth: Math.max(100, entryText.implicitWidth + 24)
                         implicitHeight: modelData.isSeparator ? 1 : 28
-                        color: entryMouse.containsMouse ? Theme.surfaceCon_tainer : "transparent"
+                        color: entryMouse.containsMouse ? Theme.surfaceContainer : "transparent"
                         radius: 4
 
                         Text {
@@ -97,7 +97,7 @@ Flow {
                             anchors.fill: parent
                             anchors.leftMargin: 4
                             anchors.rightMargin: 4
-                            color: Theme.surfaceCon_tainerLow
+                            color: Theme.surfaceContainerLow
                             visible: modelData.isSeparator
                         }
 

@@ -105,7 +105,7 @@ PanelWindow {
         anchors.centerIn: parent
 
         color: Theme.background
-        border.color: Theme.surfaceCon_tainerLow
+        border.color: Theme.surfaceContainerLow
         border.width: 2
         radius: 12
 
@@ -164,14 +164,14 @@ PanelWindow {
                                 anchors.fill: btnIcon
                                 colorization: 1.0
                                 brightness: 1
-                                colorizationColor: powerOption.isActive ? Theme.on_Surface : Theme.surfaceCon_tainer
+                                colorizationColor: powerOption.isActive ? Theme.on_Surface : Theme.surfaceContainer
                             }
                         }
                         Text {
                             id: btnText
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: powerOption.modelData.name
-                            color: powerOption.isActive ? Theme.on_Surface : Theme.surfaceCon_tainer
+                            color: powerOption.isActive ? Theme.on_Surface : Theme.surfaceContainer
                             font.pixelSize: 10
                             font.family: Theme.font
                             font.bold: true

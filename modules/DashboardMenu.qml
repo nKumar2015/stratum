@@ -707,7 +707,7 @@ PanelWindow {
 
                                     Text {
                                         text: "CPU"
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -726,7 +726,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.surfaceCon_tainerLowest
+                                    color: Theme.surfaceContainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.cpuPercent / 100
@@ -770,7 +770,7 @@ PanelWindow {
 
                                     Text {
                                         text: "GPU"
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -778,7 +778,7 @@ PanelWindow {
 
                                     Text {
                                         text: "|"
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                     }
@@ -786,7 +786,7 @@ PanelWindow {
                                     Text {
                                         Layout.fillWidth: true
                                         text: dashboard.gpuSource
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 9
                                         elide: Text.ElideRight
@@ -795,7 +795,7 @@ PanelWindow {
 
                                 Text {
                                     text: dashboard.gpuPercentText === "N/A" ? "N/A" : dashboard.gpuPercentText + "%"
-                                    color: dashboard.gpuPercentText === "N/A" ? Theme.surfaceCon_tainerLow : Theme.secondary
+                                    color: dashboard.gpuPercentText === "N/A" ? Theme.surfaceContainerLow : Theme.secondary
                                     font.family: Theme.font
                                     font.pixelSize: 17
                                     font.bold: true
@@ -805,7 +805,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.surfaceCon_tainerLowest
+                                    color: Theme.surfaceContainerLowest
                                     visible: dashboard.gpuPercentText !== "N/A"
 
                                     Rectangle {
@@ -850,7 +850,7 @@ PanelWindow {
 
                                     Text {
                                         text: "RAM"
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -876,7 +876,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.surfaceCon_tainerLowest
+                                    color: Theme.surfaceContainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.ramPercent / 100
@@ -920,7 +920,7 @@ PanelWindow {
 
                                     Text {
                                         text: "Storage"
-                                        color: Theme.surfaceCon_tainerLow
+                                        color: Theme.surfaceContainerLow
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -946,7 +946,7 @@ PanelWindow {
                                     Layout.fillWidth: true
                                     implicitHeight: 6
                                     radius: 3
-                                    color: Theme.surfaceCon_tainerLowest
+                                    color: Theme.surfaceContainerLowest
 
                                     Rectangle {
                                         width: parent.width * dashboard.storagePercent / 100
@@ -1029,7 +1029,7 @@ PanelWindow {
                                             anchors.fill: parent
                                             anchors.margins: 3
                                             text: dashboard.weekdayLabel(modelData)
-                                            color: Theme.surfaceCon_tainerHighest
+                                            color: Theme.surfaceContainerHighest
                                             font.family: Theme.font
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1081,7 +1081,7 @@ PanelWindow {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: String(dayValue)
-                                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.on_Surface : Theme.surfaceCon_tainerLow)
+                                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.on_Surface : Theme.surfaceContainerLow)
                                                 font.family: Theme.font
                                                 font.pixelSize: 12
                                                 font.bold: isToday
@@ -1285,7 +1285,7 @@ PanelWindow {
                                 anchors.centerIn: parent
                                 text: "󰎆"
                                 visible: dashboard.musicArtUrl.length === 0
-                                color: Theme.surfaceCon_tainerLow
+                                color: Theme.surfaceContainerLow
                                 font.family: Theme.font
                                 font.pixelSize: 36
                             }
@@ -1304,7 +1304,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicArtist
-                            color: Theme.surfaceCon_tainerHighest
+                            color: Theme.surfaceContainerHighest
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -1314,7 +1314,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicAlbum
-                            color: Theme.surfaceCon_tainerLow
+                            color: Theme.surfaceContainerLow
                             font.family: Theme.font
                             font.pixelSize: 10
                             elide: Text.ElideRight
