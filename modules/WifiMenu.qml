@@ -690,35 +690,35 @@ Window {
 
                     Text {
                         text: "State: " + (wifiMenu.activeState ? wifiMenu.activeState : (wifiMenu.wifiEnabled ? "idle" : "wifi disabled"))
-                        color: Theme.surfaceContainer
+                        color: Theme.secondary
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Signal: " + (wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A")
-                        color: Theme.surfaceContainer
+                        color: Theme.secondary
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Security: " + (wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A")
-                        color: Theme.surfaceContainer
+                        color: Theme.secondary
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "IP: " + (wifiMenu.activeIp ? wifiMenu.activeIp : "N/A")
-                        color: Theme.surfaceContainer
+                        color: Theme.secondary
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
 
                     Text {
                         text: "Gateway: " + (wifiMenu.activeGateway ? wifiMenu.activeGateway : "N/A")
-                        color: Theme.surfaceContainer
+                        color: Theme.secondary
                         font.family: Theme.font
                         font.pixelSize: 12
                     }
@@ -850,7 +850,7 @@ Window {
                                     width: parent.width
                                     height: 56
                                     radius: 6
-                                    color: wifiMenu.selectedSsid === modelData.ssid ? "#1d2434" : Theme.background
+                                    color: wifiMenu.selectedSsid === modelData.ssid ? Theme.surfaceVariant : Theme.surface
                                     border.color: modelData.inUse === "*" ? Theme.primary : Theme.outlineVariant
                                     border.width: 1
                                     opacity: 1
@@ -935,7 +935,7 @@ Window {
 
                                             Text {
                                                 text: "Signal " + wifiMenu.signalBars(modelData.signal) + "  •  " + (modelData.security ? modelData.security : "Open") + (modelData.inUse === "*" ? "  •  Connected" : "")
-                                                color: Theme.surfaceContainer
+                                                color: Theme.secondary
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -964,7 +964,7 @@ Window {
                 Rectangle {
                     Layout.preferredWidth: wifiMenu.hasSelection ? 250 : 0
                     Layout.fillHeight: true
-                    color: "#141422"
+                    color: Theme.surface
                     radius: 8
                     border.color: Theme.outlineVariant
                     border.width: 1
@@ -1041,32 +1041,87 @@ Window {
                             }
                         }
 
-                        Text {
-                            text: wifiMenu.selectedSsid
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 14
-                            font.bold: true
-                            elide: Text.ElideRight
+
+                        Item {
+                            id: ssidTextClip
+                            Layout.fillWidth: true
+                            Layout.minimumHeight: ssidTextA.implicitHeight
+                            implicitHeight: ssidTextA.implicitHeight
+                            clip: true
+
+                            property int marqueeGap: 24
+                            property real scrollSpeed: 42
+                            property bool titleOverflow: ssidTextA.implicitWidth > width
+                            property real loopSpan: ssidTextA.implicitWidth + marqueeGap
+                            property real tickerOffset: 0
+
+                            Text {
+                                id: ssidTextA
+                                text: wifiMenu.selectedSsid
+                                color: Theme.on_Surface
+                                font.family: Theme.font
+                                font.pixelSize: 14
+                                font.bold: true
+                                elide: Text.ElideNone
+                                wrapMode: Text.NoWrap
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: ssidTextClip.titleOverflow ? ssidTextClip.tickerOffset : 0
+                            } 
+
+                            Text {
+                                id: ssidTextB
+                                text: "|  " + wifiMenu.selectedSsid
+                                color: Theme.on_Surface
+                                font.family: Theme.font
+                                font.pixelSize: 14
+                                font.bold: true
+                                elide: Text.ElideNone
+                                wrapMode: Text.NoWrap
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: ssidTextClip.tickerOffset + ssidTextClip.loopSpan
+                                visible: ssidTextClip.titleOverflow
+                            } 
+
+                            NumberAnimation {
+                                id: ssidMarquee
+                                target: ssidTextClip
+                                property: "tickerOffset"
+                                from: 0
+                                to: -ssidTextClip.loopSpan
+                                duration: Math.max(1, Math.round((ssidTextClip.loopSpan / ssidTextClip.scrollSpeed) * 1000))
+                                easing.type: Easing.Linear
+                                running: wifiMenu.visible && ssidTextClip.titleOverflow
+                                loops: Animation.Infinite
+
+                                onRunningChanged: {
+                                    if (!running)
+                                        ssidTextClip.tickerOffset = 0;
+                                }
+                            }
+
+                            onTitleOverflowChanged: {
+                                if (!titleOverflow)
+                                    tickerOffset = 0;
+                            }
                         }
 
                         Text {
                             text: "Security: " + (wifiMenu.selectedSecurity ? wifiMenu.selectedSecurity : "Open")
-                            color: Theme.surfaceContainer
+                            color: Theme.secondary
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Signal: " + (wifiMenu.selectedSignal >= 0 ? wifiMenu.signalBars(wifiMenu.selectedSignal) : "N/A")
-                            color: Theme.surfaceContainer
+                            color: Theme.secondary
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
 
                         Text {
                             text: "Status: " + (wifiMenu.selectedInUse === "*" ? "Connected" : "Available")
-                            color: wifiMenu.selectedInUse === "*" ? Theme.secondary : Theme.surfaceContainer
+                            color: Theme.secondary
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1095,13 +1150,13 @@ Window {
                             echoMode: TextInput.Password
                             enabled: visible
                             color: Theme.on_Surface
-                            placeholderTextColor: Theme.surfaceContainer
+                            placeholderTextColor: Theme.surfaceBright
                             selectionColor: Theme.primary
                             selectedTextColor: Theme.surfaceContainerLowest
 
                             background: Rectangle {
                                 radius: 6
-                                color: passwordInput.enabled ? "#10101b" : "#1f1f29"
+                                color: passwordInput.enabled ? Theme.surface : Theme.surfaceDim
                                 border.color: passwordInput.activeFocus ? Theme.primary : Theme.outlineVariant
                                 border.width: 1
 

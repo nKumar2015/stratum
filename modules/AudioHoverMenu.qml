@@ -265,6 +265,11 @@ PanelWindow {
         }
     }
 
+    Process {
+        id: openPavucontrolProc
+        command: ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "open-control"]
+    }
+
     Timer {
         id: statusRetryTimer
         interval: 120
@@ -628,6 +633,36 @@ PanelWindow {
                     }
                 }
             }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: Theme.outlineVariant
+            }
+
+            Text {
+                text: "Open full settings →"
+                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
+                font.pixelSize: 11
+                font.family: Theme.font
+                opacity: fullMenuHover.containsMouse ? 1.0 : 0.6
+                Layout.bottomMargin: 0
+
+                MouseArea {
+                    id: fullMenuHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        GlobalState.audioHoverIntent = false;
+                        openPavucontrolProc.running = true;
+                        GlobalState.showAudioHoverMenu = false;
+                    }
+                }
+
+                Behavior on color { ColorAnimation { duration: 100 } }
+            }
         }
+        
     }
 }
