@@ -7,6 +7,7 @@ import QtQuick.Layouts
 import "../theme"
 
 Item {
+    id: appTitleRoot
     required property var monitor
 
     Layout.fillHeight: true
@@ -49,12 +50,10 @@ Item {
             anchors.centerIn: parent
             spacing: 8
             width: Math.min(implicitWidth, parent.width - 20)
-            Image {
+            IconImage {
                 id: appIcon
-                source: Quickshell.iconPath(displayAppId, "application-x-executable")
-
-                Layout.preferredWidth: 16
-                Layout.preferredHeight: 16
+                source: Quickshell.iconPath(appTitleRoot.displayAppId, "application-x-executable")
+                implicitSize: 16
                 Layout.alignment: Qt.AlignVCenter
 
                 visible: appText.text !== "\uf4a9  Desktop"
@@ -62,7 +61,7 @@ Item {
 
             Text {
                 id: appText
-                text: displayWindow?.title || "\uf4a9  Desktop"
+                text: appTitleRoot.displayWindow?.title || "\uf4a9  Desktop"
                 color: Theme.on_Surface
                 font.family: Theme.font
                 font.pixelSize: 14
