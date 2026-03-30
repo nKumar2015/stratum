@@ -96,6 +96,6 @@ in {
       };
     };
 
-    systemd.user.services.xdg-desktop-portal-gtk.enable = cfg.installPortal;
+    services.xdg-desktop-portal-gtk.enable = cfg.installPortal;
   };
 }
