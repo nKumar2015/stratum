@@ -9,6 +9,9 @@
       url = "github:nkumar2015/stratum";
       flake = false;
     };
+
+    matugen.url = "github:InioX/matugen";
+    quickshell.url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
   };
 
   outputs = {
