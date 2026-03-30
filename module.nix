@@ -96,10 +96,6 @@ in {
       };
     };
 
-    systemd.user.services.xdg-desktop-portal-gtk = lib.mkIf cfg.installPortal {
-      Install = {
-        WantedBy = ["xdg-desktop-portal.service"];
-      };
-    };
+    systemd.user.services.xdg-desktop-portal-gtk.enable = cfg.installPortal;
   };
 }
