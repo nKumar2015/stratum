@@ -86,6 +86,7 @@ in {
         enable = true;
         extraPortals = [
           pkgs.xdg-desktop-portal-gtk
+          pkgs.xdg-desktop-portal-hyprland
         ];
         config = {
           common = {
@@ -95,7 +96,5 @@ in {
         };
       };
     };
-
-    services.xdg-desktop-portal-gtk.enable = cfg.installPortal;
   };
 }
