@@ -676,7 +676,7 @@ PanelWindow {
 
                         Text {
                             text: "Performance"
-                            color: Theme.on_Surface
+                            color: Theme.on_Background
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -707,7 +707,7 @@ PanelWindow {
 
                                     Text {
                                         text: "CPU"
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -770,7 +770,7 @@ PanelWindow {
 
                                     Text {
                                         text: "GPU"
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -778,7 +778,7 @@ PanelWindow {
 
                                     Text {
                                         text: "|"
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                     }
@@ -786,16 +786,17 @@ PanelWindow {
                                     Text {
                                         Layout.fillWidth: true
                                         text: dashboard.gpuSource
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 9
                                         elide: Text.ElideRight
+                                        font.bold: true
                                     }
                                 }
 
                                 Text {
                                     text: dashboard.gpuPercentText === "N/A" ? "N/A" : dashboard.gpuPercentText + "%"
-                                    color: dashboard.gpuPercentText === "N/A" ? Theme.surfaceContainerLow : Theme.secondary
+                                    color: dashboard.gpuPercentText === "N/A" ? Theme.on_Background : Theme.secondary
                                     font.family: Theme.font
                                     font.pixelSize: 17
                                     font.bold: true
@@ -850,7 +851,7 @@ PanelWindow {
 
                                     Text {
                                         text: "RAM"
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -920,7 +921,7 @@ PanelWindow {
 
                                     Text {
                                         text: "Storage"
-                                        color: Theme.surfaceContainerLow
+                                        color: Theme.on_Background
                                         font.family: Theme.font
                                         font.pixelSize: 10
                                         font.bold: true
@@ -1015,26 +1016,47 @@ PanelWindow {
                                 columnSpacing: dashboard.calendarWeekdayGap
                                 width: dashboard.calendarGridWidth
 
-                                Repeater {
-                                    model: dashboard.calendarWeekdays
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        implicitWidth: dashboard.calendarCellWidth
-                                        implicitHeight: dashboard.calendarWeekdayHeight
-                                        radius: 6
-                                        color: Theme.background
-                                        border.width: 1
+                                Rectangle {
+                                    id: weekdaysBox
+                                    width: (dashboard.calendarCellWidth) * 7 + (6 * 3)
+                                    height: dashboard.calendarWeekdayHeight
+                                    radius: 8
+                                    color: Theme.background   
+                                    clip: true                    
 
-                                        Text {
-                                            anchors.fill: parent
-                                            anchors.margins: 3
-                                            text: dashboard.weekdayLabel(modelData)
-                                            color: Theme.surfaceContainerHighest
-                                            font.family: Theme.font
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.bottom: parent.bottom
+                                        height: 1
+                                        color: Theme.outline
+                                    }
+
+                                    Row {
+                                        anchors.fill: parent
+                                        spacing: 3
+
+                                        Repeater {
+                                            model: dashboard.calendarWeekdays
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                width: dashboard.calendarCellWidth
+                                                height: dashboard.calendarWeekdayHeight
+                                                color: "transparent"   // no per-item border
+                                                // optional: add only internal separators if desired
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    anchors.margins: 3
+                                                    text: dashboard.weekdayLabel(modelData)
+                                                    color: Theme.on_Background
+                                                    font.family: Theme.font
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1291,20 +1313,72 @@ PanelWindow {
                             }
                         }
 
-                        Text {
-                            text: dashboard.musicTitle
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 12
-                            font.bold: true
-                            elide: Text.ElideRight
+                        Item {
+                            id: musicTitleClip
                             Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignHCenter
+                            Layout.minimumHeight: musicTitleTextA.implicitHeight
+                            implicitHeight: musicTitleTextA.implicitHeight
+                            clip: true
+
+                            property int marqueeGap: 24
+                            property real scrollSpeed: 42
+                            property bool titleOverflow: musicTitleTextA.implicitWidth > width
+                            property real loopSpan: musicTitleTextA.implicitWidth + marqueeGap
+                            property real tickerOffset: 0
+
+                            Text {
+                                id: musicTitleTextA
+                                text: dashboard.musicTitle
+                                color: Theme.on_Surface
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideNone
+                                wrapMode: Text.NoWrap
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: musicTitleClip.titleOverflow ? musicTitleClip.tickerOffset : Math.round((musicTitleClip.width - implicitWidth) / 2)
+                            }
+
+                            Text {
+                                id: musicTitleTextB
+                                text: dashboard.musicTitle
+                                color: Theme.on_Surface
+                                font.family: Theme.font
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideNone
+                                wrapMode: Text.NoWrap
+                                visible: musicTitleClip.titleOverflow
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: musicTitleClip.tickerOffset + musicTitleClip.loopSpan
+                            }
+
+                            NumberAnimation {
+                                id: musicTitleMarquee
+                                target: musicTitleClip
+                                property: "tickerOffset"
+                                from: 0
+                                to: -musicTitleClip.loopSpan
+                                duration: Math.max(1, Math.round((musicTitleClip.loopSpan / musicTitleClip.scrollSpeed) * 1000))
+                                easing.type: Easing.Linear
+                                running: dashboard.visible && musicTitleClip.titleOverflow
+                                loops: Animation.Infinite
+
+                                onRunningChanged: {
+                                    if (!running)
+                                        musicTitleClip.tickerOffset = 0;
+                                }
+                            }
+
+                            onTitleOverflowChanged: {
+                                if (!titleOverflow)
+                                    tickerOffset = 0;
+                            }
                         }
 
                         Text {
                             text: dashboard.musicArtist
-                            color: Theme.surfaceContainerHighest
+                            color: Theme.secondary
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight
@@ -1314,7 +1388,7 @@ PanelWindow {
 
                         Text {
                             text: dashboard.musicAlbum
-                            color: Theme.surfaceContainerLow
+                            color: Theme.tertiary
                             font.family: Theme.font
                             font.pixelSize: 10
                             elide: Text.ElideRight

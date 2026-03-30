@@ -38,7 +38,7 @@ ColumnLayout {
 
     Text {
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[1] : "--"
-        color: Theme.surfaceContainerHighest
+        color: Theme.secondary
         font {
             pixelSize: 18
             bold: true
@@ -49,7 +49,7 @@ ColumnLayout {
     Text {
         horizontalAlignment: Text.AlignHCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[2] : "--"
-        color: Theme.surfaceContainerLow // Use a dimmer color so it doesn't distract
+        color: Theme.secondary
         font {
             pixelSize: 18
             bold: false

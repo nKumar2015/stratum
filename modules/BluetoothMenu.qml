@@ -32,9 +32,9 @@ Window {
     property string activePaired: ""
     property string selectedMac: ""
     property string selectedName: ""
-    property string selectedConnected: ""
-    property string selectedTrusted: ""
-    property string selectedPaired: ""
+    property bool selectedConnected: false
+    property bool selectedTrusted: false
+    property bool selectedPaired: false
     property bool hasSelection: selectedMac.length > 0
     property string statusMessage: ""
     property var devices: []
@@ -203,13 +203,13 @@ Window {
     function clearSelection() {
         selectedMac = "";
         selectedName = "";
-        selectedConnected = "";
-        selectedTrusted = "";
-        selectedPaired = "";
+        selectedConnected = false;
+        selectedTrusted = false;
+        selectedPaired = false;
     }
 
     function pairSelectedDevice() {
-        if (!selectedMac || selectedPaired === "yes")
+        if (!selectedMac || selectedPaired)
             return;
 
         actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "pair", selectedMac];
@@ -221,7 +221,7 @@ Window {
     }
 
     function connectSelectedDevice() {
-        if (!selectedMac || selectedConnected === "yes")
+        if (!selectedMac || selectedConnected)
             return;
 
         actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "connect", selectedMac];
@@ -406,9 +406,9 @@ Window {
                 for (let i = 0; i < parsed.length; i++) {
                     if (parsed[i].mac === bluetoothMenu.selectedMac) {
                         bluetoothMenu.selectedName = parsed[i].name;
-                        bluetoothMenu.selectedConnected = parsed[i].connected;
-                        bluetoothMenu.selectedTrusted = parsed[i].trusted;
-                        bluetoothMenu.selectedPaired = parsed[i].paired;
+                        bluetoothMenu.selectedConnected = parsed[i].connected == "yes";
+                        bluetoothMenu.selectedTrusted = parsed[i].trusted == "yes";
+                        bluetoothMenu.selectedPaired = parsed[i].paired == "yes";
                         selectedFound = true;
                         break;
                     }
@@ -767,7 +767,7 @@ Window {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 124
+                Layout.preferredHeight: 64
                 color: Theme.background
                 radius: 8
                 border.color: Theme.outlineVariant
@@ -776,7 +776,7 @@ Window {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 10
-                    spacing: 6
+                    spacing: 0
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -827,7 +827,7 @@ Window {
 
                     Text {
                         text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A") + "  •  Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A") + "  •  Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
-                        color: Theme.surfaceContainer
+                        color: Theme.on_Background
                         font.family: Theme.font
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -989,14 +989,15 @@ Window {
 
                                 delegate: Rectangle {
                                     required property var modelData
+                                    required property var index
                                     id: deviceRow
                                     property bool shouldAnimateOnCreate: bluetoothMenu.animateRowsOnNextLoad
 
                                     width: parent.width
                                     height: 56
                                     radius: 6
-                                    color: bluetoothMenu.selectedMac === modelData.mac ? "#1d2434" : Theme.background
-                                    border.color: modelData.connected === "yes" ? Theme.primary : Theme.outlineVariant
+                                    color: bluetoothMenu.selectedMac === modelData.mac ? Theme.surfaceVariant : Theme.surface
+                                    border.color: modelData.connected === "yes" ? Theme.outline : Theme.outlineVariant
                                     border.width: 1
                                     opacity: 1
 
@@ -1053,9 +1054,9 @@ Window {
                                             } else {
                                                 bluetoothMenu.selectedMac = modelData.mac;
                                                 bluetoothMenu.selectedName = modelData.name;
-                                                bluetoothMenu.selectedConnected = modelData.connected;
-                                                bluetoothMenu.selectedTrusted = modelData.trusted;
-                                                bluetoothMenu.selectedPaired = modelData.paired;
+                                                bluetoothMenu.selectedConnected = modelData.connected == "yes";
+                                                bluetoothMenu.selectedTrusted = modelData.trusted == "yes";
+                                                bluetoothMenu.selectedPaired = modelData.paired == "yes";
                                             }
                                         }
                                     }
@@ -1071,7 +1072,7 @@ Window {
 
                                             Text {
                                                 text: modelData.name
-                                                color: Theme.on_Surface
+                                                color: bluetoothMenu.selectedMac === modelData.mac ? Theme.on_SurfaceVariant : Theme.on_Surface
                                                 font.family: Theme.font
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -1079,7 +1080,7 @@ Window {
 
                                             Text {
                                                 text: modelData.mac + "  •  " + (modelData.connected === "yes" ? "Connected" : "Disconnected") + "  •  Trusted " + modelData.trusted
-                                                color: Theme.surfaceContainer
+                                                color: bluetoothMenu.selectedMac === modelData.mac ? Theme.on_SurfaceVariant : Theme.on_Surface
                                                 font.family: Theme.font
                                                 font.pixelSize: 10
                                                 elide: Text.ElideRight
@@ -1103,7 +1104,7 @@ Window {
                 Rectangle {
                     Layout.preferredWidth: bluetoothMenu.hasSelection ? 250 : 0
                     Layout.fillHeight: true
-                    color: "#141422"
+                    color: Theme.background
                     radius: 8
                     border.color: Theme.outlineVariant
                     border.width: 1
@@ -1133,7 +1134,7 @@ Window {
 
                             Text {
                                 text: "Selected Device"
-                                color: Theme.on_Surface
+                                color: Theme.on_Background
                                 font.family: Theme.font
                                 font.pixelSize: 12
                                 font.bold: true
@@ -1182,7 +1183,7 @@ Window {
 
                         Text {
                             text: bluetoothMenu.selectedName
-                            color: Theme.on_Surface
+                            color: Theme.on_Background
                             font.family: Theme.font
                             font.pixelSize: 14
                             font.bold: true
@@ -1191,7 +1192,7 @@ Window {
 
                         Text {
                             text: "MAC: " + bluetoothMenu.selectedMac
-                            color: Theme.surfaceContainer
+                            color: Theme.secondary
                             font.family: Theme.font
                             font.pixelSize: 11
                         }
@@ -1201,11 +1202,12 @@ Window {
                             spacing: 5
 
                             Text {
-                                text: "Connected: " + (bluetoothMenu.selectedConnected || "no")
-                                color: bluetoothMenu.selectedConnected === "yes" ? Theme.secondary : Theme.surfaceContainer
+                                text: "Connected "
+                                color: Theme.tertiary
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
+                                visible: bluetoothMenu.selectedConnected 
                             }
 
                             Text {
@@ -1213,25 +1215,28 @@ Window {
                                 color: Theme.outlineVariant
                                 font.family: Theme.font
                                 font.pixelSize: 11
+                                visible: bluetoothMenu.selectedConnected && bluetoothMenu.selectedTrusted
                             }
 
                             Text {
-                                text: "Trusted: " + (bluetoothMenu.selectedTrusted || "no")
-                                color: Theme.surfaceContainer
+                                text: "Trusted"
+                                color: Theme.tertiary
                                 font.family: Theme.font
                                 font.pixelSize: 11
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
+                                visible: bluetoothMenu.selectedTrusted
                             }
                         }
 
                         Text {
                             Layout.fillWidth: true
-                            text: "Paired: " + (bluetoothMenu.selectedPaired || "no")
-                            color: Theme.surfaceContainer
+                            text: "Paired"
+                            color: Theme.tertiary
                             font.family: Theme.font
                             font.pixelSize: 11
                             elide: Text.ElideRight
+                            visible: bluetoothMenu.selectedPaired
                         }
 
                         Rectangle {
@@ -1242,7 +1247,7 @@ Window {
                         }
 
                         Rectangle {
-                            property bool isEnabled: bluetoothMenu.bluetoothEnabled && bluetoothMenu.selectedMac.length > 0 && bluetoothMenu.selectedPaired !== "yes"
+                            property bool isEnabled: bluetoothMenu.bluetoothEnabled && bluetoothMenu.selectedMac.length > 0 && !bluetoothMenu.selectedPaired
                             Layout.preferredHeight: 36
                             Layout.fillWidth: true
                             radius: 6
@@ -1250,7 +1255,7 @@ Window {
                             border.color: Theme.outlineVariant
                             border.width: 1
                             opacity: isEnabled ? 1.0 : 0.6
-                            visible: bluetoothMenu.selectedPaired !== "yes"
+                            visible: bluetoothMenu.selectedPaired
 
                             RowLayout {
                                 anchors.centerIn: parent
@@ -1282,7 +1287,7 @@ Window {
                         }
 
                         Rectangle {
-                            property bool isEnabled: bluetoothMenu.bluetoothEnabled && bluetoothMenu.selectedMac.length > 0 && bluetoothMenu.selectedConnected !== "yes"
+                            property bool isEnabled: bluetoothMenu.bluetoothEnabled && bluetoothMenu.selectedMac.length > 0 && !bluetoothMenu.selectedConnected
                             Layout.preferredHeight: 36
                             Layout.fillWidth: true
                             radius: 6
@@ -1303,7 +1308,7 @@ Window {
                                 }
 
                                 Text {
-                                    text: bluetoothMenu.selectedConnected === "yes" ? "Connected" : "Connect"
+                                    text: bluetoothMenu.selectedConnected ? "Connected" : "Connect"
                                     color: Theme.on_Surface
                                     font.family: Theme.font
                                     font.pixelSize: 12
@@ -1321,7 +1326,7 @@ Window {
                         }
 
                         Rectangle {
-                            property bool isEnabled: bluetoothMenu.selectedConnected === "yes"
+                            property bool isEnabled: bluetoothMenu.selectedConnected
                             Layout.preferredHeight: 36
                             Layout.fillWidth: true
                             radius: 6

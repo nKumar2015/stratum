@@ -72,7 +72,7 @@ ShellRoot {
 
                     Text {
                         text: ""
-                        color: Theme.surfaceContainerHighest
+                        color: Theme.secondary
                         font.pixelSize: 20
                         Layout.alignment: Qt.AlignHCenter
                     }
