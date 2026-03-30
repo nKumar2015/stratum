@@ -36,7 +36,7 @@ in {
 
   # 3. Activation Script for First-Boot Safety
   home.activation = {
-    setupMatugenCache = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    setupMatugenCache = config.lib.dag.entryAfter ["writeBoundary"] ''
       $DRY_RUN_CMD mkdir -p ${cacheDir}
       $DRY_RUN_CMD touch ${cacheDir}/Theme.qml
     '';
