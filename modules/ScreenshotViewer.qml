@@ -88,8 +88,7 @@ PanelWindow {
 
         try {
             value = decodeURIComponent(value);
-        } catch (_error) {
-        }
+        } catch (_error) {}
 
         return value;
     }
@@ -185,7 +184,7 @@ PanelWindow {
         if (hasAnnotations()) {
             const runtimeDir = StandardPaths.writableLocation(StandardPaths.RuntimeLocation) || "/tmp";
             const composedPath = runtimeDir + "/quickshell-screenshot-viewer-" + Date.now() + ".png";
-            imageDrawSurface.grabToImage(function(result) {
+            imageDrawSurface.grabToImage(function (result) {
                 const saved = result.saveToFile(composedPath);
                 if (!saved) {
                     viewer.isWorking = false;
@@ -266,7 +265,10 @@ PanelWindow {
             nextPanY = clamp(nextPanY, -limitY, limitY);
         }
 
-        return { x: nextPanX, y: nextPanY };
+        return {
+            x: nextPanX,
+            y: nextPanY
+        };
     }
 
     function setImageZoom(nextZoom, focusX, focusY) {
@@ -457,8 +459,7 @@ PanelWindow {
 
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-            }
+            onClicked: {}
         }
 
         ColumnLayout {
@@ -518,7 +519,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.tertiaryFixedDim
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.primary
 
@@ -542,7 +543,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.tertiaryFixedDim
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.primary
 
@@ -566,7 +567,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.tertiaryFixedDim
+                    color: Theme.surfaceContainerLowest
                     border.width: 1
                     border.color: Theme.primary
 
@@ -784,7 +785,7 @@ PanelWindow {
                             acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                             hoverEnabled: true
 
-                            onWheel: function(wheel) {
+                            onWheel: function (wheel) {
                                 if (!(wheel.modifiers & Qt.ControlModifier)) {
                                     wheel.accepted = false;
                                     return;
@@ -802,7 +803,7 @@ PanelWindow {
                                 wheel.accepted = true;
                             }
 
-                            onPressed: function(mouse) {
+                            onPressed: function (mouse) {
                                 const surfacePos = viewer.mapPaintToSurface(paintInputArea, mouse.x, mouse.y);
                                 const imagePos = viewer.mapPaintToImage(paintInputArea, mouse.x, mouse.y);
 
@@ -816,7 +817,12 @@ PanelWindow {
                                 const stroke = {
                                     color: viewer.colorToHex(viewer.annotationColor),
                                     size: viewer.penSize,
-                                    points: [{ x: imagePos.x, y: imagePos.y }]
+                                    points: [
+                                        {
+                                            x: imagePos.x,
+                                            y: imagePos.y
+                                        }
+                                    ]
                                 };
                                 strokes.push(stroke);
                                 viewer.annotationStrokes = strokes;
@@ -824,7 +830,7 @@ PanelWindow {
                                 paintCanvas.requestPaint();
                             }
 
-                            onPositionChanged: function(mouse) {
+                            onPositionChanged: function (mouse) {
                                 const surfacePos = viewer.mapPaintToSurface(paintInputArea, mouse.x, mouse.y);
                                 const imagePos = viewer.mapPaintToImage(paintInputArea, mouse.x, mouse.y);
 
@@ -845,7 +851,10 @@ PanelWindow {
                                 if (!stroke || !stroke.points)
                                     return;
 
-                                stroke.points.push({ x: imagePos.x, y: imagePos.y });
+                                stroke.points.push({
+                                    x: imagePos.x,
+                                    y: imagePos.y
+                                });
                                 strokes[idx] = stroke;
                                 viewer.annotationStrokes = strokes;
                                 paintCanvas.requestPaint();
@@ -887,7 +896,6 @@ PanelWindow {
                     font.bold: true
                 }
             }
-
         }
     }
 }
