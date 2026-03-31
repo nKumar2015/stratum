@@ -222,8 +222,7 @@ PanelWindow {
         const stamp = new Date();
         const pad = n => String(n).padStart(2, "0");
         const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
-        reopenAfterSaveAsDialog = viewer.visibleState;
-        viewer.visibleState = false;
+        reopenAfterSaveAsDialog = false;
         portalSaveAsProc.command = ["sh", Quickshell.shellDir + "/scripts/portal_save_file.sh", "Save Screenshot As", name];
         portalSaveAsProc.running = true;
     }
@@ -389,12 +388,16 @@ PanelWindow {
 
                 const result = this.text.trim();
                 if (!result) {
-                    viewer.showStatus(viewer.saveAsError("empty response"), true);
+                    // Some portal backends can close without returning a response payload.
+                    // Treat this as a user-cancel path to avoid surfacing a false timeout/error.
                     return;
                 }
 
                 if (result.startsWith("__ERROR__|")) {
                     const message = result.substring("__ERROR__|".length);
+                    const lowered = message.toLowerCase();
+                    if (lowered.includes("timed out") || lowered.includes("timeout") || lowered.includes("cancel"))
+                        return;
                     viewer.showStatus(viewer.saveAsError(message), true);
                     return;
                 }
@@ -515,7 +518,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
+                    color: Theme.tertiaryFixedDim
                     border.width: 1
                     border.color: Theme.primary
 
@@ -539,7 +542,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
+                    color: Theme.tertiaryFixedDim
                     border.width: 1
                     border.color: Theme.primary
 
@@ -563,7 +566,7 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: viewer.isWorking ? Theme.surfaceContainer : Theme.primary
+                    color: Theme.tertiaryFixedDim
                     border.width: 1
                     border.color: Theme.primary
 
