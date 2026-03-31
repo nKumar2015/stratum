@@ -221,7 +221,8 @@ PanelWindow {
         const stamp = new Date();
         const pad = n => String(n).padStart(2, "0");
         const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
-        reopenAfterSaveAsDialog = false;
+        reopenAfterSaveAsDialog = viewer.visibleState;
+        viewer.visibleState = false;
         portalSaveAsProc.command = ["sh", Quickshell.shellDir + "/scripts/portal_save_file.sh", "Save Screenshot As", name];
         portalSaveAsProc.running = true;
     }
@@ -481,7 +482,7 @@ PanelWindow {
 
                 Text {
                     text: "Mode: " + viewer.captureMode
-                    color: Theme.surfaceContainer
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
@@ -618,7 +619,7 @@ PanelWindow {
 
                 Text {
                     text: "Annotation color"
-                    color: Theme.surfaceContainer
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -647,7 +648,7 @@ PanelWindow {
 
                 Text {
                     text: "Pen"
-                    color: Theme.surfaceContainer
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                 }
@@ -679,7 +680,7 @@ PanelWindow {
 
                 Text {
                     text: "Zoom"
-                    color: Theme.surfaceContainer
+color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
