@@ -56,6 +56,7 @@ Item {
         }
         return Number(notification.sourceNotificationId || 0) > 0;
     }
+    readonly property bool canAutoDismiss: root.autoDismissEnabled && !root.sticky && !root.hovered && !replyInput.activeFocus
 
     function findInlineReplyAction() {
         const actions = notification.actions || [];
@@ -430,7 +431,17 @@ Item {
         id: dismissTimer
         interval: Math.max(1200, Number(notification.expiryMs || 5000))
         repeat: false
-        running: root.autoDismissEnabled && !root.sticky && !root.hovered && !replyInput.activeFocus
+        running: false
         onTriggered: root.expiredRequested(Number(notification.id || 0))
     }
+
+    function syncDismissTimer() {
+        dismissTimer.stop();
+        if (root.canAutoDismiss)
+            dismissTimer.start();
+    }
+
+    onCanAutoDismissChanged: syncDismissTimer()
+    onNotificationChanged: syncDismissTimer()
+    Component.onCompleted: syncDismissTimer()
 }

@@ -19,7 +19,6 @@ PanelWindow {
     property color annotationColor: "#ff3b30"
     property int penSize: 3
     property bool isWorking: false
-    property bool reopenAfterSaveAsDialog: false
     property string statusMessage: ""
     property bool statusError: false
     property var annotationStrokes: []
@@ -47,7 +46,7 @@ PanelWindow {
     exclusiveZone: -1
 
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: (visible && !portalSaveAsProc.running) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     function screenForMonitorName(name) {
         const wanted = String(name || "").trim();
@@ -221,8 +220,6 @@ PanelWindow {
         const stamp = new Date();
         const pad = n => String(n).padStart(2, "0");
         const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
-        reopenAfterSaveAsDialog = viewer.visibleState;
-        viewer.visibleState = false;
         portalSaveAsProc.command = ["sh", Quickshell.shellDir + "/scripts/portal_save_file.sh", "Save Screenshot As", name];
         portalSaveAsProc.running = true;
     }
@@ -385,10 +382,6 @@ PanelWindow {
         running: false
         stdout: StdioCollector {
             onStreamFinished: {
-                if (viewer.reopenAfterSaveAsDialog)
-                    viewer.visibleState = true;
-                viewer.reopenAfterSaveAsDialog = false;
-
                 const result = this.text.trim();
                 if (!result) {
                     // Some portal backends can close without returning a response payload.
