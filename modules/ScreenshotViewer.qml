@@ -45,7 +45,9 @@ PanelWindow {
     visible: visibleState
     exclusiveZone: -1
 
-    WlrLayershell.layer: WlrLayer.Overlay
+    // Keep the viewer above normal UI during editing, but drop it below regular
+    // app windows while the portal picker is active so the chooser is always on top.
+    WlrLayershell.layer: portalSaveAsProc.running ? WlrLayer.Bottom : WlrLayer.Overlay
     WlrLayershell.keyboardFocus: (visible && !portalSaveAsProc.running) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     function screenForMonitorName(name) {
