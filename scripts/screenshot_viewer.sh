@@ -96,6 +96,18 @@ save_to_path() {
     target_path="$(normalize_path "$target_path_raw")"
     [ -n "$target_path" ] || error "missing destination path"
 
+    # Some portal backends may return a directory URI/path; resolve it to a filename.
+    case "$target_path" in
+        */)
+            target_path="${target_path%/}/Screenshot-$(date +%Y%m%d-%H%M%S).png"
+            ;;
+        *)
+            if [ -d "$target_path" ]; then
+                target_path="$target_path/Screenshot-$(date +%Y%m%d-%H%M%S).png"
+            fi
+            ;;
+    esac
+
     case "$target_path" in
         *.png) ;;
         *) target_path="$target_path.png" ;;

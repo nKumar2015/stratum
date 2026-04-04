@@ -31,7 +31,7 @@ request_output="$(gdbus call \
     "$title_raw" \
     "$options" 2>&1)" || error "$request_output"
 
-request_path="$(printf "%s\n" "$request_output" | sed -n "s/^(objectpath '\([^']*\)',)$/\1/p")"
+request_path="$(printf "%s\n" "$request_output" | sed -n "s/.*objectpath '\([^']*\)'.*/\1/p" | head -n1)"
 [ -n "$request_path" ] || error "failed to read portal request handle"
 
 portal_timeout="${XDG_PORTAL_TIMEOUT:-300}"
@@ -48,12 +48,15 @@ result="$(timeout "$portal_timeout" dbus-monitor --session \
         }
         next
     }
-    code == 0 && /string "file:\/\// && uri == "" {
-        uri = $0
-        sub(/.*string "/, "", uri)
-        sub(/".*$/, "", uri)
-        print "ok|" uri
-        exit
+    code == 0 && /string "/ && uri == "" {
+        value = $0
+        sub(/.*string "/, "", value)
+        sub(/".*$/, "", value)
+        if (value ~ /^file:\/\// || value ~ /^\//) {
+            uri = value
+            print "ok|" uri
+            exit
+        }
     }
 ')"
 
