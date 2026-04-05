@@ -70,6 +70,18 @@ PanelWindow {
         return isNaN(n) ? fallback : n;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function clampPercent(value) {
         const n = parseInt(value);
         if (isNaN(n))
@@ -124,58 +136,45 @@ PanelWindow {
             firstWeekday: calendarFirstWeekday
         };
 
-        const lines = String(rawText || "").trim().split("\n");
-        let rowIndex = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const line = (lines[i] || "").trim();
-            if (!line || line.startsWith("__ERROR__|"))
-                continue;
+        const parsed = parseCliJson(rawText);
+        if (!parsed || parsed.ok !== true)
+            return payload;
 
-            const parts = line.split("|");
-            const type = (parts[0] || "").trim();
+        const calendar = parsed.calendar || null;
+        if (!calendar || typeof calendar !== "object")
+            return payload;
 
-            if (type === "CAL_TITLE") {
-                payload.title = (parts[1] || "").trim();
-                payload.hasCalendar = true;
-            } else if (type === "CAL_META") {
-                const y = parseInt(parts[1] || String(payload.year));
-                const m = parseInt(parts[2] || String(payload.month));
-                const dim = parseInt(parts[3] || String(payload.daysInMonth));
-                const fwd = parseInt(parts[4] || String(payload.firstWeekday));
+        payload.title = String(calendar.title || payload.title).trim();
 
-                payload.year = isNaN(y) ? payload.year : y;
-                payload.month = isNaN(m) ? payload.month : m;
-                payload.daysInMonth = isNaN(dim) ? payload.daysInMonth : dim;
-                payload.firstWeekday = isNaN(fwd) ? payload.firstWeekday : Math.max(0, Math.min(6, fwd));
-                payload.hasCalendar = true;
-            } else if (type === "CAL_WEEKDAYS") {
-                payload.weekdays = [
-                    (parts[1] || "Su").trim(),
-                    (parts[2] || "Mo").trim(),
-                    (parts[3] || "Tu").trim(),
-                    (parts[4] || "We").trim(),
-                    (parts[5] || "Th").trim(),
-                    (parts[6] || "Fr").trim(),
-                    (parts[7] || "Sa").trim()
-                ];
-                payload.hasCalendar = true;
-            } else if (type === "CAL_ROW") {
-                if (rowIndex < 6) {
-                    const row = [];
-                    for (let c = 1; c <= 7; c++) {
-                        const day = parseInt(parts[c] || "0");
-                        row.push(isNaN(day) ? 0 : day);
-                    }
-                    payload.rows[rowIndex] = row;
-                    rowIndex++;
-                    payload.hasCalendar = true;
-                }
-            } else if (type === "TODAY") {
-                const day = parseInt(parts[1] || "-1");
-                payload.today = isNaN(day) ? -1 : day;
-                payload.hasCalendar = true;
+        const year = parseInt(String(calendar.year));
+        const month = parseInt(String(calendar.month));
+        const daysInMonth = parseInt(String(calendar.days_in_month));
+        const firstWeekday = parseInt(String(calendar.first_weekday));
+        const today = parseInt(String(calendar.today));
+
+        payload.year = isNaN(year) ? payload.year : year;
+        payload.month = isNaN(month) ? payload.month : month;
+        payload.daysInMonth = isNaN(daysInMonth) ? payload.daysInMonth : Math.max(1, daysInMonth);
+        payload.firstWeekday = isNaN(firstWeekday) ? payload.firstWeekday : Math.max(0, Math.min(6, firstWeekday));
+        payload.today = isNaN(today) ? payload.today : today;
+
+        const defaultWeekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+        const weekdays = Array.isArray(calendar.weekdays) ? calendar.weekdays : [];
+        payload.weekdays = [];
+        for (let i = 0; i < 7; i++)
+            payload.weekdays.push(String(weekdays[i] || defaultWeekdays[i]).trim());
+
+        const rows = createEmptyCalendarRows();
+        const inputRows = Array.isArray(calendar.rows) ? calendar.rows : [];
+        for (let r = 0; r < 6; r++) {
+            const rowData = Array.isArray(inputRows[r]) ? inputRows[r] : [];
+            for (let c = 0; c < 7; c++) {
+                const day = parseInt(String(rowData[c] || "0"));
+                rows[r][c] = isNaN(day) ? 0 : day;
             }
         }
+        payload.rows = rows;
+        payload.hasCalendar = true;
 
         return payload;
     }
@@ -262,8 +261,8 @@ PanelWindow {
         calendarPrefetchMonth = next.month;
         calendarPrefetchRunning = true;
         calendarPrefetchProc.command = [
-            "sh",
-            Quickshell.shellDir + "/scripts/dashboard_menu.sh",
+            "stratum-cli",
+            "dashboard",
             "calendar",
             String(calendarPrefetchYear),
             String(calendarPrefetchMonth)
@@ -406,8 +405,8 @@ PanelWindow {
         loading = true;
         lastError = "";
         dataProc.command = [
-            "sh",
-            Quickshell.shellDir + "/scripts/dashboard_menu.sh",
+            "stratum-cli",
+            "dashboard",
             "all",
             String(selectedCalendarYear),
             String(selectedCalendarMonth)
@@ -498,7 +497,7 @@ PanelWindow {
 
     Process {
         id: dataProc
-        command: ["sh", Quickshell.shellDir + "/scripts/dashboard_menu.sh", "all", String(selectedCalendarYear), String(selectedCalendarMonth)]
+        command: ["stratum-cli", "dashboard", "all", String(selectedCalendarYear), String(selectedCalendarMonth)]
         running: false
         stdout: StdioCollector {
             onStreamFinished: {
@@ -507,6 +506,16 @@ PanelWindow {
                 const raw = this.text.trim();
                 if (!raw) {
                     dashboard.lastError = "No dashboard data";
+                    return;
+                }
+
+                const response = dashboard.parseCliJson(raw);
+                if (!response) {
+                    dashboard.lastError = "Invalid dashboard response";
+                    return;
+                }
+                if (response.ok !== true) {
+                    dashboard.lastError = String(response.error || "Dashboard command failed");
                     return;
                 }
 
@@ -521,51 +530,39 @@ PanelWindow {
                     }
                 }
 
-                const lines = raw.split("\n");
-                let parseError = "";
+                const music = (response.music && typeof response.music === "object") ? response.music : {};
+                dashboard.musicStatus = String(music.status || "Unknown").trim();
+                dashboard.musicPlayer = String(music.player || "N/A").trim();
+                dashboard.musicTitle = String(music.title || "Nothing playing").trim();
+                dashboard.musicArtist = String(music.artist || "N/A").trim();
+                dashboard.musicAlbum = String(music.album || "N/A").trim();
+                dashboard.musicPosition = String(music.position || "00:00").trim();
+                dashboard.musicLength = String(music.length || "00:00").trim();
+                dashboard.musicArtUrl = String(music.art_url || "").trim();
+                dashboard.musicPlayerTitle = String(music.player_title || dashboard.musicPlayer || "N/A").trim();
 
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line)
-                        continue;
+                const performance = (response.performance && typeof response.performance === "object") ? response.performance : {};
+                dashboard.cpuPercent = dashboard.clampPercent(String(performance.cpu_percent || "0"));
 
-                    if (line.startsWith("__ERROR__|")) {
-                        parseError = line.replace("__ERROR__|", "");
-                        continue;
-                    }
-
-                    const parts = line.split("|");
-                    const type = (parts[0] || "").trim();
-
-                    if (type === "MUSIC") {
-                        dashboard.musicStatus = (parts[1] || "Unknown").trim();
-                        dashboard.musicPlayer = (parts[2] || "N/A").trim();
-                        dashboard.musicTitle = (parts[3] || "Nothing playing").trim();
-                        dashboard.musicArtist = (parts[4] || "N/A").trim();
-                        dashboard.musicAlbum = (parts[5] || "N/A").trim();
-                        dashboard.musicPosition = (parts[6] || "00:00").trim();
-                        dashboard.musicLength = (parts[7] || "00:00").trim();
-                        dashboard.musicArtUrl = (parts[8] || "").trim();
-                        dashboard.musicPlayerTitle = (parts[9] || dashboard.musicPlayer || "N/A").trim();
-                    } else if (type === "CPU") {
-                        dashboard.cpuPercent = dashboard.clampPercent(parts[1] || "0");
-                    } else if (type === "GPU") {
-                        dashboard.gpuPercentText = (parts[1] || "N/A").trim();
-                        const gpuVal = parseInt(dashboard.gpuPercentText);
-                        dashboard.gpuPercentValue = isNaN(gpuVal) ? 0 : dashboard.clampPercent(String(gpuVal));
-                        dashboard.gpuSource = (parts[2] || "N/A").trim();
-                    } else if (type === "RAM") {
-                        dashboard.ramUsedGiB = dashboard.parseNumber(parts[1] || "0", 0);
-                        dashboard.ramTotalGiB = dashboard.parseNumber(parts[2] || "0", 0);
-                        dashboard.ramPercent = dashboard.clampPercent(parts[3] || "0");
-                    } else if (type === "STORAGE") {
-                        dashboard.storageUsedGiB = dashboard.parseNumber(parts[1] || "0", 0);
-                        dashboard.storageTotalGiB = dashboard.parseNumber(parts[2] || "0", 0);
-                        dashboard.storagePercent = dashboard.clampPercent(parts[3] || "0");
-                    }
+                dashboard.gpuPercentText = String(performance.gpu_percent_text || "N/A").trim();
+                const gpuValue = Number(performance.gpu_percent_value);
+                if (!isNaN(gpuValue))
+                    dashboard.gpuPercentValue = dashboard.clampPercent(String(Math.round(gpuValue)));
+                else {
+                    const parsedGpu = parseInt(dashboard.gpuPercentText);
+                    dashboard.gpuPercentValue = isNaN(parsedGpu) ? 0 : dashboard.clampPercent(String(parsedGpu));
                 }
+                dashboard.gpuSource = String(performance.gpu_source || "N/A").trim();
 
-                dashboard.lastError = parseError;
+                dashboard.ramUsedGiB = dashboard.parseNumber(performance.ram_used_gib, 0);
+                dashboard.ramTotalGiB = dashboard.parseNumber(performance.ram_total_gib, 0);
+                dashboard.ramPercent = dashboard.clampPercent(String(performance.ram_percent || "0"));
+
+                dashboard.storageUsedGiB = dashboard.parseNumber(performance.storage_used_gib, 0);
+                dashboard.storageTotalGiB = dashboard.parseNumber(performance.storage_total_gib, 0);
+                dashboard.storagePercent = dashboard.clampPercent(String(performance.storage_percent || "0"));
+
+                dashboard.lastError = "";
             }
         }
     }

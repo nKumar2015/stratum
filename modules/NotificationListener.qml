@@ -32,7 +32,7 @@ Scope {
 
         const json = JSON.stringify(payload);
         const encoded = encodeURIComponent(json);
-        snapshotSaveProc.command = ["sh", Quickshell.shellDir + "/scripts/notification_listener.sh", "snapshot-save", encoded];
+        snapshotSaveProc.command = ["stratum-cli", "notifications-snapshot", "snapshot-save", encoded];
         snapshotSaveProc.running = true;
     }
 
@@ -534,7 +534,7 @@ Scope {
 
     Process {
         id: snapshotLoadProc
-        command: ["sh", Quickshell.shellDir + "/scripts/notification_listener.sh", "snapshot-load"]
+        command: ["stratum-cli", "notifications-snapshot", "snapshot-load"]
         stdout: StdioCollector {
             onStreamFinished: {
                 root.snapshotLoaded = root.applySnapshot(this.text);

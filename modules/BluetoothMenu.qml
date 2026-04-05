@@ -116,6 +116,18 @@ Window {
         return parts;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function sortDevicesByPriority(list) {
         list.sort(function(a, b) {
             const aConnected = a.connected === "yes";
@@ -212,7 +224,7 @@ Window {
         if (!selectedMac || selectedPaired)
             return;
 
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "pair", selectedMac];
+        actionProc.command = ["stratum-cli", "bluetooth", "pair", selectedMac];
         pendingAction = "pair";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Pairing with " + pendingActionTarget + "...", false);
@@ -224,7 +236,7 @@ Window {
         if (!selectedMac || selectedConnected)
             return;
 
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "connect", selectedMac];
+        actionProc.command = ["stratum-cli", "bluetooth", "connect", selectedMac];
         pendingAction = "connect";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Connecting to " + pendingActionTarget + "...", false);
@@ -238,7 +250,7 @@ Window {
             return;
 
         const label = activeName || selectedName || targetMac;
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "disconnect", targetMac];
+        actionProc.command = ["stratum-cli", "bluetooth", "disconnect", targetMac];
         pendingAction = "disconnect";
         pendingActionTarget = label;
         setStatusMessage("Disconnecting " + label + "...", false);
@@ -250,7 +262,7 @@ Window {
         if (!selectedMac)
             return;
 
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "forget", selectedMac];
+        actionProc.command = ["stratum-cli", "bluetooth", "forget", selectedMac];
         pendingAction = "forget";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Removing " + pendingActionTarget + "...", false);
@@ -260,7 +272,7 @@ Window {
 
     function toggleBluetoothPower() {
         const target = bluetoothEnabled ? "off" : "on";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "power", target];
+        actionProc.command = ["stratum-cli", "bluetooth", "power", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         setStatusMessage(bluetoothEnabled ? "Turning Bluetooth off..." : "Turning Bluetooth on...", false);
@@ -272,7 +284,7 @@ Window {
         if (scanning)
             return;
 
-        scanProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "scan"];
+        scanProc.command = ["stratum-cli", "bluetooth", "scan"];
         scanning = true;
         GlobalState.bluetoothScanning = true;
         setStatusMessage("Scanning for devices...", false);
@@ -285,19 +297,21 @@ Window {
 
     Process {
         id: btStateProc
-        command: ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "state"]
+        command: ["stratum-cli", "bluetooth", "state"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|")) {
+                const payload = bluetoothMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     bluetoothMenu.bluetoothEnabled = false;
                     GlobalState.bluetoothPowered = false;
                     GlobalState.bluetoothConnected = false;
                     GlobalState.bluetoothScanning = false;
-                    bluetoothMenu.setStatusMessage("bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
                     return;
                 }
-                bluetoothMenu.bluetoothEnabled = result === "yes";
+
+                bluetoothMenu.bluetoothEnabled = String(payload.powered || "no") === "yes";
                 GlobalState.bluetoothPowered = bluetoothMenu.bluetoothEnabled;
 
                 if (bluetoothMenu.pendingPowerSyncTarget) {
@@ -332,34 +346,35 @@ Window {
 
     Process {
         id: btListProc
-        command: ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "list"]
+        command: ["stratum-cli", "bluetooth", "list"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
                 if (!bluetoothMenu.scanning)
                     bluetoothMenu.listLoading = false;
 
-                if (result.startsWith("__ERROR__|")) {
+                const payload = bluetoothMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     bluetoothMenu.devices = [];
-                    bluetoothMenu.setStatusMessage("bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
                     return;
                 }
 
-                const lines = result.length > 0 ? result.split("\n") : [];
+                const rows = Array.isArray(payload.devices) ? payload.devices : [];
                 const parsed = [];
 
-                for (let i = 0; i < lines.length; i++) {
-                    const cols = bluetoothMenu.splitPipeFields(lines[i], 5);
-                    const mac = cols[0].trim();
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i] || {};
+                    const mac = String(row.mac || "").trim();
                     if (!mac)
                         continue;
 
                     parsed.push({
                         mac: mac,
-                        name: cols[1].trim() || mac,
-                        connected: cols[2].trim() || "no",
-                        trusted: cols[3].trim() || "no",
-                        paired: cols[4].trim() || "yes"
+                        name: String(row.name || "").trim() || mac,
+                        connected: String(row.connected || "no").trim(),
+                        trusted: String(row.trusted || "no").trim(),
+                        paired: String(row.paired || "yes").trim()
                     });
                 }
 
@@ -427,12 +442,15 @@ Window {
                 const result = this.text.trim();
                 bluetoothMenu.actionWatchdogTimer.stop();
 
-                if (result.startsWith("__ERROR__|")) {
-                    bluetoothMenu.setStatusMessage("bluetoothctl is required for Bluetooth controls.", true);
-                } else if (result.length > 0 && result.toLowerCase().indexOf("failed") !== -1) {
-                    bluetoothMenu.setStatusMessage(result, true);
-                } else if (result.length > 0 && result.toLowerCase().indexOf("error") !== -1) {
-                    bluetoothMenu.setStatusMessage(result, true);
+                const payload = bluetoothMenu.parseCliJson(result);
+                const message = payload ? String(payload.output || payload.error || "") : result;
+
+                if (!payload || payload.ok !== true) {
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                } else if (message.length > 0 && message.toLowerCase().indexOf("failed") !== -1) {
+                    bluetoothMenu.setStatusMessage(message, true);
+                } else if (message.length > 0 && message.toLowerCase().indexOf("error") !== -1) {
+                    bluetoothMenu.setStatusMessage(message, true);
                 } else if (bluetoothMenu.pendingAction === "pair") {
                     bluetoothMenu.setStatusMessage("Paired with " + bluetoothMenu.pendingActionTarget + ".", true);
                 } else if (bluetoothMenu.pendingAction === "connect") {
@@ -507,15 +525,19 @@ Window {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                bluetoothMenu.mergeScanOutputDevices(result);
+
+                const payload = bluetoothMenu.parseCliJson(result);
+                const outputText = payload ? String(payload.output || "") : result;
+
+                bluetoothMenu.mergeScanOutputDevices(outputText);
                 bluetoothMenu.finishScanState();
 
-                if (result.startsWith("__ERROR__|")) {
-                    bluetoothMenu.setStatusMessage("bluetoothctl is required for Bluetooth controls.", true);
-                } else if (result.length > 0 && result.toLowerCase().indexOf("failed") !== -1) {
-                    bluetoothMenu.setStatusMessage("Scan failed: " + result, true);
-                } else if (result.length > 0 && result.toLowerCase().indexOf("error") !== -1) {
-                    bluetoothMenu.setStatusMessage("Scan error: " + result, true);
+                if (!payload || payload.ok !== true) {
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("failed") !== -1) {
+                    bluetoothMenu.setStatusMessage("Scan failed: " + outputText, true);
+                } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("error") !== -1) {
+                    bluetoothMenu.setStatusMessage("Scan error: " + outputText, true);
                 } else {
                     bluetoothMenu.setStatusMessage("Scan completed.", true);
                 }

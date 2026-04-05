@@ -12,6 +12,12 @@ in {
   options.programs.stratum = {
     enable = lib.mkEnableOption "A Quickshell config";
 
+    devSourcePath = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Absolute path to a local Stratum checkout for development. When set, .config/quickshell is sourced from this path instead of the flake input snapshot.";
+    };
+
     prefer = lib.mkOption {
       type = lib.types.enum ["darkness" "light"];
       default = "darkness";
@@ -31,11 +37,14 @@ in {
     home = {
       file = {
         ".config/quickshell" = {
-          source = pkgs.runCommand "patched-stratum" {} ''
-            cp -r ${inputs.stratum} $out
-            chmod -R +w $out
-            rm -f $out/theme/Theme.qml
-          '';
+          source =
+            if cfg.devSourcePath != null
+            then config.lib.file.mkOutOfStoreSymlink cfg.devSourcePath
+            else pkgs.runCommand "patched-stratum" {} ''
+              cp -r ${inputs.stratum} $out
+              chmod -R +w $out
+              rm -f $out/theme/Theme.qml
+            '';
           recursive = true;
         };
 

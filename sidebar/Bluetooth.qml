@@ -16,11 +16,27 @@ Item {
 
     property string icon: GlobalState.bluetoothScanning ? "󰂰" : (GlobalState.bluetoothConnected ? "󰂱" : (GlobalState.bluetoothPowered ? "󰂯" : "󰂲"))
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function updateStatus(output) {
         if (GlobalState.showBluetoothSettings || GlobalState.bluetoothScanning)
             return;
 
-        const raw = output.trim().toLowerCase();
+        const payload = parseCliJson(output);
+        if (!payload || payload.ok !== true)
+            return;
+
+        const raw = String(payload.state || "").trim().toLowerCase();
         if (raw === "connected") {
             GlobalState.bluetoothPowered = true;
             GlobalState.bluetoothConnected = true;
@@ -39,7 +55,7 @@ Item {
 
     Process {
         id: bluetoothProc
-        command: ["sh", Quickshell.shellDir + "/scripts/check_bluetooth.sh"]
+        command: ["stratum-cli", "bluetooth", "check"]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {

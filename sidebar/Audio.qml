@@ -34,18 +34,25 @@ Item {
             icon = "󰝞";
     }
 
+    function parseCliJson(raw) {
+        try {
+            return JSON.parse(String(raw || "").trim());
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function updateStatus(output) {
         if (GlobalState.audioUserAdjusting)
             return;
 
-        const raw = output.trim();
-        const parts = raw.split("|");
-        if (parts.length < 2)
+        const payload = parseCliJson(output);
+        if (!payload || payload.ok !== true)
             return;
 
-        const volumeText = (parts[0] || "0%").trim();
-        const muteText = (parts[1] || "yes").trim().toLowerCase();
-        const headphonesText = (parts[2] || "no").trim().toLowerCase();
+        const volumeText = String(payload.volume || "0%").trim();
+        const muteText = String(payload.mute || "yes").trim().toLowerCase();
+        const headphonesText = String(payload.headphones || "no").trim().toLowerCase();
         const parsedVolume = parseInt(volumeText.replace("%", ""));
 
         volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
@@ -70,12 +77,12 @@ Item {
 
     Process {
         id: audioProc
-        command: ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "status"]
+        command: ["stratum-cli", "audio", "status"]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result && !result.startsWith("__ERROR__"))
+                if (result)
                     root.updateStatus(result);
                 refreshTimer.start();
             }
@@ -91,7 +98,7 @@ Item {
 
     Process {
         id: openPavucontrolProc
-        command: ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "open-control"]
+        command: ["stratum-cli", "audio", "open-control"]
     }
 
     Text {

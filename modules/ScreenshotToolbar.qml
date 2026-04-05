@@ -73,6 +73,18 @@ PanelWindow {
         return "file://" + encodeURI(value);
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function resetSelectionState() {
         hoverWindowX = 0;
         hoverWindowY = 0;
@@ -237,7 +249,7 @@ PanelWindow {
         onTriggered: {
             if (!toolbar.visibleState || freezeProc.running)
                 return;
-            freezeProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "freeze-frame", toolbar.monitorGeometryString(), toolbar.monitorName, toolbar.monitorName];
+            freezeProc.command = ["stratum-cli", "screenshot-menu", "freeze-frame", toolbar.monitorGeometryString(), toolbar.monitorName, toolbar.monitorName];
             freezeProc.running = true;
         }
     }
@@ -261,9 +273,9 @@ PanelWindow {
             toolbar.resetSelectionState();
 
             if (nextCommand === "capture-geometry")
-                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-geometry", nextGeometry, nextMode];
+                captureProc.command = ["stratum-cli", "screenshot-menu", "capture-geometry", nextGeometry, nextMode];
             else
-                captureProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "capture-fullscreen", nextMode, toolbar.monitorGeometryString(), toolbar.monitorName];
+                captureProc.command = ["stratum-cli", "screenshot-menu", "capture-fullscreen", nextMode, toolbar.monitorGeometryString(), toolbar.monitorName];
 
             captureProc.running = true;
         }
@@ -280,7 +292,7 @@ PanelWindow {
 
             const globalX = Math.round(pointerArea.mouseX + toolbar.monitorOffsetX);
             const globalY = Math.round(pointerArea.mouseY + toolbar.monitorOffsetY);
-            windowAtProc.command = ["sh", Quickshell.shellDir + "/scripts/screenshot_menu.sh", "window-at", String(globalX), String(globalY)];
+            windowAtProc.command = ["stratum-cli", "screenshot-menu", "window-at", String(globalX), String(globalY)];
             windowAtProc.running = true;
         }
     }
@@ -295,35 +307,8 @@ PanelWindow {
                 toolbar.hideCursorForCapture = false;
                 const result = this.text.trim();
 
-                if (!result) {
-                    toolbar.visibleState = true;
-                    toolbar.freezeReady = true;
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Capture failed",
-                        body: "Empty response from capture process",
-                        urgency: 2,
-                        category: "screenshot"
-                    });
-                    return;
-                }
-
-                if (result.startsWith("__ERROR__|")) {
-                    const message = result.substring("__ERROR__|".length);
-                    toolbar.visibleState = true;
-                    toolbar.freezeReady = true;
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Capture failed",
-                        body: message || "Unknown error",
-                        urgency: 2,
-                        category: "screenshot"
-                    });
-                    return;
-                }
-
-                const parts = result.split("|");
-                if (parts.length < 4 || parts[0] !== "ok") {
+                const payload = toolbar.parseCliJson(result);
+                if (!payload) {
                     toolbar.visibleState = true;
                     toolbar.freezeReady = true;
                     GlobalState.addNotification({
@@ -336,8 +321,22 @@ PanelWindow {
                     return;
                 }
 
-                const imagePath = parts[1] || "";
-                const captureMode = parts[2] || "fullscreen";
+                if (payload.ok !== true) {
+                    const errorMessage = String(payload.error || "Unknown error").trim();
+                    toolbar.visibleState = true;
+                    toolbar.freezeReady = true;
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Capture failed",
+                        body: errorMessage || "Unknown error",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
+                    return;
+                }
+
+                const imagePath = String(payload.path || "").trim();
+                const captureMode = String(payload.mode || "fullscreen").trim();
                 if (!imagePath) {
                     toolbar.visibleState = true;
                     toolbar.freezeReady = true;
@@ -367,35 +366,8 @@ PanelWindow {
                 if (!toolbar.visibleState)
                     return;
 
-                if (!result) {
-                    toolbar.freezeReady = false;
-                    toolbar.closeToolbar(true);
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Start failed",
-                        body: "Could not freeze screen",
-                        urgency: 2,
-                        category: "screenshot"
-                    });
-                    return;
-                }
-
-                if (result.startsWith("__ERROR__|")) {
-                    const message = result.substring("__ERROR__|".length);
-                    toolbar.freezeReady = false;
-                    toolbar.closeToolbar(true);
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Start failed",
-                        body: message || "Could not freeze screen",
-                        urgency: 2,
-                        category: "screenshot"
-                    });
-                    return;
-                }
-
-                const parts = result.split("|");
-                if (parts.length < 2 || parts[0] !== "ok") {
+                const payload = toolbar.parseCliJson(result);
+                if (!payload) {
                     toolbar.freezeReady = false;
                     toolbar.closeToolbar(true);
                     GlobalState.addNotification({
@@ -408,7 +380,21 @@ PanelWindow {
                     return;
                 }
 
-                toolbar.freezeFramePath = parts[1] || "";
+                if (payload.ok !== true) {
+                    const message = String(payload.error || "Could not freeze screen").trim();
+                    toolbar.freezeReady = false;
+                    toolbar.closeToolbar(true);
+                    GlobalState.addNotification({
+                        appName: "Screenshot",
+                        summary: "Start failed",
+                        body: message || "Could not freeze screen",
+                        urgency: 2,
+                        category: "screenshot"
+                    });
+                    return;
+                }
+
+                toolbar.freezeFramePath = String(payload.path || "").trim();
                 toolbar.freezeReady = toolbar.freezeFramePath.length > 0;
                 toolbar.suppressOverlayVisuals = false;
             }
@@ -421,21 +407,19 @@ PanelWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (!result)
+                const payload = toolbar.parseCliJson(result);
+                if (!payload || payload.ok !== true)
                     return;
 
-                if (result.startsWith("ok|")) {
-                    const parts = result.split("|");
-                    toolbar.updateHoverFromGeometry(parts[1] || "");
-                    return;
-                }
-
-                if (result === "none")
+                const geometry = String(payload.geometry || "").trim();
+                if (geometry.length > 0)
+                    toolbar.updateHoverFromGeometry(geometry);
+                else
                     toolbar.updateHoverFromGeometry("");
             }
         }
     }
-
+    
     IpcHandler {
         target: "screenshot"
 
@@ -466,7 +450,7 @@ PanelWindow {
     MouseArea {
         id: pointerArea
         anchors.fill: parent
-        enabled: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.isCapturing
+        enabled: toolbar.visibleState && !toolbar.suppressOverlayVisuals && !toolbar.isCapturing && toolbar.freezeReady
         hoverEnabled: true
         cursorShape: Qt.CrossCursor
 
@@ -496,6 +480,12 @@ PanelWindow {
         }
 
         onReleased: {
+            if (!toolbar.freezeReady) {
+                toolbar.pointerDown = false;
+                toolbar.dragActive = false;
+                return;
+            }
+
             const hadDrag = toolbar.dragActive;
             toolbar.pointerDown = false;
             if (hadDrag)

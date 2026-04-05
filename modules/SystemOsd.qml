@@ -64,6 +64,18 @@ PanelWindow {
         return String(value) + "%";
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function showChannel(kind, newValue, isMuted) {
         channel = kind;
         value = Math.max(0, Math.min(kind === "volume" ? 150 : 100, newValue));
@@ -99,20 +111,21 @@ PanelWindow {
 
     Process {
         id: volumeProc
-        command: ["sh", Quickshell.shellDir + "/scripts/osd_status.sh", "volume"]
+        command: ["stratum-cli", "osd", "volume"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const raw = this.text.trim();
-                if (!raw || raw.startsWith("__ERROR__"))
+                const payload = osd.parseCliJson(raw);
+                if (!payload || payload.ok !== true)
                     return;
 
-                const parts = raw.split("|");
-                if (parts.length < 3 || parts[0] !== "VOLUME")
+                const value = parseInt(String(payload.value || "0"));
+                if (isNaN(value))
                     return;
 
-                const parsed = parseInt(parts[1]);
-                const volume = isNaN(parsed) ? 0 : Math.max(0, Math.min(150, parsed));
-                const isMuted = (parts[2] || "yes").trim().toLowerCase() === "yes";
+                const volume = Math.max(0, Math.min(150, value));
+                const muteValue = String(payload.mute || "yes").trim().toLowerCase();
+                const isMuted = muteValue === "yes" || muteValue === "true";
 
                 GlobalState.audioVolumePercent = volume;
                 GlobalState.audioMuted = isMuted;
@@ -134,18 +147,15 @@ PanelWindow {
 
     Process {
         id: brightnessProc
-        command: ["sh", Quickshell.shellDir + "/scripts/osd_status.sh", "brightness"]
+        command: ["stratum-cli", "osd", "brightness"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const raw = this.text.trim();
-                if (!raw || raw.startsWith("__ERROR__"))
+                const payload = osd.parseCliJson(raw);
+                if (!payload || payload.ok !== true)
                     return;
 
-                const parts = raw.split("|");
-                if (parts.length < 2 || parts[0] !== "BRIGHTNESS")
-                    return;
-
-                const parsed = parseInt(parts[1]);
+                const parsed = parseInt(String(payload.value || "0"));
                 const brightness = isNaN(parsed) ? 0 : Math.max(0, Math.min(100, parsed));
                 const changed = brightness !== osd.lastBrightness;
                 osd.lastBrightness = brightness;

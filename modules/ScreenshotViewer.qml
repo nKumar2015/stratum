@@ -31,6 +31,13 @@ PanelWindow {
     property real panLastSurfaceX: 0
     property real panLastSurfaceY: 0
     property var resolvedScreen: null
+    property string postActionTempPath: ""
+    property string pendingAnnotatedAction: ""
+    property string pendingAnnotatedTargetPath: ""
+    property bool annotatedExportPending: false
+    property int annotatedExportRetries: 0
+    property real annotatedExportWidth: 0
+    property real annotatedExportHeight: 0
 
     anchors {
         top: true
@@ -42,12 +49,11 @@ PanelWindow {
     screen: resolvedScreen
 
     color: "#99000000"
-    visible: visibleState
+    visible: visibleState && !portalSaveAsProc.running
     exclusiveZone: -1
 
-    // Keep the viewer above normal UI during editing, but drop it below regular
-    // app windows while the portal picker is active so the chooser is always on top.
-    WlrLayershell.layer: portalSaveAsProc.running ? WlrLayer.Bottom : WlrLayer.Overlay
+    // Keep the viewer above normal UI during editing and Save As flow.
+    WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: (visible && !portalSaveAsProc.running) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     function screenForMonitorName(name) {
@@ -106,6 +112,11 @@ PanelWindow {
         imagePanX = 0;
         imagePanY = 0;
         panActive = false;
+        pendingAnnotatedAction = "";
+        pendingAnnotatedTargetPath = "";
+        annotatedExportPending = false;
+        if (!postProc.running)
+            cleanupPostActionTempPath();
         paintCanvas.requestPaint();
     }
 
@@ -115,6 +126,71 @@ PanelWindow {
         statusMessage = "";
         statusError = false;
         isWorking = false;
+        annotatedExportPending = false;
+        pendingAnnotatedAction = "";
+        pendingAnnotatedTargetPath = "";
+        if (!postProc.running)
+            cleanupPostActionTempPath();
+    }
+
+    function sourcePixelSize() {
+        const preferredW = Math.round(Number(screenshotImage.sourceSize.width || drawImageBase.sourceSize.width || 0));
+        const preferredH = Math.round(Number(screenshotImage.sourceSize.height || drawImageBase.sourceSize.height || 0));
+        if (preferredW > 0 && preferredH > 0)
+            return {
+                w: preferredW,
+                h: preferredH
+            };
+
+        const fallbackW = Math.max(1, Math.round(Number(imageDrawSurface.width || 0)));
+        const fallbackH = Math.max(1, Math.round(Number(imageDrawSurface.height || 0)));
+        if (fallbackW > 0 && fallbackH > 0)
+            return {
+                w: fallbackW,
+                h: fallbackH
+            };
+
+        return null;
+    }
+
+    function cleanupPostActionTempPath() {
+        const tempPath = toLocalPath(postActionTempPath);
+        if (!tempPath)
+            return;
+
+        postActionTempPath = "";
+        tempCleanupProc.command = ["rm", "-f", tempPath];
+        tempCleanupProc.running = true;
+    }
+
+    function runPostAction(action, imagePath, targetPath) {
+        const args = ["stratum-cli", "screenshot-post", String(action || ""), toLocalPath(imagePath)];
+        const normalizedTarget = toLocalPath(targetPath);
+        if (normalizedTarget.length > 0)
+            args.push(normalizedTarget);
+        postProc.command = args;
+        postProc.running = true;
+    }
+
+    function startAnnotatedPostAction(action, targetPath) {
+        const sourceSize = sourcePixelSize();
+        if (!sourceSize) {
+            isWorking = false;
+            showStatus("Failed to prepare annotated export", true);
+            return;
+        }
+
+        const runtimeDir = StandardPaths.writableLocation(StandardPaths.RuntimeLocation) || "/tmp";
+        cleanupPostActionTempPath();
+        postActionTempPath = runtimeDir + "/quickshell-screenshot-viewer-" + Date.now() + ".png";
+        pendingAnnotatedAction = String(action || "");
+        pendingAnnotatedTargetPath = toLocalPath(targetPath);
+        annotatedExportWidth = sourceSize.w;
+        annotatedExportHeight = sourceSize.h;
+        annotatedExportRetries = 0;
+        annotatedExportPending = true;
+        annotationExportCanvas.requestPaint();
+        annotatedExportGrabTimer.restart();
     }
 
     function showStatus(message, isError) {
@@ -123,6 +199,25 @@ PanelWindow {
         if (!statusMessage)
             return;
         clearStatusTimer.restart();
+    }
+
+    function logSaveAs(message) {
+        console.log("[QS][Screenshot][SaveAs] " + String(message || ""));
+    }
+
+    function logSaveAsPayload(streamName, payload) {
+        const raw = String(payload || "");
+        if (!raw.length) {
+            logSaveAs(streamName + " <empty>");
+            return;
+        }
+
+        const lines = raw.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+            if (!lines[i].length)
+                continue;
+            logSaveAs(streamName + " " + lines[i]);
+        }
     }
 
     function statusForPostAction(action) {
@@ -141,6 +236,18 @@ PanelWindow {
         if (!detail)
             return "Save As failed";
         return "Save As failed: " + detail;
+    }
+
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
     }
 
     function colorToHex(c) {
@@ -183,32 +290,11 @@ PanelWindow {
 
         isWorking = true;
         if (hasAnnotations()) {
-            const runtimeDir = StandardPaths.writableLocation(StandardPaths.RuntimeLocation) || "/tmp";
-            const composedPath = runtimeDir + "/quickshell-screenshot-viewer-" + Date.now() + ".png";
-            imageDrawSurface.grabToImage(function (result) {
-                const saved = result.saveToFile(composedPath);
-                if (!saved) {
-                    viewer.isWorking = false;
-                    viewer.showStatus("Failed to render annotated image", true);
-                    return;
-                }
-
-                const args = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, composedPath];
-                const normalizedTarget = viewer.toLocalPath(targetPath);
-                if (normalizedTarget.length > 0)
-                    args.push(normalizedTarget);
-                postProc.command = args;
-                postProc.running = true;
-            });
+            startAnnotatedPostAction(action, targetPath);
             return;
         }
 
-        const args = ["sh", Quickshell.shellDir + "/scripts/screenshot_viewer.sh", action, toLocalPath(sourcePath)];
-        const normalizedTarget = toLocalPath(targetPath);
-        if (normalizedTarget.length > 0)
-            args.push(normalizedTarget);
-        postProc.command = args;
-        postProc.running = true;
+        runPostAction(action, sourcePath, targetPath);
     }
 
     function startSaveAs() {
@@ -222,7 +308,9 @@ PanelWindow {
         const stamp = new Date();
         const pad = n => String(n).padStart(2, "0");
         const name = "Screenshot-" + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) + "-" + pad(stamp.getHours()) + pad(stamp.getMinutes()) + pad(stamp.getSeconds()) + ".png";
-        portalSaveAsProc.command = ["sh", Quickshell.shellDir + "/scripts/portal_save_file.sh", "Save Screenshot As", name];
+        portalSaveAsGuard.restart();
+        portalSaveAsProc.command = ["stratum-cli", "portal-save-file", "Save Screenshot As", name];
+        logSaveAs("launch command=" + JSON.stringify(portalSaveAsProc.command));
         portalSaveAsProc.running = true;
     }
 
@@ -334,6 +422,83 @@ PanelWindow {
         }
     }
 
+    Timer {
+        id: portalSaveAsGuard
+        interval: 35000
+        repeat: false
+        onTriggered: {
+            if (!portalSaveAsProc.running)
+                return;
+
+            viewer.logSaveAs("guard timeout: process still running after " + interval + "ms");
+            portalSaveAsProc.running = false;
+            viewer.showStatus(viewer.saveAsError("portal request timed out"), true);
+        }
+    }
+
+    Timer {
+        id: annotatedExportGrabTimer
+        interval: 16
+        repeat: false
+        onTriggered: {
+            if (!viewer.annotatedExportPending)
+                return;
+
+            if (annotationExportBase.status === Image.Error) {
+                viewer.annotatedExportPending = false;
+                viewer.pendingAnnotatedAction = "";
+                viewer.pendingAnnotatedTargetPath = "";
+                viewer.isWorking = false;
+                viewer.cleanupPostActionTempPath();
+                viewer.showStatus("Failed to load source image for export", true);
+                return;
+            }
+
+            if (annotationExportBase.status !== Image.Ready) {
+                viewer.annotatedExportRetries = viewer.annotatedExportRetries + 1;
+                if (viewer.annotatedExportRetries <= 60) {
+                    annotatedExportGrabTimer.restart();
+                    return;
+                }
+
+                viewer.annotatedExportPending = false;
+                viewer.pendingAnnotatedAction = "";
+                viewer.pendingAnnotatedTargetPath = "";
+                viewer.isWorking = false;
+                viewer.cleanupPostActionTempPath();
+                viewer.showStatus("Timed out preparing annotated export", true);
+                return;
+            }
+
+            annotationExportCanvas.requestPaint();
+            annotationExportSurface.grabToImage(function (result) {
+                const exportPath = viewer.toLocalPath(viewer.postActionTempPath);
+                const action = viewer.pendingAnnotatedAction;
+                const target = viewer.pendingAnnotatedTargetPath;
+
+                viewer.annotatedExportPending = false;
+                viewer.pendingAnnotatedAction = "";
+                viewer.pendingAnnotatedTargetPath = "";
+
+                if (!exportPath) {
+                    viewer.isWorking = false;
+                    viewer.showStatus("Failed to prepare annotated image", true);
+                    return;
+                }
+
+                const saved = result.saveToFile(exportPath);
+                if (!saved) {
+                    viewer.isWorking = false;
+                    viewer.cleanupPostActionTempPath();
+                    viewer.showStatus("Failed to render annotated image", true);
+                    return;
+                }
+
+                viewer.runPostAction(action, exportPath, target);
+            });
+        }
+    }
+
     Connections {
         target: GlobalState
 
@@ -343,19 +508,31 @@ PanelWindow {
     }
 
     Process {
+        id: tempCleanupProc
+        running: false
+    }
+
+    Process {
         id: postProc
         running: false
         stdout: StdioCollector {
             onStreamFinished: {
                 viewer.isWorking = false;
+                viewer.cleanupPostActionTempPath();
                 const result = this.text.trim();
                 if (!result) {
                     viewer.showStatus("Action failed: empty response", true);
                     return;
                 }
 
-                if (result.startsWith("__ERROR__|")) {
-                    const message = result.substring("__ERROR__|".length);
+                const payload = viewer.parseCliJson(result);
+                if (!payload) {
+                    viewer.showStatus("Action failed: invalid response", true);
+                    return;
+                }
+
+                if (payload.ok !== true) {
+                    const message = String(payload.error || "Action failed");
                     viewer.showStatus(message || "Action failed", true);
                     GlobalState.addNotification({
                         appName: "Screenshot",
@@ -367,13 +544,12 @@ PanelWindow {
                     return;
                 }
 
-                const parts = result.split("|");
-                if (parts[0] !== "ok") {
+                const action = String(payload.action || "");
+                if (!action.length) {
                     viewer.showStatus("Action failed", true);
                     return;
                 }
 
-                const action = parts[1] || "";
                 viewer.showStatus(viewer.statusForPostAction(action), false);
             }
         }
@@ -382,39 +558,63 @@ PanelWindow {
     Process {
         id: portalSaveAsProc
         running: false
+        stderr: StdioCollector {
+            onStreamFinished: {
+                viewer.logSaveAsPayload("stderr", this.text);
+            }
+        }
         stdout: StdioCollector {
             onStreamFinished: {
-                const result = this.text.trim();
+                portalSaveAsGuard.stop();
+                const rawResult = String(this.text || "");
+                viewer.logSaveAsPayload("stdout", rawResult);
+
+                const result = rawResult.trim();
+                viewer.logSaveAs("stdout.trim=" + result);
+
                 if (!result) {
-                    // Some portal backends can close without returning a response payload.
-                    // Treat this as a user-cancel path to avoid surfacing a false timeout/error.
+                    viewer.logSaveAs("branch=no-response");
+                    viewer.showStatus(viewer.saveAsError("no response from portal"), true);
                     return;
                 }
 
-                if (result.startsWith("__ERROR__|")) {
-                    const message = result.substring("__ERROR__|".length);
-                    const lowered = message.toLowerCase();
-                    if (lowered.includes("timed out") || lowered.includes("timeout") || lowered.includes("cancel"))
-                        return;
+                const payload = viewer.parseCliJson(result);
+                if (!payload) {
+                    viewer.logSaveAs("branch=invalid-json");
+                    viewer.showStatus(viewer.saveAsError("invalid response"), true);
+                    return;
+                }
+
+                if (payload.ok !== true) {
+                    const message = String(payload.error || "unknown error");
+                    viewer.logSaveAs("branch=error message=" + message);
                     viewer.showStatus(viewer.saveAsError(message), true);
                     return;
                 }
 
-                if (result === "cancel")
+                const status = String(payload.status || "");
+                if (status === "cancel") {
+                    viewer.logSaveAs("branch=cancel");
                     return;
+                }
 
-                if (!result.startsWith("ok|")) {
+                if (status !== "ok") {
+                    viewer.logSaveAs("branch=unexpected-response");
                     viewer.showStatus(viewer.saveAsError("unexpected response"), true);
                     return;
                 }
 
-                const selectedUri = result.substring(3).trim();
+                const selectedUri = String(payload.uri || "").trim();
                 const selectedPath = viewer.toLocalPath(selectedUri);
+                viewer.logSaveAs("selectedUri=" + selectedUri);
+                viewer.logSaveAs("selectedPath=" + selectedPath);
                 if (!selectedPath) {
+                    viewer.logSaveAs("branch=invalid-destination");
                     viewer.showStatus(viewer.saveAsError("invalid destination"), true);
                     return;
                 }
 
+                viewer.logSaveAs("branch=dispatch-save-to");
                 viewer.startPostActionWithTarget("save-to", selectedPath);
             }
         }
@@ -438,7 +638,7 @@ PanelWindow {
 
     MouseArea {
         anchors.fill: parent
-        enabled: viewer.visibleState
+        enabled: viewer.visibleState && !portalSaveAsProc.running
         onClicked: viewer.closeViewer()
     }
 
@@ -451,7 +651,7 @@ PanelWindow {
         color: Theme.background
         border.width: 1
         border.color: Theme.outlineVariant
-        visible: viewer.visibleState
+        visible: viewer.visibleState && !portalSaveAsProc.running
 
         MouseArea {
             anchors.fill: parent
@@ -675,7 +875,7 @@ PanelWindow {
 
                 Text {
                     text: "Zoom"
-color: Theme.on_Surface
+                    color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
@@ -890,6 +1090,60 @@ color: Theme.on_Surface
                     font.family: Theme.font
                     font.pixelSize: 11
                     font.bold: true
+                }
+            }
+        }
+    }
+
+    // Off-screen compositor used for full-resolution annotation exports.
+    Item {
+        id: annotationExportSurface
+        visible: viewer.annotatedExportPending
+        opacity: 0
+        x: -20000
+        y: -20000
+        width: Math.max(1, Math.round(viewer.annotatedExportWidth))
+        height: Math.max(1, Math.round(viewer.annotatedExportHeight))
+
+        Image {
+            id: annotationExportBase
+            anchors.fill: parent
+            source: viewer.toFileUrl(viewer.sourcePath)
+            fillMode: Image.Stretch
+            smooth: false
+            cache: false
+        }
+
+        Canvas {
+            id: annotationExportCanvas
+            anchors.fill: parent
+
+            onPaint: {
+                const ctx = getContext("2d");
+                ctx.clearRect(0, 0, annotationExportCanvas.width, annotationExportCanvas.height);
+
+                const strokes = viewer.annotationStrokes || [];
+                const sourceW = Math.max(1, Number(imageDrawSurface.width || 1));
+                const sourceH = Math.max(1, Number(imageDrawSurface.height || 1));
+                const sx = annotationExportCanvas.width / sourceW;
+                const sy = annotationExportCanvas.height / sourceH;
+                const strokeScale = (sx + sy) / 2;
+
+                for (let i = 0; i < strokes.length; i++) {
+                    const stroke = strokes[i];
+                    const points = stroke.points || [];
+                    if (points.length < 2)
+                        continue;
+
+                    ctx.lineJoin = "round";
+                    ctx.lineCap = "round";
+                    ctx.strokeStyle = stroke.color;
+                    ctx.lineWidth = Math.max(1, stroke.size * strokeScale);
+                    ctx.beginPath();
+                    ctx.moveTo(points[0].x * sx, points[0].y * sy);
+                    for (let p = 1; p < points.length; p++)
+                        ctx.lineTo(points[p].x * sx, points[p].y * sy);
+                    ctx.stroke();
                 }
             }
         }

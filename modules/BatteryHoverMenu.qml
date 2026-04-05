@@ -57,6 +57,18 @@ PanelWindow {
     property string chargingInfo: ""
     property string activeProfile: "balanced"
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function stateText() {
         if (batteryState === "charging")
             return "Charging";
@@ -114,41 +126,40 @@ PanelWindow {
 
         switching = true;
         statusMsg = "Switching to " + profileLabel(profileName) + "...";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/battery_menu.sh", "set-profile", profileName];
+        actionProc.command = ["stratum-cli", "battery", "set-profile", profileName];
         actionProc.running = true;
     }
 
     Process {
         id: statusProc
-        command: ["sh", Quickshell.shellDir + "/scripts/battery_menu.sh", "hover-status"]
+        command: ["stratum-cli", "battery", "status"]
         stdout: StdioCollector {
             onStreamFinished: {
                 hoverMenu.loading = false;
 
                 const raw = this.text.trim();
-                if (!raw || raw.startsWith("__ERROR__")) {
-                    hoverMenu.statusMsg = raw.startsWith("__ERROR__") ? raw.replace("__ERROR__|", "") : "Battery info unavailable";
+                const payload = hoverMenu.parseCliJson(raw);
+                if (!payload) {
+                    hoverMenu.statusMsg = "Battery info unavailable";
                     statusClearTimer.restart();
                     return;
                 }
 
-                const lines = raw.split("\n");
-                for (let i = 0; i < lines.length; i++) {
-                    const parts = lines[i].split("|");
-                    const type = (parts[0] || "").trim();
-
-                    if (type === "BATTERY") {
-                        const parsedPct = parseInt(parts[1]);
-                        hoverMenu.batteryPct = isNaN(parsedPct) ? 0 : Math.max(0, Math.min(100, parsedPct));
-                        hoverMenu.batteryState = (parts[2] || "unknown").trim();
-                        hoverMenu.projectedLife = (parts[3] || "Unknown").trim();
-                        hoverMenu.screenOnTime = (parts[4] || "Unknown").trim();
-                    } else if (type === "CHARGING") {
-                        hoverMenu.chargingInfo = (parts[1] || "").trim();
-                    } else if (type === "PROFILE") {
-                        hoverMenu.activeProfile = (parts[1] || "balanced").trim();
-                    }
+                if (payload.ok !== true) {
+                    hoverMenu.statusMsg = String(payload.error || "Battery info unavailable");
+                    statusClearTimer.restart();
+                    return;
                 }
+
+                const battery = (payload.battery && typeof payload.battery === "object") ? payload.battery : {};
+                const parsedPct = parseInt(String(battery.pct || "0"));
+                hoverMenu.batteryPct = isNaN(parsedPct) ? 0 : Math.max(0, Math.min(100, parsedPct));
+                hoverMenu.batteryState = String(battery.state || "unknown").trim();
+                hoverMenu.projectedLife = String(battery.projected_text || "Unknown").trim();
+                hoverMenu.screenOnTime = String(battery.screen_on_time || "Unknown").trim();
+
+                hoverMenu.chargingInfo = String(payload.charging_info || "").trim();
+                hoverMenu.activeProfile = String(payload.profile || "balanced").trim();
             }
         }
     }
@@ -160,8 +171,9 @@ PanelWindow {
                 const result = this.text.trim();
                 hoverMenu.switching = false;
 
-                if (result.startsWith("__ERROR__") || result.toLowerCase().indexOf("failed") !== -1) {
-                    hoverMenu.statusMsg = "Profile switch failed";
+                const payload = hoverMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
+                    hoverMenu.statusMsg = payload && payload.error ? String(payload.error) : "Profile switch failed";
                     statusClearTimer.restart();
                 } else {
                     hoverMenu.statusMsg = "Power mode updated";

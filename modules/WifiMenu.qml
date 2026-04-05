@@ -89,6 +89,18 @@ Window {
         return fields;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function signalLevel(signal) {
         if (signal >= 75)
             return 4;
@@ -141,7 +153,7 @@ Window {
             return;
         }
 
-        activeInfoProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "active-info", activeDevice];
+        activeInfoProc.command = ["stratum-cli", "wifi", "active-info", activeDevice];
         activeInfoProc.running = true;
     }
 
@@ -156,7 +168,7 @@ Window {
             return;
         }
 
-        const cmd = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "connect", selectedSsid];
+        const cmd = ["stratum-cli", "wifi", "connect", selectedSsid];
         if (showPassword)
             cmd.push(trimmedPassword);
         actionProc.command = cmd;
@@ -173,7 +185,7 @@ Window {
         if (!activeDevice)
             return;
 
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "disconnect", activeDevice];
+        actionProc.command = ["stratum-cli", "wifi", "disconnect", activeDevice];
         pendingAction = "disconnect";
         pendingActionTarget = activeSsid;
         statusMessage = "Disconnecting " + activeSsid + "...";
@@ -186,14 +198,14 @@ Window {
 
         pendingAction = "forget";
         pendingActionTarget = activeSsid;
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "forget", activeSsid];
+        actionProc.command = ["stratum-cli", "wifi", "forget", activeSsid];
         statusMessage = "Forgetting " + activeSsid + "...";
         actionProc.running = true;
     }
 
     function toggleWifiRadio() {
         const target = wifiEnabled ? "off" : "on";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "toggle", target];
+        actionProc.command = ["stratum-cli", "wifi", "toggle", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         statusMessage = wifiEnabled ? "Turning Wi-Fi off..." : "Turning Wi-Fi on...";
@@ -202,49 +214,51 @@ Window {
 
     Process {
         id: wifiStateProc
-        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "state"]
+        command: ["stratum-cli", "wifi", "state"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|")) {
+                const payload = wifiMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
                     wifiMenu.wifiEnabled = false;
                     return;
                 }
-                wifiMenu.wifiEnabled = result.toLowerCase().indexOf("enabled") !== -1;
+
+                const state = String(payload.state || "").toLowerCase();
+                wifiMenu.wifiEnabled = state.indexOf("enabled") !== -1;
             }
         }
     }
 
     Process {
         id: deviceStatusProc
-        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "device-status"]
+        command: ["stratum-cli", "wifi", "device-status"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|")) {
+                const payload = wifiMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
                     return;
                 }
 
-                const lines = result.length > 0 ? result.split("\n") : [];
+                const rows = Array.isArray(payload.devices) ? payload.devices : [];
                 let currentDevice = "";
                 let currentSsid = "";
                 let currentState = "";
 
-                for (let i = 0; i < lines.length; i++) {
-                    const cols = wifiMenu.splitNmcliFields(lines[i], 4);
-                    if (cols.length < 4)
-                        continue;
-                    const device = cols[0].trim();
-                    const type = cols[1].trim().toLowerCase();
-                    const state = cols[2].trim().toLowerCase();
-                    const conn = cols[3].trim();
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i] || {};
+                    const device = String(row.device || "").trim();
+                    const type = String(row.type || "").trim().toLowerCase();
+                    const state = String(row.state || "").trim().toLowerCase();
+                    const conn = String(row.connection || "").trim();
 
                     if (type === "wifi" && state.indexOf("connected") !== -1) {
                         currentDevice = device;
                         currentSsid = conn;
-                        currentState = cols[2].trim();
+                        currentState = String(row.state || "").trim();
                         break;
                     }
                 }
@@ -267,23 +281,21 @@ Window {
 
     Process {
         id: knownConnectionsProc
-        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "known-connections"]
+        command: ["stratum-cli", "wifi", "known-connections"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|"))
+                const payload = wifiMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true)
                     return;
 
-                const rows = result.length > 0 ? result.split("\n") : [];
+                const rows = Array.isArray(payload.connections) ? payload.connections : [];
                 const known = {};
 
                 for (let i = 0; i < rows.length; i++) {
-                    const cols = wifiMenu.splitNmcliFields(rows[i], 2);
-                    if (cols.length < 2)
-                        continue;
-
-                    const name = cols[0].trim();
-                    const type = cols[1].trim().toLowerCase();
+                    const row = rows[i] || {};
+                    const name = String(row.name || "").trim();
+                    const type = String(row.type || "").trim().toLowerCase();
                     if (!name)
                         continue;
 
@@ -298,36 +310,36 @@ Window {
 
     Process {
         id: wifiListProc
-        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "list"]
+        command: ["stratum-cli", "wifi", "list"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
                 wifiMenu.listLoading = false;
-                if (result.startsWith("__ERROR__|")) {
+                const payload = wifiMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
                     wifiMenu.networks = [];
                     return;
                 }
 
-                const rows = result.length > 0 ? result.split("\n") : [];
+                const rows = Array.isArray(payload.networks) ? payload.networks : [];
                 const dedupBySsid = {};
                 let candidateCount = 0;
 
                 for (let i = 0; i < rows.length; i++) {
-                    const cols = wifiMenu.splitNmcliFields(rows[i], 4);
-                    if (cols.length < 4)
-                        continue;
-
-                    const inUse = cols[0].trim();
-                    const ssid = cols[1].trim();
+                    const row = rows[i] || {};
+                    const inUse = String(row.in_use || "").trim();
+                    const ssid = String(row.ssid || "").trim();
                     if (!ssid)
                         continue;
+
+                    const signalValue = Number(row.signal || 0);
 
                     const candidate = {
                         inUse: inUse,
                         ssid: ssid,
-                        signal: parseInt(cols[2].trim() || "0"),
-                        security: cols[3].trim()
+                        signal: isNaN(signalValue) ? 0 : Math.round(signalValue),
+                        security: String(row.security || "").trim()
                     };
                     candidateCount++;
 
@@ -406,30 +418,14 @@ Window {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|")) {
+                const payload = wifiMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
                     return;
                 }
 
-                const lines = result.length > 0 ? result.split("\n") : [];
-                let ip = "";
-                let gateway = "";
-
-                for (let i = 0; i < lines.length; i++) {
-                    const cols = wifiMenu.splitNmcliFields(lines[i], 2);
-                    if (cols.length < 2)
-                        continue;
-                    const key = cols[0].trim();
-                    const value = cols[1].trim();
-
-                    if (key === "IP4.ADDRESS[1]")
-                        ip = value;
-                    else if (key === "IP4.GATEWAY")
-                        gateway = value;
-                }
-
-                wifiMenu.activeIp = ip;
-                wifiMenu.activeGateway = gateway;
+                wifiMenu.activeIp = String(payload.ip4_address || "");
+                wifiMenu.activeGateway = String(payload.ip4_gateway || "");
             }
         }
     }
@@ -439,14 +435,22 @@ Window {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__|")) {
-                    wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
-                } else if (result.length > 0 && result.toLowerCase().indexOf("error") !== -1) {
+                const payload = wifiMenu.parseCliJson(result);
+
+                if (!payload || payload.ok !== true) {
                     if (wifiMenu.pendingAction === "connect" && wifiMenu.pendingConnectWasKnown && wifiMenu.pendingConnectWasSecure && !wifiMenu.requirePasswordRetry) {
                         wifiMenu.requirePasswordRetry = true;
                         wifiMenu.statusMessage = "Saved credentials failed. Enter password and retry.";
                     } else {
-                        wifiMenu.statusMessage = result;
+                        wifiMenu.statusMessage = payload && payload.error ? String(payload.error) : "Action failed.";
+                    }
+                    wifiMenu.autoHideOnConnectSsid = "";
+                } else if (String(payload.message || "").toLowerCase().indexOf("error") !== -1) {
+                    if (wifiMenu.pendingAction === "connect" && wifiMenu.pendingConnectWasKnown && wifiMenu.pendingConnectWasSecure && !wifiMenu.requirePasswordRetry) {
+                        wifiMenu.requirePasswordRetry = true;
+                        wifiMenu.statusMessage = "Saved credentials failed. Enter password and retry.";
+                    } else {
+                        wifiMenu.statusMessage = String(payload.message || "Action failed.");
                     }
                     wifiMenu.autoHideOnConnectSsid = "";
                 } else if (wifiMenu.pendingAction === "forget") {

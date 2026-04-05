@@ -76,6 +76,18 @@ PanelWindow {
         statusProc.running = true;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function previewVolume(value) {
         const clamped = Math.max(0, Math.min(150, Math.round(value)));
         currentVolume = clamped;
@@ -99,7 +111,7 @@ PanelWindow {
 
         const value = pendingVolume;
         pendingVolume = -1;
-        volumeProc.command = ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "set-volume", String(value)];
+        volumeProc.command = ["stratum-cli", "audio", "set-volume", String(value)];
         volumeProc.running = true;
     }
 
@@ -141,7 +153,7 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching output...";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "set-output", name];
+        actionProc.command = ["stratum-cli", "audio", "set-output", name];
         actionProc.running = true;
     }
 
@@ -150,13 +162,13 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching input...";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "set-input", name];
+        actionProc.command = ["stratum-cli", "audio", "set-input", name];
         actionProc.running = true;
     }
 
     Process {
         id: statusProc
-        command: ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "hover-status"]
+        command: ["stratum-cli", "audio", "status", "--hover"]
         stdout: StdioCollector {
             onStreamFinished: {
                 hoverMenu.loading = false;
@@ -166,56 +178,45 @@ PanelWindow {
                     hoverMenu.inputDevices = [];
                     return;
                 }
-                if (raw.startsWith("__ERROR__")) {
-                    hoverMenu.errorMsg = raw.replace("__ERROR__|", "");
+
+                const payload = hoverMenu.parseCliJson(raw);
+                if (!payload || payload.ok !== true) {
+                    hoverMenu.errorMsg = payload && payload.error ? String(payload.error) : "Audio status unavailable";
                     hoverMenu.outputDevices = [];
                     hoverMenu.inputDevices = [];
                     return;
                 }
 
-                const lines = raw.split("\n");
-                const sinks = [];
-                const sources = [];
-                let defOut = "";
-                let defIn = "";
+                const status = payload.status || {};
+                const defaults = payload.default || {};
 
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line)
-                        continue;
-                    const parts = line.split("|");
-                    const type = (parts[0] || "").trim();
+                hoverMenu.sliderSyncing = true;
+                hoverMenu.parseVolumeStatus(String(status.volume || "0%"), String(status.mute || "yes"));
+                hoverMenu.sliderSyncing = false;
 
-                    if (type === "STATUS") {
-                        hoverMenu.sliderSyncing = true;
-                        hoverMenu.parseVolumeStatus((parts[1] || "0%"), (parts[2] || "yes"));
-                        hoverMenu.sliderSyncing = false;
-                    } else if (type === "DEFAULT") {
-                        defOut = (parts[1] || "").trim();
-                        defIn = (parts[2] || "").trim();
-                    } else if (type === "SINK") {
-                        const name = (parts[1] || "").trim();
-                        if (!name)
-                            continue;
-                        sinks.push({
-                            name: name,
-                            description: (parts[2] || "").trim()
-                        });
-                    } else if (type === "SOURCE") {
-                        const name = (parts[1] || "").trim();
-                        if (!name)
-                            continue;
-                        sources.push({
-                            name: name,
-                            description: (parts[2] || "").trim()
-                        });
-                    }
-                }
+                hoverMenu.defaultOutput = String(defaults.sink || "");
+                hoverMenu.defaultInput = String(defaults.source || "");
 
-                hoverMenu.defaultOutput = defOut;
-                hoverMenu.defaultInput = defIn;
-                hoverMenu.outputDevices = sinks.slice(0, 6);
-                hoverMenu.inputDevices = sources.slice(0, 6);
+                const sinks = Array.isArray(payload.sinks) ? payload.sinks : [];
+                const sources = Array.isArray(payload.sources) ? payload.sources : [];
+
+                hoverMenu.outputDevices = sinks.filter(function(row) {
+                    return !!String(row.name || "").trim();
+                }).map(function(row) {
+                    return {
+                        name: String(row.name || "").trim(),
+                        description: String(row.description || "").trim()
+                    };
+                }).slice(0, 6);
+
+                hoverMenu.inputDevices = sources.filter(function(row) {
+                    return !!String(row.name || "").trim();
+                }).map(function(row) {
+                    return {
+                        name: String(row.name || "").trim(),
+                        description: String(row.description || "").trim()
+                    };
+                }).slice(0, 6);
             }
         }
     }
@@ -226,7 +227,8 @@ PanelWindow {
             onStreamFinished: {
                 const result = this.text.trim();
                 hoverMenu.switching = false;
-                if (result.startsWith("__ERROR__") || result.toLowerCase().indexOf("failed") !== -1) {
+                const payload = hoverMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     hoverMenu.statusMsg = "Switch failed";
                     statusClearTimer.restart();
                 } else {
@@ -243,7 +245,8 @@ PanelWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                if (result.startsWith("__ERROR__") || result.toLowerCase().indexOf("failed") !== -1) {
+                const payload = hoverMenu.parseCliJson(result);
+                if (!payload || payload.ok !== true) {
                     hoverMenu.statusMsg = "Volume change failed";
                     hoverMenu.expectedVolume = -1;
                     hoverMenu.expectedVolumeMisses = 0;
@@ -267,7 +270,7 @@ PanelWindow {
 
     Process {
         id: openPavucontrolProc
-        command: ["sh", Quickshell.shellDir + "/scripts/audio_menu.sh", "open-control"]
+        command: ["stratum-cli", "audio", "open-control"]
     }
 
     Timer {

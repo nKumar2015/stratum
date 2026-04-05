@@ -1,0 +1,71 @@
+use std::io::ErrorKind;
+use std::process::{Command, Stdio};
+
+use serde_json::{json, Value};
+
+pub fn emit(msg: &str) {
+    println!("{}", msg);
+}
+
+pub fn emit_json(value: Value) {
+    emit(&value.to_string());
+}
+
+pub fn debug(msg: &str) {
+    eprintln!("__DEBUG__|{}", msg);
+}
+
+pub fn fail(msg: &str) -> ! {
+    emit_json(json!({ "ok": false, "error": msg }));
+    std::process::exit(0);
+}
+
+pub fn is_help_flag(value: &str) -> bool {
+    matches!(value, "help" | "-h" | "--help")
+}
+
+pub fn emit_help(command: &str, usage: &str, subcommands: &[&str]) {
+    emit_json(json!({
+        "ok": true,
+        "command": command,
+        "help": {
+            "usage": usage,
+            "subcommands": subcommands,
+        }
+    }));
+}
+
+pub fn run_command_capture(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to run {}: {}", program, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit code {}", output.status)
+        };
+        return Err(format!("{} failed: {}", program, detail));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn command_available(program: &str) -> bool {
+    match Command::new(program)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
+        Ok(_) => true,
+        Err(err) => !matches!(err.kind(), ErrorKind::NotFound),
+    }
+}
+

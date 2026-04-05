@@ -16,12 +16,30 @@ Item {
 
     property string icon: "\udb82\udd2e"
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function updateStatus(output) {
-        let raw = output.trim();
-        if (raw === "ethernet") {
+        const payload = parseCliJson(output);
+        if (!payload || payload.ok !== true)
+            return;
+
+        const state = String(payload.state || "").trim().toLowerCase();
+        if (state === "ethernet") {
             icon = "\udb80\ude00";
-        } else if (raw.startsWith("wifi:")) {
-            let strength = parseInt(raw.split(":")[1]);
+        } else if (state === "wifi") {
+            let strength = parseInt(String(payload.signal_pct || "0"));
+            if (isNaN(strength))
+                strength = 0;
             if (strength >= 80)
                 icon = "\udb82\udd28";
             else if (strength >= 60)
@@ -39,7 +57,7 @@ Item {
 
     Process {
         id: netProc
-        command: ["sh", Quickshell.shellDir + "/scripts/check_net.sh"]
+        command: ["stratum-cli", "net", "check"]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {

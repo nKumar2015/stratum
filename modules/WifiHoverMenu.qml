@@ -66,41 +66,59 @@ PanelWindow {
         statusProc.running = true;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     // ── Fetch: type + ssid + signal from nmcli ──────────────────────────
     // Output format per active device: TYPE|DEVICE|SSID|SIGNAL|IP|GW
     Process {
         id: statusProc
-        command: ["sh", Quickshell.shellDir + "/scripts/wifi_menu.sh", "hover-status"]
+        command: ["stratum-cli", "wifi", "state", "--hover"]
         stdout: StdioCollector {
             onStreamFinished: {
                 hoverMenu.loading = false;
                 const text = this.text.trim();
-                if (text.startsWith("__ERROR__")) {
-                    hoverMenu.errorMsg = "nmcli not found";
-                    hoverMenu.connectionType = "";
-                    return;
-                }
                 if (!text) {
                     hoverMenu.connections = [];
                     return;
                 }
-                const lines = text.split("\n");
+
+                const payload = hoverMenu.parseCliJson(text);
+                if (!payload || payload.ok !== true) {
+                    hoverMenu.errorMsg = payload && payload.error ? String(payload.error) : "Network status unavailable";
+                    hoverMenu.connections = [];
+                    return;
+                }
+
+                const entries = Array.isArray(payload.connections) ? payload.connections : [];
                 const parsed = [];
-                for (let i = 0; i < lines.length; i++) {
-                    const l = lines[i].trim();
-                    if (!l) continue;
-                    const parts = l.split("|");
-                    const type = parts[0] || "";
-                    if (type !== "ethernet" && type !== "wifi") continue;
-                    const rawSig = parts[3] || "";
+
+                for (let i = 0; i < entries.length; i++) {
+                    const entry = entries[i] || {};
+                    const type = String(entry.type || "").trim();
+                    if (type !== "ethernet" && type !== "wifi")
+                        continue;
+
+                    const rawSig = String(entry.signal || "").trim();
+                    const parsedSignal = rawSig.length > 0 ? parseInt(rawSig) : -1;
                     parsed.push({
                         type:      type,
-                        ssid:      parts[2] || "",
-                        signalPct: rawSig.length > 0 ? parseInt(rawSig) : -1,
-                        ipAddress: parts[4] || "",
-                        gateway:   parts[5] || ""
+                        ssid:      String(entry.connection || ""),
+                        signalPct: isNaN(parsedSignal) ? -1 : parsedSignal,
+                        ipAddress: String(entry.ip_address || ""),
+                        gateway:   String(entry.gateway || "")
                     });
                 }
+
                 // Sort: ethernet first, then wifi
                 parsed.sort((a, b) => {
                     if (a.type === b.type) return 0;

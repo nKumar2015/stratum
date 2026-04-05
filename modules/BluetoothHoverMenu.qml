@@ -60,48 +60,64 @@ PanelWindow {
         devProc.running = true;
     }
 
+    function parseCliJson(raw) {
+        const text = String(raw || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
     function connectDevice(mac, name) {
         pendingMac = mac;
         statusMsg = "Connecting to " + name + "...";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "hover-connect", mac];
+        actionProc.command = ["stratum-cli", "bluetooth", "connect", mac, "--hover"];
         actionProc.running = true;
     }
 
     function disconnectDevice(mac, name) {
         pendingMac = mac;
         statusMsg = "Disconnecting " + name + "...";
-        actionProc.command = ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "hover-disconnect", mac];
+        actionProc.command = ["stratum-cli", "bluetooth", "disconnect", mac, "--hover"];
         actionProc.running = true;
     }
 
     Process {
         id: devProc
-        command: ["sh", Quickshell.shellDir + "/scripts/bluetooth_menu.sh", "hover-list"]
+        command: ["stratum-cli", "bluetooth", "list", "--hover"]
         stdout: StdioCollector {
             onStreamFinished: {
                 hoverMenu.loading = false;
                 const text = this.text.trim();
-                if (!text || text.startsWith("__ERROR__")) {
+                if (!text) {
                     hoverMenu.devices = [];
-                    if (text.startsWith("__ERROR__")) {
-                        hoverMenu.statusMsg = "bluetoothctl not found";
-                        statusClearTimer.restart();
-                    }
                     return;
                 }
-                const lines = text.split("\n");
+
+                const payload = hoverMenu.parseCliJson(text);
+                if (!payload || payload.ok !== true) {
+                    hoverMenu.devices = [];
+                    hoverMenu.statusMsg = payload && payload.error ? String(payload.error) : "bluetoothctl not found";
+                    statusClearTimer.restart();
+                    return;
+                }
+
+                const rows = Array.isArray(payload.devices) ? payload.devices : [];
                 const parsed = [];
-                for (let i = 0; i < lines.length; i++) {
-                    const parts = lines[i].split("|");
-                    if (parts.length < 2)
-                        continue;
-                    const mac = parts[0].trim();
+
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i] || {};
+                    const mac = String(row.mac || "").trim();
                     if (!mac)
                         continue;
                     parsed.push({
                         mac: mac,
-                        name: parts[1].trim() || mac,
-                        connected: (parts[2] || "no").trim()
+                        name: String(row.name || "").trim() || mac,
+                        connected: String(row.connected || "no").trim()
                     });
                 }
                 parsed.sort((a, b) => {
@@ -122,7 +138,9 @@ PanelWindow {
             onStreamFinished: {
                 const result = this.text.trim();
                 hoverMenu.pendingMac = "";
-                if (result.startsWith("__ERROR__") || result.toLowerCase().indexOf("failed") !== -1) {
+                const payload = hoverMenu.parseCliJson(result);
+                const message = payload ? String(payload.output || payload.error || "") : result;
+                if (!payload || payload.ok !== true || message.toLowerCase().indexOf("failed") !== -1 || message.toLowerCase().indexOf("error") !== -1) {
                     hoverMenu.statusMsg = "Action failed";
                     statusClearTimer.restart();
                 } else {
