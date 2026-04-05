@@ -19,7 +19,7 @@ The binary name is `stratum-cli`.
   - `stratum-cli <command> -h`
   - `stratum-cli <command> help`
 
-All responses are JSON on stdout.
+Command responses are JSON on stdout. Help output is human-readable plain text.
 
 ## Command Groups and Effects
 
@@ -155,10 +155,7 @@ All responses are JSON on stdout.
 
 - Success payloads include `"ok": true` and command-specific fields.
 - Failures return `{"ok": false, "error": "..."}`.
-- Help payloads return:
-  - `"ok": true`
-  - `"command": "..."`
-  - `"help": { "usage": "...", "subcommands": [...] }`
+- Help output is plain text for readability and does not use the JSON payload format.
 
 ## Runtime Invocation
 

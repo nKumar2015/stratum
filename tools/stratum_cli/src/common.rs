@@ -25,14 +25,21 @@ pub fn is_help_flag(value: &str) -> bool {
 }
 
 pub fn emit_help(command: &str, usage: &str, subcommands: &[&str]) {
-    emit_json(json!({
-        "ok": true,
-        "command": command,
-        "help": {
-            "usage": usage,
-            "subcommands": subcommands,
+    let mut lines = Vec::new();
+    lines.push(format!("{} help", command));
+    lines.push(String::new());
+    lines.push("Usage:".to_string());
+    lines.push(format!("  {}", usage));
+
+    if !subcommands.is_empty() {
+        lines.push(String::new());
+        lines.push("Commands:".to_string());
+        for subcommand in subcommands {
+            lines.push(format!("  - {}", subcommand));
         }
-    }));
+    }
+
+    emit(&lines.join("\n"));
 }
 
 pub fn run_command_capture(program: &str, args: &[&str]) -> Result<String, String> {
