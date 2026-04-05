@@ -39,8 +39,7 @@
         pname = "stratum-cli";
         version = "0.1.0";
 
-        src = ./.;
-        sourceRoot = "source/tools/stratum_cli";
+        src = ./tools/stratum_cli;
         cargoLock.lockFile = ./tools/stratum_cli/Cargo.lock;
 
         nativeBuildInputs = with pkgs; [pkg-config];
