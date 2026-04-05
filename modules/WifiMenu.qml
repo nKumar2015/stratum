@@ -847,6 +847,7 @@ Window {
                                 model: wifiMenu.networks
 
                                 delegate: Rectangle {
+                                    required property int index
                                     required property var modelData
                                     id: networkRow
                                     property bool shouldAnimateOnCreate: wifiMenu.animateRowsOnNextLoad

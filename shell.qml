@@ -2,12 +2,14 @@
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import Quickshell.Io
 import QtQuick
 import QtQuick.Layouts
 
 import "sidebar"
 import "modules"
 import "theme"
+import "globals"
 
 ShellRoot {
     PowerMenu {}
@@ -31,6 +33,16 @@ ShellRoot {
         }
     }
     ScreenshotViewer {}
+
+    IpcHandler {
+        target: "screenshot"
+
+        function start(): void {
+            if (!GlobalState.screenshotOverlayOpen)
+                GlobalState.screenshotOverlayOpen = true;
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 

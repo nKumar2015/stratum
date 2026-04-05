@@ -8,6 +8,7 @@ import "../globals"
 ColumnLayout {
     id: root
     property string monitorName: ""
+    property bool hoverActive: false
     spacing: 0
 
     function getBatteryIcon() {
@@ -99,7 +100,7 @@ ColumnLayout {
         interval: 350
         repeat: false
         onTriggered: {
-            if (batteryHover.containsMouse)
+            if (root.hoverActive)
                 GlobalState.showBatteryHoverMenu = true;
         }
     }
@@ -109,25 +110,24 @@ ColumnLayout {
         interval: 420
         repeat: false
         onTriggered: {
-            if (!batteryHover.containsMouse)
+            if (!root.hoverActive)
                 GlobalState.batteryHoverIntent = false;
         }
     }
 
-    MouseArea {
-        id: batteryHover
-        anchors.fill: parent
-        hoverEnabled: true
-        onEntered: {
-            hoverExitGraceTimer.stop();
-            GlobalState.setPopupMonitorName(root.monitorName);
-            GlobalState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
-            GlobalState.batteryHoverIntent = true;
-            hoverShowTimer.start();
-        }
-        onExited: {
-            hoverShowTimer.stop();
-            hoverExitGraceTimer.restart();
+    HoverHandler {
+        onHoveredChanged: {
+            root.hoverActive = hovered;
+            if (hovered) {
+                hoverExitGraceTimer.stop();
+                GlobalState.setPopupMonitorName(root.monitorName);
+                GlobalState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
+                GlobalState.batteryHoverIntent = true;
+                hoverShowTimer.start();
+            } else {
+                hoverShowTimer.stop();
+                hoverExitGraceTimer.restart();
+            }
         }
     }
 }

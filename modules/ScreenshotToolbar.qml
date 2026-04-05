@@ -420,14 +420,6 @@ PanelWindow {
         }
     }
     
-    IpcHandler {
-        target: "screenshot"
-
-        function start(): void {
-            toolbar.openToolbar();
-        }
-    }
-
     Shortcut {
         sequence: "Escape"
         onActivated: {
