@@ -19,9 +19,55 @@ The binary name is `stratum-cli`.
   - `stratum-cli <command> -h`
   - `stratum-cli <command> help`
 
+- Show shell IPC target help:
+  - `stratum-cli help <target>`
+  - `stratum-cli <target> --help`
+
 Command responses are JSON on stdout. Help output is human-readable plain text.
 
+Direct shell IPC syntax:
+
+- `stratum-cli <target> <function> [args...]`
+- Internally this resolves the newest running Quickshell instance and executes:
+  - `qs ipc --pid <PID> call <target> <function> [args...]`
+
+Supported IPC targets:
+
+- `notifications`
+- `powermenu`
+- `lockscreen`
+- `screenshot`
+- `dashboard` (only `open|close|toggle`; data commands remain under dashboard subcommands)
+
 ## Command Groups and Effects
+
+## Shell IPC Targets
+
+- `notifications`
+  - Functions: `open`, `close`, `toggle`, `clear`, `toggleDnd`
+  - Example: `stratum-cli notifications toggle`
+
+- `powermenu`
+  - Functions: `toggle`
+  - Example: `stratum-cli powermenu toggle`
+
+- `lockscreen`
+  - Functions: `lock`
+  - Example: `stratum-cli lockscreen lock`
+
+- `screenshot`
+  - Functions: `start`
+  - Example: `stratum-cli screenshot start`
+
+- `dashboard` (IPC controls)
+  - Functions: `open`, `close`, `toggle`
+  - Example: `stratum-cli dashboard toggle`
+
+Notes:
+
+- `dashboard` also has non-IPC data subcommands (`all`, `calendar`, `music`, `performance`).
+- `stratum-cli dashboard open|close|toggle` routes to shell IPC.
+- `stratum-cli dashboard all|calendar|music|performance` keeps existing data behavior.
 
 ## `audio`
 
@@ -63,14 +109,18 @@ Command responses are JSON on stdout. Help output is human-readable plain text.
 
 ## `dashboard`
 
-- Provides dashboard data blocks.
+- Provides dashboard data blocks and dashboard panel IPC controls.
 - Subcommands:
   - `all [year month]`: emits calendar + media + performance in one payload.
   - `calendar [year month]`: emits calendar metadata and rows.
   - `music`: emits current media metadata from `playerctl`.
   - `performance`: emits CPU/GPU/RAM/storage metrics.
+  - `open`: opens the dashboard panel via shell IPC target.
+  - `close`: closes dashboard panel via shell IPC target.
+  - `toggle`: toggles dashboard panel via shell IPC target.
 - Side effects:
-  - Read-only system probing only.
+  - Data subcommands are read-only system probing.
+  - `open|close|toggle` mutate UI visibility via shell IPC.
 
 ## `net`
 
@@ -164,6 +214,10 @@ Quickshell components invoke `stratum-cli` directly.
 Examples:
 
 - `stratum-cli audio ...`
+- `stratum-cli notifications toggle`
+- `stratum-cli powermenu toggle`
+- `stratum-cli lockscreen lock`
+- `stratum-cli screenshot start`
 - `stratum-cli wifi ...`
 - `stratum-cli bluetooth ...`
 - `stratum-cli net check`
