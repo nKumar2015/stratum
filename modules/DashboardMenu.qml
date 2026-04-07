@@ -37,12 +37,12 @@ PanelWindow {
     property int calendarWeekdayGap: 3
     property int calendarWeekdayToDatesGap: 2
     readonly property int calendarGridWidth: (calendarCellWidth * 7) + (calendarGridGap * 6)
-    property real calendarSwipeX: 0
     property var calendarCache: ({})
     property var calendarPrefetchQueue: []
     property bool calendarPrefetchRunning: false
     property int calendarPrefetchYear: 0
     property int calendarPrefetchMonth: 0
+    readonly property int dashboardRefreshMs: 2000
 
     property string musicStatus: "Unknown"
     property string musicPlayer: "N/A"
@@ -68,6 +68,62 @@ PanelWindow {
     function parseNumber(value, fallback) {
         const n = Number(value);
         return isNaN(n) ? fallback : n;
+    }
+
+    function parseGpuPercentValue(textValue, numericValue) {
+        const gpuValue = Number(numericValue);
+        if (!isNaN(gpuValue))
+            return clampPercent(String(Math.round(gpuValue)));
+
+        const parsedText = parseInt(String(textValue || "N/A"));
+        return isNaN(parsedText) ? 0 : clampPercent(String(parsedText));
+    }
+
+    function applyMusicPayload(musicPayload) {
+        const music = (musicPayload && typeof musicPayload === "object") ? musicPayload : {};
+        musicStatus = String(music.status || "Unknown").trim();
+        musicPlayer = String(music.player || "N/A").trim();
+        musicTitle = String(music.title || "Nothing playing").trim();
+        musicArtist = String(music.artist || "N/A").trim();
+        musicAlbum = String(music.album || "N/A").trim();
+        musicPosition = String(music.position || "00:00").trim();
+        musicLength = String(music.length || "00:00").trim();
+        musicArtUrl = String(music.art_url || "").trim();
+        musicPlayerTitle = String(music.player_title || musicPlayer || "N/A").trim();
+    }
+
+    function applyPerformancePayload(performancePayload) {
+        const performance = (performancePayload && typeof performancePayload === "object") ? performancePayload : {};
+        cpuPercent = clampPercent(String(performance.cpu_percent || "0"));
+
+        gpuPercentText = String(performance.gpu_percent_text || "N/A").trim();
+        gpuPercentValue = parseGpuPercentValue(gpuPercentText, performance.gpu_percent_value);
+        gpuSource = String(performance.gpu_source || "N/A").trim();
+
+        ramUsedGiB = parseNumber(performance.ram_used_gib, 0);
+        ramTotalGiB = parseNumber(performance.ram_total_gib, 0);
+        ramPercent = clampPercent(String(performance.ram_percent || "0"));
+
+        storageUsedGiB = parseNumber(performance.storage_used_gib, 0);
+        storageTotalGiB = parseNumber(performance.storage_total_gib, 0);
+        storagePercent = clampPercent(String(performance.storage_percent || "0"));
+    }
+
+    function applyDashboardResponse(response, raw) {
+        const calendarPayload = parseCalendarPayload(raw);
+        if (calendarPayload.hasCalendar) {
+            cacheCalendarPayload(calendarPayload);
+
+            // Avoid visual jump: only apply responses for the currently selected month.
+            if (calendarPayload.year === selectedCalendarYear && calendarPayload.month === selectedCalendarMonth) {
+                applyCalendarPayload(calendarPayload, false);
+                preloadNearbyCalendars(calendarPayload.year, calendarPayload.month);
+            }
+        }
+
+        applyMusicPayload(response.music);
+        applyPerformancePayload(response.performance);
+        lastError = "";
     }
 
     function parseCliJson(raw) {
@@ -414,13 +470,6 @@ PanelWindow {
         dataProc.running = true;
     }
 
-    function animateCalendarSwipe(direction) {
-        const dir = direction < 0 ? -1 : 1;
-        calendarSwipeX = 42 * dir;
-        calendarDatesAnimatedLayer.opacity = 0.75;
-        calendarSwipeAnimation.restart();
-    }
-
     function sendPlayerAction(action) {
         if (!action || action.length === 0)
             return;
@@ -486,7 +535,7 @@ PanelWindow {
 
     Timer {
         id: refreshTimer
-        interval: 2000
+        interval: dashboard.dashboardRefreshMs
         repeat: true
         running: false
         onTriggered: {
@@ -519,50 +568,7 @@ PanelWindow {
                     return;
                 }
 
-                const calendarPayload = dashboard.parseCalendarPayload(raw);
-                if (calendarPayload.hasCalendar) {
-                    dashboard.cacheCalendarPayload(calendarPayload);
-
-                    // Avoid visual jump: only apply responses for the currently selected month.
-                    if (calendarPayload.year === dashboard.selectedCalendarYear && calendarPayload.month === dashboard.selectedCalendarMonth) {
-                        dashboard.applyCalendarPayload(calendarPayload, false);
-                        dashboard.preloadNearbyCalendars(calendarPayload.year, calendarPayload.month);
-                    }
-                }
-
-                const music = (response.music && typeof response.music === "object") ? response.music : {};
-                dashboard.musicStatus = String(music.status || "Unknown").trim();
-                dashboard.musicPlayer = String(music.player || "N/A").trim();
-                dashboard.musicTitle = String(music.title || "Nothing playing").trim();
-                dashboard.musicArtist = String(music.artist || "N/A").trim();
-                dashboard.musicAlbum = String(music.album || "N/A").trim();
-                dashboard.musicPosition = String(music.position || "00:00").trim();
-                dashboard.musicLength = String(music.length || "00:00").trim();
-                dashboard.musicArtUrl = String(music.art_url || "").trim();
-                dashboard.musicPlayerTitle = String(music.player_title || dashboard.musicPlayer || "N/A").trim();
-
-                const performance = (response.performance && typeof response.performance === "object") ? response.performance : {};
-                dashboard.cpuPercent = dashboard.clampPercent(String(performance.cpu_percent || "0"));
-
-                dashboard.gpuPercentText = String(performance.gpu_percent_text || "N/A").trim();
-                const gpuValue = Number(performance.gpu_percent_value);
-                if (!isNaN(gpuValue))
-                    dashboard.gpuPercentValue = dashboard.clampPercent(String(Math.round(gpuValue)));
-                else {
-                    const parsedGpu = parseInt(dashboard.gpuPercentText);
-                    dashboard.gpuPercentValue = isNaN(parsedGpu) ? 0 : dashboard.clampPercent(String(parsedGpu));
-                }
-                dashboard.gpuSource = String(performance.gpu_source || "N/A").trim();
-
-                dashboard.ramUsedGiB = dashboard.parseNumber(performance.ram_used_gib, 0);
-                dashboard.ramTotalGiB = dashboard.parseNumber(performance.ram_total_gib, 0);
-                dashboard.ramPercent = dashboard.clampPercent(String(performance.ram_percent || "0"));
-
-                dashboard.storageUsedGiB = dashboard.parseNumber(performance.storage_used_gib, 0);
-                dashboard.storageTotalGiB = dashboard.parseNumber(performance.storage_total_gib, 0);
-                dashboard.storagePercent = dashboard.clampPercent(String(performance.storage_percent || "0"));
-
-                dashboard.lastError = "";
+                dashboard.applyDashboardResponse(response, raw);
             }
         }
     }
@@ -653,850 +659,82 @@ PanelWindow {
                 Layout.fillHeight: false
                 spacing: 8
 
-                Rectangle {
-                    id: performancePanel
+                DashboardPerformancePanel {
+                    id: performancePanelItem
                     Layout.alignment: Qt.AlignTop
                     Layout.preferredWidth: 270
-                    Layout.preferredHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.minimumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.maximumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    color: Theme.background
-                    radius: 10
-                    border.width: 1
-                    border.color: Theme.outlineVariant
-
-                    ColumnLayout {
-                        id: performanceColumn
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 6
-
-                        Text {
-                            text: "Performance"
-                            color: Theme.on_Background
-                            font.family: Theme.font
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 70
-                            radius: 8
-                            color: Theme.background
-                            border.width: 1
-                            border.color: Theme.outlineVariant
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 2
-
-                                RowLayout {
-                                    spacing: 4
-
-                                    Text {
-                                        text: ""
-                                        color: Theme.primary
-                                        font.family: Theme.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Text {
-                                        text: "CPU"
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                    }
-                                }
-
-                                Text {
-                                    text: String(dashboard.cpuPercent) + "%"
-                                    color: dashboard.metricColor(dashboard.cpuPercent)
-                                    font.family: Theme.font
-                                    font.pixelSize: 17
-                                    font.bold: true
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 6
-                                    radius: 3
-                                    color: Theme.surfaceContainerLowest
-
-                                    Rectangle {
-                                        width: parent.width * dashboard.cpuPercent / 100
-                                        height: parent.height
-                                        radius: 3
-                                        color: dashboard.metricColor(dashboard.cpuPercent)
-
-                                        Behavior on width {
-                                            NumberAnimation {
-                                                duration: 260
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 70
-                            radius: 8
-                            color: Theme.background
-                            border.width: 1
-                            border.color: Theme.outlineVariant
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 2
-
-                                RowLayout {
-                                    spacing: 4
-
-                                    Text {
-                                        text: "󰢮"
-                                        color: Theme.primary
-                                        font.family: Theme.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Text {
-                                        text: "GPU"
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                    }
-
-                                    Text {
-                                        text: "|"
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: dashboard.gpuSource
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 9
-                                        elide: Text.ElideRight
-                                        font.bold: true
-                                    }
-                                }
-
-                                Text {
-                                    text: dashboard.gpuPercentText === "N/A" ? "N/A" : dashboard.gpuPercentText + "%"
-                                    color: dashboard.gpuPercentText === "N/A" ? Theme.on_Background : Theme.secondary
-                                    font.family: Theme.font
-                                    font.pixelSize: 17
-                                    font.bold: true
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 6
-                                    radius: 3
-                                    color: Theme.surfaceContainerLowest
-                                    visible: dashboard.gpuPercentText !== "N/A"
-
-                                    Rectangle {
-                                        width: parent.width * dashboard.gpuPercentValue / 100
-                                        height: parent.height
-                                        radius: 3
-                                        color: Theme.secondary
-
-                                        Behavior on width {
-                                            NumberAnimation {
-                                                duration: 260
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 82
-                            radius: 8
-                            color: Theme.background
-                            border.width: 1
-                            border.color: Theme.outlineVariant
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 2
-
-                                RowLayout {
-                                    spacing: 4
-
-                                    Text {
-                                        text: "󰍛"
-                                        color: Theme.primary
-                                        font.family: Theme.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Text {
-                                        text: "RAM"
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                    }
-                                }
-
-                                Text {
-                                    text: dashboard.ramUsedGiB.toFixed(1) + " / " + dashboard.ramTotalGiB.toFixed(1) + " GiB"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 12
-                                }
-
-                                Text {
-                                    text: String(dashboard.ramPercent) + "%"
-                                    color: dashboard.metricColor(dashboard.ramPercent)
-                                    font.family: Theme.font
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 6
-                                    radius: 3
-                                    color: Theme.surfaceContainerLowest
-
-                                    Rectangle {
-                                        width: parent.width * dashboard.ramPercent / 100
-                                        height: parent.height
-                                        radius: 3
-                                        color: dashboard.metricColor(dashboard.ramPercent)
-
-                                        Behavior on width {
-                                            NumberAnimation {
-                                                duration: 260
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 82
-                            radius: 8
-                            color: Theme.background
-                            border.width: 1
-                            border.color: Theme.outlineVariant
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 2
-
-                                RowLayout {
-                                    spacing: 4
-
-                                    Text {
-                                        text: ""
-                                        color: Theme.primary
-                                        font.family: Theme.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Text {
-                                        text: "Storage"
-                                        color: Theme.on_Background
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                    }
-                                }
-
-                                Text {
-                                    text: dashboard.storageUsedGiB.toFixed(1) + " / " + dashboard.storageTotalGiB.toFixed(1) + " GiB"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 12
-                                }
-
-                                Text {
-                                    text: String(dashboard.storagePercent) + "%"
-                                    color: dashboard.metricColor(dashboard.storagePercent)
-                                    font.family: Theme.font
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 6
-                                    radius: 3
-                                    color: Theme.surfaceContainerLowest
-
-                                    Rectangle {
-                                        width: parent.width * dashboard.storagePercent / 100
-                                        height: parent.height
-                                        radius: 3
-                                        color: dashboard.metricColor(dashboard.storagePercent)
-
-                                        Behavior on width {
-                                            NumberAnimation {
-                                                duration: 260
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                    }
+                    Layout.preferredHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.minimumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.maximumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    cpuPercent: dashboard.cpuPercent
+                    gpuPercentText: dashboard.gpuPercentText
+                    gpuPercentValue: dashboard.gpuPercentValue
+                    gpuSource: dashboard.gpuSource
+                    ramUsedGiB: dashboard.ramUsedGiB
+                    ramTotalGiB: dashboard.ramTotalGiB
+                    ramPercent: dashboard.ramPercent
+                    storageUsedGiB: dashboard.storageUsedGiB
+                    storageTotalGiB: dashboard.storageTotalGiB
+                    storagePercent: dashboard.storagePercent
                 }
 
-                Rectangle {
-                    id: calendarPanel
+                DashboardCalendarPanel {
+                    id: calendarPanelItem
                     Layout.alignment: Qt.AlignTop
                     Layout.preferredWidth: dashboard.calendarGridWidth + 8
                     Layout.minimumWidth: dashboard.calendarGridWidth + 8
                     Layout.maximumWidth: dashboard.calendarGridWidth + 8
-                    Layout.preferredHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.minimumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.maximumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    color: Theme.background
-                    radius: 10
-                    border.width: 1
-                    border.color: Theme.outlineVariant
-
-                    ColumnLayout {
-                        id: calendarColumn
-                        anchors.fill: parent
-                        anchors.margins: 4
-                        spacing: 0
-
-                        Text {
-                            text: dashboard.calendarTitle.length > 0 ? dashboard.calendarTitle : "Calendar"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 16
-                            font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            Layout.fillWidth: true
-                            Layout.topMargin: 2
-                            Layout.bottomMargin: 8
-                        }
-
-                        Item {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: dashboard.calendarGridWidth
-                            Layout.minimumWidth: dashboard.calendarGridWidth
-                            Layout.maximumWidth: dashboard.calendarGridWidth
-                            implicitHeight: dashboard.calendarWeekdayHeight + dashboard.calendarWeekdayToDatesGap + (dashboard.calendarCellHeight * 6) + (dashboard.calendarGridGap * 5)
-
-                            GridLayout {
-                                anchors.top: parent.top
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                columns: 7
-                                rowSpacing: 0
-                                columnSpacing: dashboard.calendarWeekdayGap
-                                width: dashboard.calendarGridWidth
-
-                                Rectangle {
-                                    id: weekdaysBox
-                                    width: (dashboard.calendarCellWidth) * 7 + (6 * 3)
-                                    height: dashboard.calendarWeekdayHeight
-                                    radius: 8
-                                    color: Theme.background   
-                                    clip: true                    
-
-                                    Rectangle {
-                                        anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        anchors.bottom: parent.bottom
-                                        height: 1
-                                        color: Theme.outline
-                                    }
-
-                                    Row {
-                                        anchors.fill: parent
-                                        spacing: 3
-
-                                        Repeater {
-                                            model: dashboard.calendarWeekdays
-                                            delegate: Rectangle {
-                                                required property var modelData
-                                                width: dashboard.calendarCellWidth
-                                                height: dashboard.calendarWeekdayHeight
-                                                color: "transparent"   // no per-item border
-                                                // optional: add only internal separators if desired
-
-                                                Text {
-                                                    anchors.fill: parent
-                                                    anchors.margins: 3
-                                                    text: dashboard.weekdayLabel(modelData)
-                                                    color: Theme.on_Background
-                                                    font.family: Theme.font
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    verticalAlignment: Text.AlignVCenter
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Item {
-                                id: calendarDatesAnimatedLayer
-                                anchors.top: parent.top
-                                anchors.topMargin: dashboard.calendarWeekdayHeight + dashboard.calendarWeekdayToDatesGap
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: dashboard.calendarGridWidth
-                                height: (dashboard.calendarCellHeight * 6) + (dashboard.calendarGridGap * 5)
-                                transform: Translate {
-                                    x: dashboard.calendarSwipeX
-                                }
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 120
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                GridLayout {
-                                    anchors.fill: parent
-                                    columns: 7
-                                    rowSpacing: dashboard.calendarGridGap
-                                    columnSpacing: dashboard.calendarGridGap
-
-                                    Repeater {
-                                        model: 42
-                                        delegate: Rectangle {
-                                            property int dayValue: dashboard.gridDayValue(index)
-                                            property bool inCurrentMonth: dashboard.gridCellCurrentMonth(index)
-                                            property bool isToday: dashboard.gridCellIsToday(index)
-
-                                            implicitWidth: dashboard.calendarCellWidth
-                                            implicitHeight: dashboard.calendarCellHeight
-                                            radius: 6
-                                            color: isToday ? Theme.primary : Theme.background
-                                            border.width: isToday ? 1 : 0
-                                            border.color: Theme.primary
-
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: String(dayValue)
-                                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.on_Surface : Theme.surfaceContainerLow)
-                                                font.family: Theme.font
-                                                font.pixelSize: 12
-                                                font.bold: isToday
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        RowLayout {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: dashboard.calendarGridWidth
-                            Layout.minimumWidth: dashboard.calendarGridWidth
-                            Layout.maximumWidth: dashboard.calendarGridWidth
-                            Layout.topMargin: 5
-                            spacing: 6
-
-                            Rectangle {
-                                Layout.preferredWidth: 38
-                                Layout.preferredHeight: 28
-                                radius: 6
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "<<"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        dashboard.changeCalendarYear(-1);
-                                        dashboard.animateCalendarSwipe(-1);
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 38
-                                Layout.preferredHeight: 28
-                                radius: 6
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "<"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        dashboard.changeCalendarMonth(-1);
-                                        dashboard.animateCalendarSwipe(-1);
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 28
-                                radius: 6
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "Today"
-                                    color: Theme.primary
-                                    font.family: Theme.font
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        dashboard.jumpCalendarToToday();
-                                        dashboard.animateCalendarSwipe(1);
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 38
-                                Layout.preferredHeight: 28
-                                radius: 6
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: ">"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        dashboard.changeCalendarMonth(1);
-                                        dashboard.animateCalendarSwipe(1);
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 38
-                                Layout.preferredHeight: 28
-                                radius: 6
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: ">>"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        dashboard.changeCalendarYear(1);
-                                        dashboard.animateCalendarSwipe(1);
-                                    }
-                                }
-                            }
-                        }
-
+                    Layout.preferredHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.minimumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.maximumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    title: dashboard.calendarTitle.length > 0 ? dashboard.calendarTitle : "Calendar"
+                    calendarWeekdays: dashboard.calendarWeekdays
+                    calendarCellWidth: dashboard.calendarCellWidth
+                    calendarCellHeight: dashboard.calendarCellHeight
+                    calendarGridGap: dashboard.calendarGridGap
+                    calendarWeekdayHeight: dashboard.calendarWeekdayHeight
+                    calendarWeekdayGap: dashboard.calendarWeekdayGap
+                    calendarWeekdayToDatesGap: dashboard.calendarWeekdayToDatesGap
+                    gridDayValueFn: function(index) {
+                        return dashboard.gridDayValue(index);
                     }
+                    gridCellCurrentMonthFn: function(index) {
+                        return dashboard.gridCellCurrentMonth(index);
+                    }
+                    gridCellIsTodayFn: function(index) {
+                        return dashboard.gridCellIsToday(index);
+                    }
+                    weekdayLabelFn: function(label) {
+                        return dashboard.weekdayLabel(label);
+                    }
+                    onPreviousYearRequested: dashboard.changeCalendarYear(-1)
+                    onPreviousMonthRequested: dashboard.changeCalendarMonth(-1)
+                    onTodayRequested: dashboard.jumpCalendarToToday()
+                    onNextMonthRequested: dashboard.changeCalendarMonth(1)
+                    onNextYearRequested: dashboard.changeCalendarYear(1)
                 }
 
-                Rectangle {
-                    id: musicPanel
+                DashboardMusicPanel {
+                    id: musicPanelItem
                     Layout.alignment: Qt.AlignTop
                     Layout.preferredWidth: 310
-                    Layout.preferredHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.minimumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    Layout.maximumHeight: Math.max(performanceColumn.implicitHeight + 20, musicColumn.implicitHeight + 20)
-                    color: Theme.background
-                    radius: 10
-                    border.width: 1
-                    border.color: Theme.outlineVariant
-
-                    ColumnLayout {
-                        id: musicColumn
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 6
-
-                        Text {
-                            text: "Now Playing"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 14
-                            font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            Layout.fillWidth: true
-                        }
-
-                        Rectangle {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: 200
-                            Layout.preferredHeight: 200
-                            radius: 10
-                            color: Theme.background
-                            border.width: 1
-                            border.color: Theme.outlineVariant
-                            clip: true
-
-                            Image {
-                                anchors.fill: parent
-                                source: dashboard.musicArtUrl
-                                fillMode: Image.PreserveAspectCrop
-                                visible: dashboard.musicArtUrl.length > 0
-                                smooth: true
-                                asynchronous: true
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "󰎆"
-                                visible: dashboard.musicArtUrl.length === 0
-                                color: Theme.surfaceContainerLow
-                                font.family: Theme.font
-                                font.pixelSize: 36
-                            }
-                        }
-
-                        Item {
-                            id: musicTitleClip
-                            Layout.fillWidth: true
-                            Layout.minimumHeight: musicTitleTextA.implicitHeight
-                            implicitHeight: musicTitleTextA.implicitHeight
-                            clip: true
-
-                            property int marqueeGap: 24
-                            property real scrollSpeed: 42
-                            property bool titleOverflow: musicTitleTextA.implicitWidth > width
-                            property real loopSpan: musicTitleTextA.implicitWidth + marqueeGap
-                            property real tickerOffset: 0
-
-                            Text {
-                                id: musicTitleTextA
-                                text: dashboard.musicTitle
-                                color: Theme.on_Surface
-                                font.family: Theme.font
-                                font.pixelSize: 12
-                                font.bold: true
-                                elide: Text.ElideNone
-                                wrapMode: Text.NoWrap
-                                anchors.verticalCenter: parent.verticalCenter
-                                x: musicTitleClip.titleOverflow ? musicTitleClip.tickerOffset : Math.round((musicTitleClip.width - implicitWidth) / 2)
-                            }
-
-                            Text {
-                                id: musicTitleTextB
-                                text: dashboard.musicTitle
-                                color: Theme.on_Surface
-                                font.family: Theme.font
-                                font.pixelSize: 12
-                                font.bold: true
-                                elide: Text.ElideNone
-                                wrapMode: Text.NoWrap
-                                visible: musicTitleClip.titleOverflow
-                                anchors.verticalCenter: parent.verticalCenter
-                                x: musicTitleClip.tickerOffset + musicTitleClip.loopSpan
-                            }
-
-                            NumberAnimation {
-                                id: musicTitleMarquee
-                                target: musicTitleClip
-                                property: "tickerOffset"
-                                from: 0
-                                to: -musicTitleClip.loopSpan
-                                duration: Math.max(1, Math.round((musicTitleClip.loopSpan / musicTitleClip.scrollSpeed) * 1000))
-                                easing.type: Easing.Linear
-                                running: dashboard.visible && musicTitleClip.titleOverflow
-                                loops: Animation.Infinite
-
-                                onRunningChanged: {
-                                    if (!running)
-                                        musicTitleClip.tickerOffset = 0;
-                                }
-                            }
-
-                            onTitleOverflowChanged: {
-                                if (!titleOverflow)
-                                    tickerOffset = 0;
-                            }
-                        }
-
-                        Text {
-                            text: dashboard.musicArtist
-                            color: Theme.secondary
-                            font.family: Theme.font
-                            font.pixelSize: 11
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-
-                        Text {
-                            text: dashboard.musicAlbum
-                            color: Theme.tertiary
-                            font.family: Theme.font
-                            font.pixelSize: 10
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-
-                        Text {
-                            text: dashboard.musicPosition + " / " + dashboard.musicLength
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 10
-                            horizontalAlignment: Text.AlignHCenter
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignHCenter
-                            spacing: 10
-
-                            Rectangle {
-                                Layout.preferredWidth: 56
-                                Layout.preferredHeight: 40
-                                radius: 8
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: ""
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 16
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: dashboard.sendPlayerAction("previous")
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 72
-                                Layout.preferredHeight: 40
-                                radius: 8
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: dashboard.musicStatus === "Playing" ? "" : ""
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 16
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: dashboard.sendPlayerAction("play-pause")
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 56
-                                Layout.preferredHeight: 40
-                                radius: 8
-                                color: Theme.background
-                                border.width: 1
-                                border.color: Theme.outlineVariant
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: ""
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
-                                    font.pixelSize: 16
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: dashboard.sendPlayerAction("next")
-                                }
-                            }
-                        }
-
-                    }
+                    Layout.preferredHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.minimumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    Layout.maximumHeight: Math.max(performancePanelItem.implicitHeight, musicPanelItem.implicitHeight)
+                    panelVisible: dashboard.visible
+                    musicStatus: dashboard.musicStatus
+                    musicTitle: dashboard.musicTitle
+                    musicArtist: dashboard.musicArtist
+                    musicAlbum: dashboard.musicAlbum
+                    musicPosition: dashboard.musicPosition
+                    musicLength: dashboard.musicLength
+                    musicArtUrl: dashboard.musicArtUrl
+                    onPreviousRequested: dashboard.sendPlayerAction("previous")
+                    onPlayPauseRequested: dashboard.sendPlayerAction("play-pause")
+                    onNextRequested: dashboard.sendPlayerAction("next")
                 }
             }
         }
     }
 
-    ParallelAnimation {
-        id: calendarSwipeAnimation
-
-        NumberAnimation {
-            target: dashboard
-            property: "calendarSwipeX"
-            to: 0
-            duration: 180
-            easing.type: Easing.OutCubic
-        }
-
-        NumberAnimation {
-            target: calendarDatesAnimatedLayer
-            property: "opacity"
-            to: 1
-            duration: 180
-            easing.type: Easing.OutCubic
-        }
-    }
 }
