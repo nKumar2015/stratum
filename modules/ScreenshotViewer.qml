@@ -38,6 +38,12 @@ PanelWindow {
     property int annotatedExportRetries: 0
     property real annotatedExportWidth: 0
     property real annotatedExportHeight: 0
+    readonly property bool portalBusy: portalSaveAsProc.running
+    readonly property bool viewerInteractive: visibleState && !portalBusy
+    readonly property bool saveAsVerboseLogs: false
+    readonly property int portalSaveAsTimeoutMs: 35000
+    readonly property int annotatedExportPollMs: 16
+    readonly property int annotatedExportMaxRetries: 60
 
     anchors {
         top: true
@@ -49,12 +55,27 @@ PanelWindow {
     screen: resolvedScreen
 
     color: "#99000000"
-    visible: visibleState && !portalSaveAsProc.running
+    visible: viewerInteractive
     exclusiveZone: -1
 
     // Keep the viewer above normal UI during editing and Save As flow.
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: (visible && !portalSaveAsProc.running) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: viewerInteractive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+    ScreenshotWorkflowHelper {
+        id: workflow
+        viewer: viewer
+        annotationExportSurface: annotationExportSurface
+        annotationExportCanvas: annotationExportCanvas
+    }
+
+    ScreenshotCanvasHelper {
+        id: canvasOps
+        viewer: viewer
+        renderSurface: renderSurface
+        screenshotImage: screenshotImage
+        imageDrawSurface: imageDrawSurface
+    }
 
     function screenForMonitorName(name) {
         const wanted = String(name || "").trim();
@@ -202,6 +223,8 @@ PanelWindow {
     }
 
     function logSaveAs(message) {
+        if (!saveAsVerboseLogs)
+            return;
         console.log("[QS][Screenshot][SaveAs] " + String(message || ""));
     }
 
@@ -251,29 +274,22 @@ PanelWindow {
     }
 
     function colorToHex(c) {
-        const r = Math.round(c.r * 255).toString(16).padStart(2, "0");
-        const g = Math.round(c.g * 255).toString(16).padStart(2, "0");
-        const b = Math.round(c.b * 255).toString(16).padStart(2, "0");
-        return "#" + r + g + b;
+        return canvasOps.colorToHex(c);
     }
 
     function clearAnnotations() {
-        annotationStrokes = [];
+        canvasOps.clearAnnotations();
         paintCanvas.requestPaint();
     }
 
     function undoLastAnnotation() {
-        const strokes = viewer.annotationStrokes || [];
-        if (!strokes.length)
-            return;
-
-        annotationStrokes = strokes.slice(0, strokes.length - 1);
+        canvasOps.undoLastAnnotation();
         paintCanvas.currentStrokeIndex = -1;
         paintCanvas.requestPaint();
     }
 
     function hasAnnotations() {
-        return (annotationStrokes || []).length > 0;
+        return canvasOps.hasAnnotations();
     }
 
     function startPostAction(action) {
@@ -314,103 +330,39 @@ PanelWindow {
         portalSaveAsProc.running = true;
     }
 
+
     function clamp(value, minValue, maxValue) {
-        return Math.max(minValue, Math.min(maxValue, value));
+        return canvasOps.clamp(value, minValue, maxValue);
     }
 
     function mapPaintToSurface(paintItem, x, y) {
-        return paintItem.mapToItem(renderSurface, x, y);
+        return canvasOps.mapPaintToSurface(paintItem, x, y);
     }
 
     function mapPaintToImage(paintItem, x, y) {
-        const mapped = paintItem.mapToItem(imageDrawSurface, x, y);
-        return {
-            x: clamp(mapped.x, 0, Math.max(0, imageDrawSurface.width - 1)),
-            y: clamp(mapped.y, 0, Math.max(0, imageDrawSurface.height - 1))
-        };
+        return canvasOps.mapPaintToImage(paintItem, x, y);
     }
 
     function clampPanForZoom(zoomValue, proposedPanX, proposedPanY) {
-        const baseW = Math.max(0, screenshotImage.paintedWidth);
-        const baseH = Math.max(0, screenshotImage.paintedHeight);
-        const scaledW = baseW * zoomValue;
-        const scaledH = baseH * zoomValue;
-
-        let nextPanX = proposedPanX;
-        let nextPanY = proposedPanY;
-
-        if (scaledW <= renderSurface.width)
-            nextPanX = 0;
-        else {
-            const limitX = (scaledW - renderSurface.width) / 2;
-            nextPanX = clamp(nextPanX, -limitX, limitX);
-        }
-
-        if (scaledH <= renderSurface.height)
-            nextPanY = 0;
-        else {
-            const limitY = (scaledH - renderSurface.height) / 2;
-            nextPanY = clamp(nextPanY, -limitY, limitY);
-        }
-
-        return {
-            x: nextPanX,
-            y: nextPanY
-        };
+        return canvasOps.clampPanForZoom(zoomValue, proposedPanX, proposedPanY);
     }
 
     function setImageZoom(nextZoom, focusX, focusY) {
-        const baseW = Math.max(0, screenshotImage.paintedWidth);
-        const baseH = Math.max(0, screenshotImage.paintedHeight);
-        if (baseW <= 0 || baseH <= 0)
-            return;
-
-        const oldZoom = imageZoom;
-        const clampedZoom = clamp(Number(nextZoom || 1), minImageZoom, maxImageZoom);
-        const fx = (typeof focusX === "number") ? focusX : (renderSurface.width / 2);
-        const fy = (typeof focusY === "number") ? focusY : (renderSurface.height / 2);
-
-        const oldPosX = (renderSurface.width - (baseW * oldZoom)) / 2 + imagePanX;
-        const oldPosY = (renderSurface.height - (baseH * oldZoom)) / 2 + imagePanY;
-        const contentX = (fx - oldPosX) / Math.max(0.0001, oldZoom);
-        const contentY = (fy - oldPosY) / Math.max(0.0001, oldZoom);
-
-        const newPosX = fx - contentX * clampedZoom;
-        const newPosY = fy - contentY * clampedZoom;
-        const centeredPosX = (renderSurface.width - (baseW * clampedZoom)) / 2;
-        const centeredPosY = (renderSurface.height - (baseH * clampedZoom)) / 2;
-        const unclampedPanX = newPosX - centeredPosX;
-        const unclampedPanY = newPosY - centeredPosY;
-        const clampedPan = clampPanForZoom(clampedZoom, unclampedPanX, unclampedPanY);
-
-        imageZoom = clampedZoom;
-        imagePanX = clampedPan.x;
-        imagePanY = clampedPan.y;
+        canvasOps.setImageZoom(nextZoom, focusX, focusY);
     }
 
     function startPan(surfaceX, surfaceY) {
-        panActive = true;
-        panLastSurfaceX = surfaceX;
-        panLastSurfaceY = surfaceY;
+        canvasOps.startPan(surfaceX, surfaceY);
     }
 
     function updatePan(surfaceX, surfaceY) {
-        if (!panActive)
-            return;
-
-        const dx = surfaceX - panLastSurfaceX;
-        const dy = surfaceY - panLastSurfaceY;
-        panLastSurfaceX = surfaceX;
-        panLastSurfaceY = surfaceY;
-
-        const clampedPan = clampPanForZoom(imageZoom, imagePanX + dx, imagePanY + dy);
-        imagePanX = clampedPan.x;
-        imagePanY = clampedPan.y;
+        canvasOps.updatePan(surfaceX, surfaceY);
     }
 
     function stopPan() {
-        panActive = false;
+        canvasOps.stopPan();
     }
+
 
     Timer {
         id: clearStatusTimer
@@ -424,7 +376,7 @@ PanelWindow {
 
     Timer {
         id: portalSaveAsGuard
-        interval: 35000
+        interval: viewer.portalSaveAsTimeoutMs
         repeat: false
         onTriggered: {
             if (!portalSaveAsProc.running)
@@ -438,64 +390,29 @@ PanelWindow {
 
     Timer {
         id: annotatedExportGrabTimer
-        interval: 16
+        interval: viewer.annotatedExportPollMs
         repeat: false
         onTriggered: {
             if (!viewer.annotatedExportPending)
                 return;
 
             if (annotationExportBase.status === Image.Error) {
-                viewer.annotatedExportPending = false;
-                viewer.pendingAnnotatedAction = "";
-                viewer.pendingAnnotatedTargetPath = "";
-                viewer.isWorking = false;
-                viewer.cleanupPostActionTempPath();
-                viewer.showStatus("Failed to load source image for export", true);
+                workflow.failAnnotatedExport("Failed to load source image for export", true);
                 return;
             }
 
             if (annotationExportBase.status !== Image.Ready) {
                 viewer.annotatedExportRetries = viewer.annotatedExportRetries + 1;
-                if (viewer.annotatedExportRetries <= 60) {
+                if (viewer.annotatedExportRetries <= viewer.annotatedExportMaxRetries) {
                     annotatedExportGrabTimer.restart();
                     return;
                 }
 
-                viewer.annotatedExportPending = false;
-                viewer.pendingAnnotatedAction = "";
-                viewer.pendingAnnotatedTargetPath = "";
-                viewer.isWorking = false;
-                viewer.cleanupPostActionTempPath();
-                viewer.showStatus("Timed out preparing annotated export", true);
+                workflow.failAnnotatedExport("Timed out preparing annotated export", true);
                 return;
             }
 
-            annotationExportCanvas.requestPaint();
-            annotationExportSurface.grabToImage(function (result) {
-                const exportPath = viewer.toLocalPath(viewer.postActionTempPath);
-                const action = viewer.pendingAnnotatedAction;
-                const target = viewer.pendingAnnotatedTargetPath;
-
-                viewer.annotatedExportPending = false;
-                viewer.pendingAnnotatedAction = "";
-                viewer.pendingAnnotatedTargetPath = "";
-
-                if (!exportPath) {
-                    viewer.isWorking = false;
-                    viewer.showStatus("Failed to prepare annotated image", true);
-                    return;
-                }
-
-                const saved = result.saveToFile(exportPath);
-                if (!saved) {
-                    viewer.isWorking = false;
-                    viewer.cleanupPostActionTempPath();
-                    viewer.showStatus("Failed to render annotated image", true);
-                    return;
-                }
-
-                viewer.runPostAction(action, exportPath, target);
-            });
+            workflow.grabAnnotatedExportImage();
         }
     }
 
@@ -519,38 +436,7 @@ PanelWindow {
             onStreamFinished: {
                 viewer.isWorking = false;
                 viewer.cleanupPostActionTempPath();
-                const result = this.text.trim();
-                if (!result) {
-                    viewer.showStatus("Action failed: empty response", true);
-                    return;
-                }
-
-                const payload = viewer.parseCliJson(result);
-                if (!payload) {
-                    viewer.showStatus("Action failed: invalid response", true);
-                    return;
-                }
-
-                if (payload.ok !== true) {
-                    const message = String(payload.error || "Action failed");
-                    viewer.showStatus(message || "Action failed", true);
-                    GlobalState.addNotification({
-                        appName: "Screenshot",
-                        summary: "Viewer action failed",
-                        body: message || "Unknown error",
-                        urgency: 2,
-                        category: "screenshot"
-                    });
-                    return;
-                }
-
-                const action = String(payload.action || "");
-                if (!action.length) {
-                    viewer.showStatus("Action failed", true);
-                    return;
-                }
-
-                viewer.showStatus(viewer.statusForPostAction(action), false);
+                workflow.handlePostActionResult(this.text);
             }
         }
     }
@@ -568,54 +454,7 @@ PanelWindow {
                 portalSaveAsGuard.stop();
                 const rawResult = String(this.text || "");
                 viewer.logSaveAsPayload("stdout", rawResult);
-
-                const result = rawResult.trim();
-                viewer.logSaveAs("stdout.trim=" + result);
-
-                if (!result) {
-                    viewer.logSaveAs("branch=no-response");
-                    viewer.showStatus(viewer.saveAsError("no response from portal"), true);
-                    return;
-                }
-
-                const payload = viewer.parseCliJson(result);
-                if (!payload) {
-                    viewer.logSaveAs("branch=invalid-json");
-                    viewer.showStatus(viewer.saveAsError("invalid response"), true);
-                    return;
-                }
-
-                if (payload.ok !== true) {
-                    const message = String(payload.error || "unknown error");
-                    viewer.logSaveAs("branch=error message=" + message);
-                    viewer.showStatus(viewer.saveAsError(message), true);
-                    return;
-                }
-
-                const status = String(payload.status || "");
-                if (status === "cancel") {
-                    viewer.logSaveAs("branch=cancel");
-                    return;
-                }
-
-                if (status !== "ok") {
-                    viewer.logSaveAs("branch=unexpected-response");
-                    viewer.showStatus(viewer.saveAsError("unexpected response"), true);
-                    return;
-                }
-
-                const selectedUri = String(payload.uri || "").trim();
-                const selectedPath = viewer.toLocalPath(selectedUri);
-                viewer.logSaveAs("selectedUri=" + selectedUri);
-                viewer.logSaveAs("selectedPath=" + selectedPath);
-                if (!selectedPath) {
-                    viewer.logSaveAs("branch=invalid-destination");
-                    viewer.showStatus(viewer.saveAsError("invalid destination"), true);
-                    return;
-                }
-
-                viewer.logSaveAs("branch=dispatch-save-to");
-                viewer.startPostActionWithTarget("save-to", selectedPath);
+                workflow.handlePortalSaveAsResult(rawResult);
             }
         }
     }
@@ -638,7 +477,7 @@ PanelWindow {
 
     MouseArea {
         anchors.fill: parent
-        enabled: viewer.visibleState && !portalSaveAsProc.running
+        enabled: viewer.viewerInteractive
         onClicked: viewer.closeViewer()
     }
 
@@ -651,7 +490,7 @@ PanelWindow {
         color: Theme.background
         border.width: 1
         border.color: Theme.outlineVariant
-        visible: viewer.visibleState && !portalSaveAsProc.running
+        visible: viewer.viewerInteractive
 
         MouseArea {
             anchors.fill: parent
