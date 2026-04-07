@@ -59,6 +59,10 @@ PanelWindow {
         const list = GlobalState.notifications || [];
         for (let i = 0; i < list.length; i++) {
             const item = list[i];
+            if (!!item.dismissed)
+                continue;
+            if (!!item.toastExpired)
+                continue;
             out.push(item);
         }
         return out;
@@ -311,7 +315,6 @@ PanelWindow {
                                 notification: modelData
                                 compact: false
                                 autoDismissEnabled: false
-                                showDismissedState: true
                                 showReplyPreviewOnly: true
                                 onDismissRequested: notificationId => GlobalState.dismissNotification(notificationId)
                                 onExpiredRequested: notificationId => GlobalState.expireToast(notificationId)
