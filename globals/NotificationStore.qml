@@ -36,6 +36,15 @@ QtObject {
         return out;
     }
 
+    function normalizeExpiryMs(value) {
+        const parsed = Number(value);
+        if (isNaN(parsed) || parsed < 0)
+            return 5000;
+        if (parsed === 0)
+            return 0;
+        return Math.max(1, Math.round(parsed));
+    }
+
     function normalizeNotificationEntry(data, fallbackId) {
         const source = data || {};
         const urgency = Math.max(0, Math.min(2, parseInt(source.urgency || 1)));
@@ -53,7 +62,7 @@ QtObject {
             actions: normalizeActions(source.actions || []),
             timestamp: ts,
             updatedAt: updated,
-            expiryMs: Number(source.expiryMs || 5000),
+            expiryMs: normalizeExpiryMs(source.expiryMs),
             read: !!source.read,
             dismissed: !!source.dismissed,
             toastExpired: !!source.toastExpired,
@@ -167,6 +176,7 @@ QtObject {
 
         next.actions = normalizeActions(next.actions || []);
         next.progressValue = normalizeProgress(next.progressValue);
+        next.expiryMs = normalizeExpiryMs(next.expiryMs);
         next.updatedAt = Number(next.updatedAt || Date.now());
         return next;
     }

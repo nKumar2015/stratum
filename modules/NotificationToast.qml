@@ -19,7 +19,15 @@ Item {
     signal defaultActionRequested(int notificationId)
 
     readonly property int urgency: Number(notification.urgency || 1)
-    readonly property bool sticky: urgency >= 2 || Number(notification.expiryMs || 5000) <= 0
+    readonly property int effectiveExpiryMs: {
+        const parsed = Number(notification.expiryMs);
+        if (isNaN(parsed) || parsed < 0)
+            return 5000;
+        if (parsed === 0)
+            return 0;
+        return Math.max(1, Math.round(parsed));
+    }
+    readonly property bool sticky: urgency >= 2 || root.effectiveExpiryMs === 0
     readonly property bool hovered: toastHover.hovered
     readonly property bool dismissed: !!notification.dismissed
     readonly property int progressValue: Number(notification.progressValue)
@@ -429,7 +437,7 @@ Item {
 
     Timer {
         id: dismissTimer
-        interval: Math.max(1200, Number(notification.expiryMs || 5000))
+        interval: Math.max(1200, root.effectiveExpiryMs)
         repeat: false
         running: false
         onTriggered: root.expiredRequested(Number(notification.id || 0))

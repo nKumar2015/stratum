@@ -21,9 +21,10 @@ PanelWindow {
     }
 
     anchors.top: true
-    anchors.bottom: true
+    anchors.bottom: GlobalState.showNotificationCenter
     anchors.right: true
     implicitWidth: 430
+    implicitHeight: GlobalState.showNotificationCenter ? 720 : (toastStack.implicitHeight + 32)
 
     color: "transparent"
     exclusiveZone: -1
@@ -100,6 +101,7 @@ PanelWindow {
     }
 
     Column {
+        id: toastStack
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: 16
