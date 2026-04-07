@@ -12,6 +12,7 @@ Item {
     property bool autoDismissEnabled: true
     property bool showDismissedState: false
     property bool showReplyPreviewOnly: false
+    property bool animatePopupTransitions: compact
 
     signal dismissRequested(int notificationId)
     signal expiredRequested(int notificationId)
@@ -65,6 +66,8 @@ Item {
         return Number(notification.sourceNotificationId || 0) > 0;
     }
     readonly property bool canAutoDismiss: root.autoDismissEnabled && !root.sticky && !root.hovered && !replyInput.activeFocus
+    property string pendingCloseKind: ""
+    property bool closeAnimationRunning: false
 
     function findInlineReplyAction() {
         const actions = notification.actions || [];
@@ -84,6 +87,82 @@ Item {
 
     implicitWidth: compact ? 360 : 400
     implicitHeight: Math.max(88, contentCol.implicitHeight + 20)
+    transformOrigin: Item.TopRight
+
+    function requestDismissWithAnimation() {
+        dismissTimer.stop();
+        const id = Number(notification.id || 0);
+        if (!root.animatePopupTransitions || root.closeAnimationRunning) {
+            root.dismissRequested(id);
+            return;
+        }
+
+        pendingCloseKind = "dismiss";
+        closeAnimationRunning = true;
+        closeAnim.start();
+    }
+
+    function requestExpireWithAnimation() {
+        dismissTimer.stop();
+        const id = Number(notification.id || 0);
+        if (!root.animatePopupTransitions || root.closeAnimationRunning) {
+            root.expiredRequested(id);
+            return;
+        }
+
+        pendingCloseKind = "expire";
+        closeAnimationRunning = true;
+        closeAnim.start();
+    }
+
+    ParallelAnimation {
+        id: openAnim
+        NumberAnimation {
+            target: root
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: 150
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            target: root
+            property: "scale"
+            from: 0.97
+            to: 1
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    ParallelAnimation {
+        id: closeAnim
+        NumberAnimation {
+            target: root
+            property: "opacity"
+            to: 0
+            duration: 130
+            easing.type: Easing.InQuad
+        }
+        NumberAnimation {
+            target: root
+            property: "scale"
+            to: 0.96
+            duration: 150
+            easing.type: Easing.InCubic
+        }
+        onStopped: {
+            const id = Number(notification.id || 0);
+            const reason = pendingCloseKind;
+            pendingCloseKind = "";
+            closeAnimationRunning = false;
+
+            if (reason === "expire")
+                root.expiredRequested(id);
+            else
+                root.dismissRequested(id);
+        }
+    }
 
     HoverHandler {
         id: toastHover
@@ -214,7 +293,7 @@ Item {
                     id: dismissHover
                     anchors.fill: parent
                     hoverEnabled: true
-                    onClicked: root.dismissRequested(Number(notification.id || 0))
+                    onClicked: root.requestDismissWithAnimation()
                 }
             }
         }
@@ -440,7 +519,7 @@ Item {
         interval: Math.max(1200, root.effectiveExpiryMs)
         repeat: false
         running: false
-        onTriggered: root.expiredRequested(Number(notification.id || 0))
+        onTriggered: root.requestExpireWithAnimation()
     }
 
     function syncDismissTimer() {
@@ -451,5 +530,12 @@ Item {
 
     onCanAutoDismissChanged: syncDismissTimer()
     onNotificationChanged: syncDismissTimer()
-    Component.onCompleted: syncDismissTimer()
+    Component.onCompleted: {
+        syncDismissTimer();
+        if (root.animatePopupTransitions) {
+            root.opacity = 0;
+            root.scale = 0.97;
+            openAnim.start();
+        }
+    }
 }

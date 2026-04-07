@@ -11,6 +11,8 @@ PanelWindow {
     id: center
 
     property bool keyboardFocusRequested: false
+    property bool panelClosing: false
+    readonly property bool centerOpen: GlobalState.showNotificationCenter
 
     function requestKeyboardFocus(): void {
         keyboardFocusRequested = true;
@@ -21,17 +23,51 @@ PanelWindow {
     }
 
     anchors.top: true
-    anchors.bottom: GlobalState.showNotificationCenter
+    anchors.bottom: center.centerOpen
     anchors.right: true
     implicitWidth: 430
-    implicitHeight: GlobalState.showNotificationCenter ? 720 : (toastStack.implicitHeight + 32)
+    implicitHeight: center.centerOpen ? 720 : (toastStack.implicitHeight + 32)
 
     color: "transparent"
     exclusiveZone: -1
-    visible: GlobalState.showNotificationCenter || center.activeToasts.length > 0
+    visible: center.centerOpen || center.activeToasts.length > 0 || center.panelClosing
 
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: center.keyboardFocusRequested ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    onCenterOpenChanged: {
+        if (center.centerOpen) {
+            panelClosing = false;
+            panelHideTimer.stop();
+            return;
+        }
+
+        if (center.activeToasts.length === 0) {
+            panelClosing = true;
+            panelHideTimer.restart();
+        }
+    }
+
+    onActiveToastsChanged: {
+        if (center.centerOpen)
+            return;
+
+        if (center.activeToasts.length > 0) {
+            panelClosing = false;
+            panelHideTimer.stop();
+        } else {
+            panelClosing = true;
+            panelHideTimer.restart();
+        }
+    }
+
+    Timer {
+        id: panelHideTimer
+        interval: 200
+        repeat: false
+        running: false
+        onTriggered: center.panelClosing = false
+    }
 
     onVisibleChanged: {
         if (!visible)
@@ -104,13 +140,62 @@ PanelWindow {
         }
     }
 
-    Column {
+    ListView {
         id: toastStack
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: 16
         anchors.rightMargin: 18
+        width: 400
+        height: contentHeight
+        implicitHeight: contentHeight
         spacing: 10
+        interactive: false
+        clip: false
+        model: center.activeToasts
+
+        add: Transition {
+            ParallelAnimation {
+                NumberAnimation {
+                    property: "x"
+                    from: toastStack.width + 24
+                    duration: 180
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    property: "opacity"
+                    from: 0
+                    to: 1
+                    duration: 150
+                    easing.type: Easing.OutQuad
+                }
+            }
+        }
+
+        remove: Transition {
+            ParallelAnimation {
+                NumberAnimation {
+                    property: "x"
+                    to: toastStack.width + 24
+                    duration: 160
+                    easing.type: Easing.InCubic
+                }
+                NumberAnimation {
+                    property: "opacity"
+                    to: 0
+                    duration: 130
+                    easing.type: Easing.InQuad
+                }
+            }
+        }
+
+        displaced: Transition {
+            NumberAnimation {
+                properties: "x,y"
+                duration: 160
+                easing.type: Easing.OutCubic
+            }
+        }
 
         HoverHandler {
             onHoveredChanged: {
@@ -121,10 +206,14 @@ PanelWindow {
             }
         }
 
-        Repeater {
-            model: center.activeToasts
-            delegate: NotificationToast {
-                required property var modelData
+        delegate: Item {
+            required property var modelData
+            width: toastStack.width
+            height: toastItem.implicitHeight
+
+            NotificationToast {
+                id: toastItem
+                anchors.right: parent.right
                 notification: modelData
                 compact: true
                 autoDismissEnabled: true
@@ -150,12 +239,12 @@ PanelWindow {
         anchors.right: parent.right
         anchors.topMargin: 12
         anchors.bottomMargin: 12
-        anchors.rightMargin: GlobalState.showNotificationCenter ? 12 : -width - 24
+        anchors.rightMargin: center.centerOpen ? 12 : -width - 24
         radius: 12
         color: Theme.background
         border.width: 1
         border.color: Theme.outlineVariant
-        visible: GlobalState.showNotificationCenter
+        visible: center.centerOpen || center.panelClosing
 
         HoverHandler {
             onHoveredChanged: {
