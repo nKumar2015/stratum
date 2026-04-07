@@ -63,7 +63,7 @@ PanelWindow {
 
     Timer {
         id: panelHideTimer
-        interval: 200
+        interval: 250
         repeat: false
         running: false
         onTriggered: center.panelClosing = false
