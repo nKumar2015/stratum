@@ -14,6 +14,16 @@ Item {
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
 
+    readonly property int signalHighThreshold: 80
+    readonly property int signalMediumHighThreshold: 60
+    readonly property int signalMediumThreshold: 40
+    readonly property int signalLowThreshold: 20
+    readonly property int statusPollMs: 3000
+    readonly property int iconFadeMs: 150
+    readonly property int hoverOpenDelayMs: 350
+    readonly property int hoverExitGraceMs: 420
+
+    // disconnected=\udb82\udd2e, ethernet=\udb80\ude00, Wi-Fi weak->strong=\udb82\udd2f..\udb82\udd28
     property string icon: "\udb82\udd2e"
 
     function parseCliJson(raw) {
@@ -40,13 +50,13 @@ Item {
             let strength = parseInt(String(payload.signal_pct || "0"));
             if (isNaN(strength))
                 strength = 0;
-            if (strength >= 80)
+            if (strength >= signalHighThreshold)
                 icon = "\udb82\udd28";
-            else if (strength >= 60)
+            else if (strength >= signalMediumHighThreshold)
                 icon = "\udb82\udd25";
-            else if (strength >= 40)
+            else if (strength >= signalMediumThreshold)
                 icon = "\udb82\udd22";
-            else if (strength >= 20)
+            else if (strength >= signalLowThreshold)
                 icon = "\udb82\udd1f";
             else
                 icon = "\udb82\udd2f";
@@ -72,7 +82,7 @@ Item {
 
     Timer {
         id: refreshTimer
-        interval: 3000
+        interval: root.statusPollMs
         repeat: false
         onTriggered: netProc.running = true
     }
@@ -85,18 +95,28 @@ Item {
 
         Behavior on color {
             ColorAnimation {
-                duration: 150
+                duration: root.iconFadeMs
             }
         }
     }
 
     Timer {
         id: hoverShowTimer
-        interval: 350
+        interval: root.hoverOpenDelayMs
         repeat: false
         onTriggered: {
             if (wifiHover.containsMouse && !GlobalState.showWifiSettings)
                 GlobalState.showWifiHoverMenu = true;
+        }
+    }
+
+    Timer {
+        id: hoverExitGraceTimer
+        interval: root.hoverExitGraceMs
+        repeat: false
+        onTriggered: {
+            if (!wifiHover.containsMouse)
+                GlobalState.wifiHoverIntent = false;
         }
     }
 
@@ -105,16 +125,19 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         onEntered: {
+            hoverExitGraceTimer.stop();
             GlobalState.setPopupMonitorName(root.monitorName);
             GlobalState.wifiIconY = root.mapToGlobal(0, root.height / 2).y;
             GlobalState.wifiHoverIntent = true;
             hoverShowTimer.start();
         }
         onExited: {
-            GlobalState.wifiHoverIntent = false;
             hoverShowTimer.stop();
+            hoverExitGraceTimer.restart();
         }
         onClicked: {
+            hoverExitGraceTimer.stop();
+            GlobalState.wifiHoverIntent = false;
             hoverShowTimer.stop();
             GlobalState.showWifiHoverMenu = false;
             GlobalState.showWifiSettings = !GlobalState.showWifiSettings;

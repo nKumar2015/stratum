@@ -9,12 +9,14 @@ ColumnLayout {
     id: root
     property string monitorName: ""
     property bool hoverActive: false
+    readonly property int hoverOpenDelayMs: 350
+    readonly property int hoverExitGraceMs: 420
     spacing: 0
 
+    // Battery glyphs: unknown/empty=󰂎, charging=󰂄, full=󰁹, then level buckets.
     function getBatteryIcon() {
         if (!UPower.displayDevice.ready)
             return "󰂎";
-        width: Math.min(implicitWidth, parent.width - 20);
         let pct = UPower.displayDevice.percentage * 100;
         let state = UPower.displayDevice.state;
 
@@ -59,7 +61,7 @@ ColumnLayout {
         return Theme.primary;
     }
 
-    // THE FIX 2: Wrap the rotated text in a fixed-size bounding box
+    // Keep a fixed container so rotating the glyph does not affect layout bounds.
     Item {
         Layout.alignment: Qt.AlignHCenter
         Layout.preferredWidth: 24
@@ -97,7 +99,7 @@ ColumnLayout {
 
     Timer {
         id: hoverShowTimer
-        interval: 350
+        interval: root.hoverOpenDelayMs
         repeat: false
         onTriggered: {
             if (root.hoverActive)
@@ -107,7 +109,7 @@ ColumnLayout {
 
     Timer {
         id: hoverExitGraceTimer
-        interval: 420
+        interval: root.hoverExitGraceMs
         repeat: false
         onTriggered: {
             if (!root.hoverActive)

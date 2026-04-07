@@ -50,6 +50,11 @@ Window {
     property bool requirePasswordRetry: false
     property bool pendingConnectWasKnown: false
     property bool pendingConnectWasSecure: false
+    readonly property string missingNmcliMessage: "nmcli is required for Wi-Fi controls."
+    readonly property int signalStrongThreshold: 75
+    readonly property int signalGoodThreshold: 50
+    readonly property int signalFairThreshold: 25
+    readonly property int refreshIntervalMs: 12000
 
     function isSecureNetwork(security) {
         if (!security)
@@ -102,11 +107,11 @@ Window {
     }
 
     function signalLevel(signal) {
-        if (signal >= 75)
+        if (signal >= signalStrongThreshold)
             return 4;
-        if (signal >= 50)
+        if (signal >= signalGoodThreshold)
             return 3;
-        if (signal >= 25)
+        if (signal >= signalFairThreshold)
             return 2;
         if (signal > 0)
             return 1;
@@ -220,7 +225,7 @@ Window {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
                 if (!payload || payload.ok !== true) {
-                    wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
+                    wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     wifiMenu.wifiEnabled = false;
                     return;
                 }
@@ -239,7 +244,7 @@ Window {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
                 if (!payload || payload.ok !== true) {
-                    wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
+                    wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     return;
                 }
 
@@ -317,7 +322,7 @@ Window {
                 wifiMenu.listLoading = false;
                 const payload = wifiMenu.parseCliJson(result);
                 if (!payload || payload.ok !== true) {
-                    wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
+                    wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     wifiMenu.networks = [];
                     return;
                 }
@@ -349,6 +354,7 @@ Window {
                         continue;
                     }
 
+                    // Dedup priority: currently connected entry first, then strongest signal.
                     const candidateConnected = candidate.inUse === "*";
                     const existingConnected = existing.inUse === "*";
 
@@ -420,7 +426,7 @@ Window {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
                 if (!payload || payload.ok !== true) {
-                    wifiMenu.statusMessage = "nmcli is required for Wi-Fi controls.";
+                    wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     return;
                 }
 
@@ -490,7 +496,7 @@ Window {
 
     Timer {
         id: refreshTimer
-        interval: 12000
+        interval: wifiMenu.refreshIntervalMs
         repeat: true
         running: false
         onTriggered: wifiMenu.refreshAll()

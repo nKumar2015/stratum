@@ -44,10 +44,24 @@ Window {
     property int autoScanRetryCount: 0
     property int emptyListStreak: 0
     property bool animateRowsOnNextLoad: true
+    // pendingAction fields model transient operation state for UI feedback and recovery timers.
     property string pendingAction: ""
     property string pendingActionTarget: ""
     property string pendingPowerSyncTarget: ""
     property int powerSyncRetryCount: 0
+    readonly property string missingBluetoothctlMessage: "bluetoothctl is required for Bluetooth controls."
+    readonly property int actionTimeoutMs: 7000
+    readonly property int powerSyncPollMs: 500
+    readonly property int powerSyncMaxRetries: 14
+    readonly property int openAutoScanDelayMs: 1200
+    readonly property int toggleAutoScanDelayMs: 1800
+    readonly property int autoScanRetryDelayMs: 900
+    readonly property int autoScanMaxRetries: 12
+    readonly property int scanRefreshIntervalMs: 1000
+    readonly property int scanWatchdogMs: 7000
+    readonly property int postScanSyncDelayMs: 1200
+    readonly property int statusClearDelayMs: 3500
+    readonly property int refreshIntervalMs: 12000
 
     function setStatusMessage(message, autoClear) {
         statusMessage = message;
@@ -307,7 +321,7 @@ Window {
                     GlobalState.bluetoothPowered = false;
                     GlobalState.bluetoothConnected = false;
                     GlobalState.bluetoothScanning = false;
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                     return;
                 }
 
@@ -356,7 +370,7 @@ Window {
                 const payload = bluetoothMenu.parseCliJson(result);
                 if (!payload || payload.ok !== true) {
                     bluetoothMenu.devices = [];
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                     return;
                 }
 
@@ -446,7 +460,7 @@ Window {
                 const message = payload ? String(payload.output || payload.error || "") : result;
 
                 if (!payload || payload.ok !== true) {
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                 } else if (message.length > 0 && message.toLowerCase().indexOf("failed") !== -1) {
                     bluetoothMenu.setStatusMessage(message, true);
                 } else if (message.length > 0 && message.toLowerCase().indexOf("error") !== -1) {
@@ -477,7 +491,7 @@ Window {
 
     Timer {
         id: actionWatchdogTimer
-        interval: 7000
+        interval: bluetoothMenu.actionTimeoutMs
         repeat: false
         running: false
         onTriggered: {
@@ -503,7 +517,7 @@ Window {
 
     Timer {
         id: powerStateSyncTimer
-        interval: 500
+        interval: bluetoothMenu.powerSyncPollMs
         repeat: false
         running: false
         onTriggered: {
@@ -511,7 +525,7 @@ Window {
                 return;
 
             bluetoothMenu.powerSyncRetryCount += 1;
-            if (bluetoothMenu.powerSyncRetryCount <= 14) {
+            if (bluetoothMenu.powerSyncRetryCount <= bluetoothMenu.powerSyncMaxRetries) {
                 btStateProc.running = true;
                 powerStateSyncTimer.restart();
             } else {
@@ -533,7 +547,7 @@ Window {
                 bluetoothMenu.finishScanState();
 
                 if (!payload || payload.ok !== true) {
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : "bluetoothctl is required for Bluetooth controls.", true);
+                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                 } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("failed") !== -1) {
                     bluetoothMenu.setStatusMessage("Scan failed: " + outputText, true);
                 } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("error") !== -1) {
@@ -578,7 +592,7 @@ Window {
 
     Timer {
         id: openAutoScanTimer
-        interval: 1200
+        interval: bluetoothMenu.openAutoScanDelayMs
         repeat: false
         running: false
         onTriggered: {
@@ -593,7 +607,7 @@ Window {
 
     Timer {
         id: toggleOnAutoScanTimer
-        interval: 1800
+        interval: bluetoothMenu.toggleAutoScanDelayMs
         repeat: false
         running: false
         onTriggered: {
@@ -608,7 +622,7 @@ Window {
 
     Timer {
         id: autoScanRetryTimer
-        interval: 900
+        interval: bluetoothMenu.autoScanRetryDelayMs
         repeat: false
         running: false
         onTriggered: {
@@ -623,7 +637,7 @@ Window {
             }
 
             bluetoothMenu.autoScanRetryCount += 1;
-            if (bluetoothMenu.autoScanRetryCount <= 12) {
+            if (bluetoothMenu.autoScanRetryCount <= bluetoothMenu.autoScanMaxRetries) {
                 btStateProc.running = true;
                 autoScanRetryTimer.restart();
             } else {
@@ -635,7 +649,7 @@ Window {
 
     Timer {
         id: scanRefreshTimer
-        interval: 1000
+        interval: bluetoothMenu.scanRefreshIntervalMs
         repeat: true
         running: false
         onTriggered: {
@@ -646,7 +660,7 @@ Window {
 
     Timer {
         id: scanWatchdogTimer
-        interval: 7000
+        interval: bluetoothMenu.scanWatchdogMs
         repeat: false
         running: false
         onTriggered: {
@@ -662,7 +676,7 @@ Window {
 
     Timer {
         id: postScanSyncTimer
-        interval: 1200
+        interval: bluetoothMenu.postScanSyncDelayMs
         repeat: false
         running: false
         onTriggered: bluetoothMenu.refreshAll()
@@ -670,7 +684,7 @@ Window {
 
     Timer {
         id: statusClearTimer
-        interval: 3500
+        interval: bluetoothMenu.statusClearDelayMs
         repeat: false
         running: false
         onTriggered: {
@@ -681,7 +695,7 @@ Window {
 
     Timer {
         id: refreshTimer
-        interval: 12000
+        interval: bluetoothMenu.refreshIntervalMs
         repeat: true
         running: false
         onTriggered: bluetoothMenu.refreshAll()

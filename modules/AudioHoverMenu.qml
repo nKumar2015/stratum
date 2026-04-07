@@ -61,6 +61,24 @@ PanelWindow {
     property int pendingVolume: -1
     property int expectedVolume: -1
     property int expectedVolumeMisses: 0
+    readonly property int volumeMaxPercent: 150
+    readonly property int lowVolumeThreshold: 34
+    readonly property int mediumVolumeThreshold: 67
+    readonly property int expectedVolumeTolerance: 2
+    readonly property int maxExpectedVolumeMisses: 2
+    readonly property int statusRetryDelayMs: 120
+    readonly property int statusClearDelayMs: 1800
+    readonly property int hoverHideDelayMs: 350
+
+    function volumeIconFor(volume, muted) {
+        if (muted || volume === 0)
+            return "󰖁";
+        if (volume < lowVolumeThreshold)
+            return "󰕿";
+        if (volume < mediumVolumeThreshold)
+            return "󰖀";
+        return "󰕾";
+    }
 
     function deviceLabel(name, description) {
         if (description && description.trim().length > 0)
@@ -89,7 +107,7 @@ PanelWindow {
     }
 
     function previewVolume(value) {
-        const clamped = Math.max(0, Math.min(150, Math.round(value)));
+        const clamped = Math.max(0, Math.min(volumeMaxPercent, Math.round(value)));
         currentVolume = clamped;
         currentMuted = clamped === 0;
         GlobalState.audioVolumePercent = clamped;
@@ -97,7 +115,7 @@ PanelWindow {
     }
 
     function queueVolumeCommit(value) {
-        pendingVolume = Math.max(0, Math.min(150, Math.round(value)));
+        pendingVolume = Math.max(0, Math.min(volumeMaxPercent, Math.round(value)));
         expectedVolume = pendingVolume;
         expectedVolumeMisses = 0;
         GlobalState.audioUserAdjusting = true;
@@ -117,7 +135,7 @@ PanelWindow {
 
     function parseVolumeStatus(volumeText, muteText) {
         const parsedVolume = parseInt((volumeText || "0").replace("%", ""));
-        const statusVolume = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
+        const statusVolume = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(volumeMaxPercent, parsedVolume));
         const statusMuted = (muteText || "yes").trim().toLowerCase() === "yes";
 
         if (GlobalState.audioUserAdjusting && !volumeSlider.pressed && pendingVolume < 0)
@@ -127,7 +145,7 @@ PanelWindow {
             return;
 
         if (expectedVolume >= 0) {
-            if (Math.abs(statusVolume - expectedVolume) > 2 && expectedVolumeMisses < 2) {
+            if (Math.abs(statusVolume - expectedVolume) > expectedVolumeTolerance && expectedVolumeMisses < maxExpectedVolumeMisses) {
                 expectedVolumeMisses += 1;
                 statusRetryTimer.restart();
                 return;
@@ -275,14 +293,14 @@ PanelWindow {
 
     Timer {
         id: statusRetryTimer
-        interval: 120
+        interval: hoverMenu.statusRetryDelayMs
         repeat: false
         onTriggered: hoverMenu.loadStatus(false)
     }
 
     Timer {
         id: statusClearTimer
-        interval: 1800
+        interval: hoverMenu.statusClearDelayMs
         repeat: false
         onTriggered: hoverMenu.statusMsg = ""
     }
@@ -312,7 +330,7 @@ PanelWindow {
 
     Timer {
         id: hideTimer
-        interval: 350
+        interval: hoverMenu.hoverHideDelayMs
         repeat: false
         running: false
         onTriggered: {
@@ -421,7 +439,7 @@ PanelWindow {
                     spacing: 8
 
                     Text {
-                        text: hoverMenu.currentMuted || hoverMenu.currentVolume === 0 ? "󰖁" : (hoverMenu.currentVolume < 34 ? "󰕿" : (hoverMenu.currentVolume < 67 ? "󰖀" : "󰕾"))
+                        text: hoverMenu.volumeIconFor(hoverMenu.currentVolume, hoverMenu.currentMuted)
                         color: Theme.on_Surface
                         font.family: Theme.font
                         font.pixelSize: 13
@@ -430,7 +448,7 @@ PanelWindow {
                     Slider {
                         id: volumeSlider
                         from: 0
-                        to: 150
+                        to: hoverMenu.volumeMaxPercent
                         value: currentVolume
                         enabled: !hoverMenu.switching
                         Layout.fillWidth: true

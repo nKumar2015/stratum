@@ -14,19 +14,26 @@ Item {
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
 
+    readonly property int volumeMaxPercent: 150
+    readonly property int volumeLowThreshold: 34
+    readonly property int volumeMidThreshold: 67
+    readonly property int statusPollMs: 2500
+    readonly property int iconFadeMs: 150
+
     property string icon: "󰖀"
     property int volumePercent: 0
     property bool muted: false
     property bool headphonesOutput: false
 
+    // muted/zero=󰖁, headphones=󰋋, low=󰕿, mid=󰖀, high=󰕾, boosted=󰝞
     function applyIconState() {
         if (muted || volumePercent === 0)
             icon = "󰖁";
         else if (headphonesOutput)
             icon = "󰋋";
-        else if (volumePercent < 34)
+        else if (volumePercent < volumeLowThreshold)
             icon = "󰕿";
-        else if (volumePercent < 67)
+        else if (volumePercent < volumeMidThreshold)
             icon = "󰖀";
         else if (volumePercent <= 100)
             icon = "󰕾";
@@ -55,7 +62,7 @@ Item {
         const headphonesText = String(payload.headphones || "no").trim().toLowerCase();
         const parsedVolume = parseInt(volumeText.replace("%", ""));
 
-        volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
+        volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(volumeMaxPercent, parsedVolume));
         muted = muteText === "yes";
         headphonesOutput = headphonesText === "yes";
         GlobalState.audioVolumePercent = volumePercent;
@@ -66,7 +73,7 @@ Item {
     Connections {
         target: GlobalState
         function onAudioVolumePercentChanged() {
-            volumePercent = Math.max(0, Math.min(150, GlobalState.audioVolumePercent));
+            volumePercent = Math.max(0, Math.min(volumeMaxPercent, GlobalState.audioVolumePercent));
             applyIconState();
         }
         function onAudioMutedChanged() {
@@ -91,7 +98,7 @@ Item {
 
     Timer {
         id: refreshTimer
-        interval: 2500
+        interval: root.statusPollMs
         repeat: false
         onTriggered: audioProc.running = true
     }
@@ -109,7 +116,7 @@ Item {
 
         Behavior on color {
             ColorAnimation {
-                duration: 150
+                duration: root.iconFadeMs
             }
         }
     }

@@ -52,19 +52,28 @@ ShellRoot {
             property var modelData
             property var monitor: Hyprland.monitorFor(modelData)
             property string monitorName: monitor?.name || ""
+            readonly property int cornerInset: 20
+            readonly property int sidebarWidth: 40
+            readonly property int sidebarPadding: 12
+            readonly property int sidebarSpacing: 16
+            readonly property int quickPanelWidth: 30
+            readonly property int quickPanelHeight: 86
+            readonly property int quickPanelInnerMargin: 6
+            readonly property int quickPanelSpacing: 4
+            readonly property int batteryVerticalNudge: -6
 
             screen: modelData
             anchors.top: true
             anchors.left: true
             anchors.bottom: true
-            implicitWidth: 60
+            implicitWidth: sidebarWidth + cornerInset
             color: "transparent"
 
-            margins.right: -20
+            margins.right: -cornerInset
 
             Rectangle {
                 id: sidebar
-                width: 40
+                width: sidebarWidth
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom
@@ -76,11 +85,11 @@ ShellRoot {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.topMargin: 12
-                    anchors.bottomMargin: 12
+                    anchors.topMargin: sidebarPadding
+                    anchors.bottomMargin: sidebarPadding
                     anchors.leftMargin: 0
                     anchors.rightMargin: 0
-                    spacing: 16
+                    spacing: sidebarSpacing
 
                     Text {
                         text: ""
@@ -106,8 +115,8 @@ ShellRoot {
 
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
-                        Layout.preferredWidth: 30
-                        Layout.preferredHeight: 86
+                        Layout.preferredWidth: quickPanelWidth
+                        Layout.preferredHeight: quickPanelHeight
                         radius: 15
                         color: Theme.surfaceContainerLowest
                         border.width: 1
@@ -115,9 +124,9 @@ ShellRoot {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.topMargin: 6
-                            anchors.bottomMargin: 6
-                            spacing: 4
+                            anchors.topMargin: quickPanelInnerMargin
+                            anchors.bottomMargin: quickPanelInnerMargin
+                            spacing: quickPanelSpacing
 
                             Audio {
                                 monitorName: panelWindow.monitorName
@@ -139,8 +148,8 @@ ShellRoot {
                     Battery {
                         monitorName: panelWindow.monitorName
                         Layout.alignment: Qt.AlignHCenter
-                        Layout.topMargin: -6
-                        Layout.bottomMargin: -6
+                        Layout.topMargin: batteryVerticalNudge
+                        Layout.bottomMargin: batteryVerticalNudge
                     }
 
                     Clock {

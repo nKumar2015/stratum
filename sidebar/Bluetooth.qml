@@ -14,6 +14,12 @@ Item {
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
 
+    readonly property int statusPollMs: 5000
+    readonly property int iconFadeMs: 150
+    readonly property int hoverOpenDelayMs: 350
+    readonly property int hoverExitGraceMs: 420
+
+    // scanning=󰂰, connected=󰂱, powered=󰂯, off=󰂲
     property string icon: GlobalState.bluetoothScanning ? "󰂰" : (GlobalState.bluetoothConnected ? "󰂱" : (GlobalState.bluetoothPowered ? "󰂯" : "󰂲"))
 
     function parseCliJson(raw) {
@@ -29,6 +35,7 @@ Item {
     }
 
     function updateStatus(output) {
+        // Skip polling sync while settings are open or active scan is running.
         if (GlobalState.showBluetoothSettings || GlobalState.bluetoothScanning)
             return;
 
@@ -69,7 +76,7 @@ Item {
 
     Timer {
         id: refreshTimer
-        interval: 5000
+        interval: root.statusPollMs
         repeat: false
         onTriggered: bluetoothProc.running = true
     }
@@ -82,18 +89,28 @@ Item {
 
         Behavior on color {
             ColorAnimation {
-                duration: 150
+                duration: root.iconFadeMs
             }
         }
     }
 
     Timer {
         id: hoverShowTimer
-        interval: 350
+        interval: root.hoverOpenDelayMs
         repeat: false
         onTriggered: {
             if (bluetoothHover.containsMouse && !GlobalState.showBluetoothSettings)
                 GlobalState.showBluetoothHoverMenu = true;
+        }
+    }
+
+    Timer {
+        id: hoverExitGraceTimer
+        interval: root.hoverExitGraceMs
+        repeat: false
+        onTriggered: {
+            if (!bluetoothHover.containsMouse)
+                GlobalState.bluetoothHoverIntent = false;
         }
     }
 
@@ -102,16 +119,19 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         onEntered: {
+            hoverExitGraceTimer.stop();
             GlobalState.setPopupMonitorName(root.monitorName);
             GlobalState.bluetoothIconY = root.mapToGlobal(0, root.height / 2).y;
             GlobalState.bluetoothHoverIntent = true;
             hoverShowTimer.start();
         }
         onExited: {
-            GlobalState.bluetoothHoverIntent = false;
             hoverShowTimer.stop();
+            hoverExitGraceTimer.restart();
         }
         onClicked: {
+            hoverExitGraceTimer.stop();
+            GlobalState.bluetoothHoverIntent = false;
             hoverShowTimer.stop();
             GlobalState.showBluetoothHoverMenu = false;
             GlobalState.showBluetoothSettings = !GlobalState.showBluetoothSettings;

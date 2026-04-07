@@ -26,6 +26,20 @@ PanelWindow {
     property int value: 0
     property bool muted: false
     property real osdOpacity: 0
+    property var channelConfig: ({
+        "volume": {
+            max: 150,
+            title: "Volume",
+            valueColor: "primary",
+            pollMs: 300
+        },
+        "brightness": {
+            max: 100,
+            title: "Brightness",
+            valueColor: "tertiary",
+            pollMs: 350
+        }
+    })
 
     property int lastVolume: -1
     property bool lastMuted: false
@@ -34,7 +48,10 @@ PanelWindow {
     property bool volumeBaselineReady: false
     property bool brightnessBaselineReady: false
 
-    property int maxValue: channel === "volume" ? 150 : 100
+    property int maxValue: {
+        const config = channelConfig[channel];
+        return config ? config.max : 100;
+    }
     property real progressRatio: Math.max(0, Math.min(1, value / Math.max(1, maxValue)))
 
     property string iconGlyph: {
@@ -57,11 +74,24 @@ PanelWindow {
         return "󰝞";
     }
 
-    property string titleText: channel === "brightness" ? "Brightness" : "Volume"
+    property string titleText: {
+        const config = channelConfig[channel];
+        return config ? String(config.title) : "Volume";
+    }
     property string valueText: {
         if (channel === "volume" && muted)
             return "Muted";
         return String(value) + "%";
+    }
+
+    function channelMax(kind) {
+        const config = channelConfig[kind];
+        return config ? config.max : 100;
+    }
+
+    function channelAccent(kind) {
+        const config = channelConfig[kind];
+        return config && config.valueColor === "tertiary" ? Theme.tertiary : Theme.primary;
     }
 
     function parseCliJson(raw) {
@@ -78,7 +108,7 @@ PanelWindow {
 
     function showChannel(kind, newValue, isMuted) {
         channel = kind;
-        value = Math.max(0, Math.min(kind === "volume" ? 150 : 100, newValue));
+        value = Math.max(0, Math.min(channelMax(kind), newValue));
         muted = isMuted;
 
         hideTimer.restart();
@@ -173,7 +203,7 @@ PanelWindow {
 
     Timer {
         id: volumePoll
-        interval: 300
+        interval: channelConfig.volume.pollMs
         repeat: true
         running: true
         onTriggered: {
@@ -184,7 +214,7 @@ PanelWindow {
 
     Timer {
         id: brightnessPoll
-        interval: 350
+        interval: channelConfig.brightness.pollMs
         repeat: true
         running: true
         onTriggered: {
@@ -232,7 +262,7 @@ PanelWindow {
 
                 Text {
                     text: osd.valueText
-                    color: osd.channel === "brightness" ? Theme.tertiary : Theme.primary
+                    color: osd.channelAccent(osd.channel)
                     font.pixelSize: 12
                     font.bold: true
                     font.family: Theme.font
@@ -249,7 +279,7 @@ PanelWindow {
                     width: parent.width * osd.progressRatio
                     height: parent.height
                     radius: parent.radius
-                    color: osd.channel === "brightness" ? Theme.tertiary : Theme.primary
+                    color: osd.channelAccent(osd.channel)
 
                     Behavior on width {
                         NumberAnimation {

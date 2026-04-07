@@ -24,35 +24,38 @@ PanelWindow {
 
     WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     property int selectedIndex: 0
+    property int confirmIndex: -1
+    property string confirmMessage: ""
+    readonly property int confirmWindowMs: 5000
     property var powerOptions: [
         {
             name: "Shutdown",
-            cmd: "systemctl poweroff",
+            command: ["systemctl", "poweroff"],
             icon: "../theme/icons/shutdown.svg"
         },
         {
             name: "Reboot",
-            cmd: "systemctl reboot",
+            command: ["systemctl", "reboot"],
             icon: "../theme/icons/reboot.svg"
         },
         {
             name: "Suspend",
-            cmd: "systemctl suspend",
+            command: ["systemctl", "suspend"],
             icon: "../theme/icons/suspend.svg"
         },
         {
             name: "Logout",
-            cmd: "hyprctl dispatch exit",
+            command: ["hyprctl", "dispatch", "exit"],
             icon: "../theme/icons/logout.svg"
         },
         {
             name: "Reboot into Windows",
-            cmd: "systemctl reboot --boot-loader-entry=windows.conf",
+            command: ["systemctl", "reboot", "--boot-loader-entry=windows.conf"],
             icon: "../theme/icons/windows.svg"
         },
         {
             name: "Reboot into BIOS",
-            cmd: "systemctl reboot --firmware-setup",
+            command: ["systemctl", "reboot", "--firmware-setup"],
             icon: "../theme/icons/bios.svg"
         }
     ]
@@ -61,9 +64,35 @@ PanelWindow {
         id: cmdRunner
     }
 
+    Timer {
+        id: confirmTimer
+        interval: powerMenu.confirmWindowMs
+        repeat: false
+        onTriggered: powerMenu.resetConfirmation()
+    }
+
+    function resetConfirmation() {
+        confirmIndex = -1;
+        confirmMessage = "";
+        confirmTimer.stop();
+    }
+
+    function requiresConfirmation(index) {
+        const actionName = String(powerOptions[index]?.name || "");
+        return actionName === "Shutdown" || actionName === "Reboot" || actionName === "Reboot into Windows" || actionName === "Reboot into BIOS";
+    }
+
     function executeSelected() {
+        if (requiresConfirmation(selectedIndex) && confirmIndex !== selectedIndex) {
+            confirmIndex = selectedIndex;
+            confirmMessage = "Press Enter again to confirm " + powerOptions[selectedIndex].name;
+            confirmTimer.restart();
+            return;
+        }
+
+        resetConfirmation();
         powerMenu.visible = false;
-        cmdRunner.command = ["bash", "-c", powerOptions[selectedIndex].cmd];
+        cmdRunner.command = powerOptions[selectedIndex].command;
         cmdRunner.running = true;
     }
 
@@ -71,22 +100,33 @@ PanelWindow {
         target: "powermenu"
         function toggle(): void {
             powerMenu.visible = !powerMenu.visible;
+            if (!powerMenu.visible)
+                powerMenu.resetConfirmation();
         }
     }
 
     Shortcut {
         sequence: "Escape"
-        onActivated: powerMenu.visible = false
+        onActivated: {
+            powerMenu.visible = false;
+            powerMenu.resetConfirmation();
+        }
     }
 
     Shortcut {
         sequence: "Left"
-        onActivated: powerMenu.selectedIndex = (powerMenu.selectedIndex > 0) ? powerMenu.selectedIndex - 1 : powerMenu.powerOptions.length - 1
+        onActivated: {
+            powerMenu.selectedIndex = (powerMenu.selectedIndex > 0) ? powerMenu.selectedIndex - 1 : powerMenu.powerOptions.length - 1;
+            powerMenu.resetConfirmation();
+        }
     }
 
     Shortcut {
         sequence: "Right"
-        onActivated: powerMenu.selectedIndex = (powerMenu.selectedIndex < powerMenu.powerOptions.length - 1) ? powerMenu.selectedIndex + 1 : 0
+        onActivated: {
+            powerMenu.selectedIndex = (powerMenu.selectedIndex < powerMenu.powerOptions.length - 1) ? powerMenu.selectedIndex + 1 : 0;
+            powerMenu.resetConfirmation();
+        }
     }
 
     Shortcut {
@@ -96,7 +136,10 @@ PanelWindow {
 
     MouseArea {
         anchors.fill: parent
-        onClicked: powerMenu.visible = false
+        onClicked: {
+            powerMenu.visible = false;
+            powerMenu.resetConfirmation();
+        }
     }
 
     Rectangle {
@@ -181,11 +224,28 @@ PanelWindow {
                         id: btnMouse
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: powerMenu.executeSelected()
-                        onEntered: powerMenu.selectedIndex = powerOption.index
+                        onClicked: {
+                            powerMenu.selectedIndex = powerOption.index;
+                            powerMenu.executeSelected();
+                        }
+                        onEntered: {
+                            powerMenu.selectedIndex = powerOption.index;
+                            powerMenu.resetConfirmation();
+                        }
                     }
                 }
             }
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 12
+            visible: powerMenu.confirmMessage.length > 0
+            text: powerMenu.confirmMessage
+            color: Theme.error
+            font.pixelSize: 11
+            font.family: Theme.font
         }
     }
 }

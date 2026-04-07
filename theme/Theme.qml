@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 
 QtObject {
+    // Core brand and role colors
     property color primary: "#aed18d"
     property color surfaceTint: "#aed18d"
     property color on_Primary: "#1c3703"
@@ -19,6 +20,8 @@ QtObject {
     property color on_Error: "#690005"
     property color errorContainer: "#93000a"
     property color on_ErrorContainer: "#ffdad6"
+
+    // Surface and elevation palette
     property color background: "#11140e"
     property color on_Background: "#e2e3d9"
     property color surface: "#11140e"
@@ -32,6 +35,8 @@ QtObject {
     property color inverseSurface: "#e2e3d9"
     property color inverseon_Surface: "#2e312a"
     property color inversePrimary: "#49672e"
+
+    // Fixed tonal roles
     property color primaryFixed: "#caeea6"
     property color on_PrimaryFixed: "#0d2000"
     property color primaryFixedDim: "#aed18d"
@@ -44,6 +49,8 @@ QtObject {
     property color on_TertiaryFixed: "#00201f"
     property color tertiaryFixedDim: "#a0cfcd"
     property color on_TertiaryFixedVariant: "#1e4e4d"
+
+    // Surface container steps
     property color surfaceDim: "#11140e"
     property color surfaceBright: "#373a33"
     property color surfaceContainerLowest: "#0c0f09"
