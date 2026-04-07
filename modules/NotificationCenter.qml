@@ -244,7 +244,26 @@ PanelWindow {
         color: Theme.background
         border.width: 1
         border.color: Theme.outlineVariant
-        visible: center.centerOpen || center.panelClosing
+        visible: center.centerOpen
+
+        Timer {
+            id: hideTimer
+            interval: 220
+            repeat: false
+            onTriggered: panel.visible = false
+        }
+
+        Connections {
+            target: center
+            function onCenterOpenChanged() {
+                if (center.centerOpen) {
+                    hideTimer.stop();
+                    panel.visible = true;
+                } else {
+                    hideTimer.restart();
+                }
+            }
+        }
 
         HoverHandler {
             onHoveredChanged: {
@@ -255,12 +274,35 @@ PanelWindow {
             }
         }
 
-        Behavior on anchors.rightMargin {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
+        states: [
+            State {
+                name: "open"
+                when: center.centerOpen
+                PropertyChanges {
+                    panel.anchors.rightMargin: 12
+                }
+            },
+            State {
+                name: "closed"
+                when: !center.centerOpen
+                PropertyChanges {
+                    panel.anchors.rightMargin: -width - 24
+                }
             }
-        }
+        ]
+
+        transitions: [
+            Transition {
+                from: "closed"
+                to: "open"
+                NumberAnimation {
+                    target: panel
+                    property: "anchors.rightMargin"
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+            }
+        ]
 
         ColumnLayout {
             anchors.fill: parent
