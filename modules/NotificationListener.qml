@@ -12,6 +12,80 @@ Scope {
     property bool restoringSnapshot: false
     property var localToNative: ({})
     property var localToActions: ({})
+    readonly property int snapshotVersion: 1
+
+    function shallowCopyMap(map) {
+        const out = {};
+        const source = map || {};
+        for (const key in source)
+            out[key] = source[key];
+        return out;
+    }
+
+    function mapWithEntry(map, key, value) {
+        const next = shallowCopyMap(map);
+        next[String(key)] = value;
+        return next;
+    }
+
+    function mapWithoutKey(map, key) {
+        const targetKey = String(key);
+        const source = map || {};
+        const next = {};
+        for (const mapKey in source) {
+            if (mapKey === targetKey)
+                continue;
+            next[mapKey] = source[mapKey];
+        }
+        return next;
+    }
+
+    function mapFilteredByKeys(map, allowedKeys) {
+        const allowed = allowedKeys || {};
+        const source = map || {};
+        const next = {};
+        for (const key in source) {
+            if (!!allowed[key])
+                next[key] = source[key];
+        }
+        return next;
+    }
+
+    function nativeNotificationFor(localId) {
+        return (root.localToNative || {})[String(localId)];
+    }
+
+    function nativeActionsFor(localId) {
+        return (root.localToActions || {})[String(localId)] || {};
+    }
+
+    function buildSnapshotPayload() {
+        return {
+            version: snapshotVersion,
+            doNotDisturb: !!GlobalState.doNotDisturb,
+            nextNotificationId: Number(GlobalState.nextNotificationId || 1),
+            notifications: GlobalState.notifications || []
+        };
+    }
+
+    function normalizeSnapshotNotification(entry) {
+        const current = entry || {};
+        const next = {};
+        for (const key in current)
+            next[key] = current[key];
+
+        next.imageUrl = root.toImageSource(current.imageUrl);
+        next.appIcon = root.toStringValue(current.appIcon);
+        return next;
+    }
+
+    function nextNotificationIdForSnapshot(parsedNextId, notifications) {
+        const list = notifications || [];
+        let maxId = 0;
+        for (let i = 0; i < list.length; i++)
+            maxId = Math.max(maxId, Number(list[i].id || 0));
+        return Math.max(maxId + 1, Number(parsedNextId || (list.length + 1)), 1);
+    }
 
     function queueSnapshotSave() {
         if (!snapshotLoaded || restoringSnapshot)
@@ -23,12 +97,7 @@ Scope {
         if (restoringSnapshot)
             return;
 
-        const payload = {
-            version: 1,
-            doNotDisturb: !!GlobalState.doNotDisturb,
-            nextNotificationId: Number(GlobalState.nextNotificationId || 1),
-            notifications: GlobalState.notifications || []
-        };
+        const payload = buildSnapshotPayload();
 
         const json = JSON.stringify(payload);
         const encoded = encodeURIComponent(json);
@@ -52,23 +121,13 @@ Scope {
 
             restoringSnapshot = true;
             const normalized = GlobalState.normalizeSnapshotNotifications(list);
-            for (let i = 0; i < normalized.length; i++) {
-                const current = normalized[i] || {};
-                const next = {};
-                for (const key in current)
-                    next[key] = current[key];
+            for (let i = 0; i < normalized.length; i++)
+                normalized[i] = root.normalizeSnapshotNotification(normalized[i]);
 
-                next.imageUrl = root.toImageSource(current.imageUrl);
-                next.appIcon = root.toStringValue(current.appIcon);
-                normalized[i] = next;
-            }
             GlobalState.doNotDisturb = !!parsed.doNotDisturb;
             GlobalState.notifications = normalized.slice(0, Math.max(1, Number(GlobalState.maxNotifications || 50)));
 
-            let maxId = 0;
-            for (let i = 0; i < GlobalState.notifications.length; i++)
-                maxId = Math.max(maxId, Number(GlobalState.notifications[i].id || 0));
-            GlobalState.nextNotificationId = Math.max(maxId + 1, Number(parsed.nextNotificationId || (GlobalState.notifications.length + 1)), 1);
+            GlobalState.nextNotificationId = root.nextNotificationIdForSnapshot(parsed.nextNotificationId, GlobalState.notifications);
             restoringSnapshot = false;
             return true;
         } catch (err) {
@@ -173,21 +232,8 @@ Scope {
                 validIds[String(id)] = true;
         }
 
-        const nextNative = {};
-        const oldNative = root.localToNative || {};
-        for (const key in oldNative) {
-            if (!!validIds[key])
-                nextNative[key] = oldNative[key];
-        }
-        root.localToNative = nextNative;
-
-        const nextActions = {};
-        const oldActions = root.localToActions || {};
-        for (const key in oldActions) {
-            if (!!validIds[key])
-                nextActions[key] = oldActions[key];
-        }
-        root.localToActions = nextActions;
+        root.localToNative = root.mapFilteredByKeys(root.localToNative, validIds);
+        root.localToActions = root.mapFilteredByKeys(root.localToActions, validIds);
     }
 
     function extractProgress(notification) {
@@ -269,50 +315,70 @@ Scope {
         return hinted;
     }
 
+    function findBySourceId(sourceId) {
+        const normalized = Number(sourceId || 0);
+        if (isNaN(normalized) || normalized <= 0)
+            return -1;
+
+        const match = Number(GlobalState.findNotificationIdBySource(normalized));
+        return match > 0 ? match : -1;
+    }
+
+    function normalizeIdentity(appId, appName, summary) {
+        return {
+            appId: root.toStringValue(appId),
+            appName: root.toStringValue(appName),
+            summary: root.toStringValue(summary)
+        };
+    }
+
+    function notificationMatchesIdentity(item, identity) {
+        if (root.toStringValue(item.summary) !== identity.summary)
+            return false;
+        if (identity.appName.length > 0 && root.toStringValue(item.appName) !== identity.appName)
+            return false;
+        if (identity.appId.length > 0 && root.toStringValue(item.appId).length > 0 && root.toStringValue(item.appId) !== identity.appId)
+            return false;
+        return true;
+    }
+
+    function findBySummaryIdentity(identity) {
+        if (identity.summary.length === 0)
+            return -1;
+
+        const list = GlobalState.notifications || [];
+        let fallbackAny = -1;
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i] || {};
+            if (!root.notificationMatchesIdentity(item, identity))
+                continue;
+
+            const id = Number(item.id || -1);
+            if (id <= 0)
+                continue;
+            if (!item.dismissed && !item.toastExpired)
+                return id;
+            if (fallbackAny < 0)
+                fallbackAny = id;
+        }
+
+        return fallbackAny;
+    }
+
     function findLocalTargetId(notification, appId, appName, summary) {
-        const sourceId = Number(notification.id || 0);
-        if (!isNaN(sourceId) && sourceId > 0) {
-            const sourceMatch = Number(GlobalState.findNotificationIdBySource(sourceId));
-            if (sourceMatch > 0)
-                return sourceMatch;
-        }
+        // Match priority:
+        // 1) explicit source id from backend event
+        // 2) explicit replaces-id hint
+        // 3) summary/app identity fallback for providers with unstable ids
+        const sourceMatch = root.findBySourceId(notification.id);
+        if (sourceMatch > 0)
+            return sourceMatch;
 
-        const replacesId = root.resolveReplacesId(notification);
-        if (replacesId > 0) {
-            const replaceMatch = Number(GlobalState.findNotificationIdBySource(replacesId));
-            if (replaceMatch > 0)
-                return replaceMatch;
-        }
+        const replaceMatch = root.findBySourceId(root.resolveReplacesId(notification));
+        if (replaceMatch > 0)
+            return replaceMatch;
 
-        const normalizedAppId = root.toStringValue(appId);
-        const normalizedAppName = root.toStringValue(appName);
-        const normalizedSummary = root.toStringValue(summary);
-        if (normalizedSummary.length > 0) {
-            const list = GlobalState.notifications || [];
-            let fallbackAny = -1;
-            for (let i = 0; i < list.length; i++) {
-                const item = list[i] || {};
-                if (root.toStringValue(item.summary) !== normalizedSummary)
-                    continue;
-                if (normalizedAppName.length > 0 && root.toStringValue(item.appName) !== normalizedAppName)
-                    continue;
-                if (normalizedAppId.length > 0 && root.toStringValue(item.appId).length > 0 && root.toStringValue(item.appId) !== normalizedAppId)
-                    continue;
-
-                const id = Number(item.id || -1);
-                if (id <= 0)
-                    continue;
-                if (!item.dismissed && !item.toastExpired)
-                    return id;
-                if (fallbackAny < 0)
-                    fallbackAny = id;
-            }
-
-            if (fallbackAny > 0)
-                return fallbackAny;
-        }
-
-        return -1;
+        return root.findBySummaryIdentity(root.normalizeIdentity(appId, appName, summary));
     }
 
     function inlineReplyHint(notification) {
@@ -361,12 +427,7 @@ Scope {
     }
 
     function registerNative(localId, notification) {
-        const nextMap = {};
-        const oldMap = root.localToNative || {};
-        for (const key in oldMap)
-            nextMap[key] = oldMap[key];
-        nextMap[String(localId)] = notification;
-        root.localToNative = nextMap;
+        root.localToNative = root.mapWithEntry(root.localToNative, localId, notification);
 
         const actionMap = {};
         const nativeActions = notification.actions || [];
@@ -377,12 +438,7 @@ Scope {
             actionMap[String(action.identifier || "")] = action;
         }
 
-        const nextActions = {};
-        const oldActions = root.localToActions || {};
-        for (const actionKey in oldActions)
-            nextActions[actionKey] = oldActions[actionKey];
-        nextActions[String(localId)] = actionMap;
-        root.localToActions = nextActions;
+        root.localToActions = root.mapWithEntry(root.localToActions, localId, actionMap);
 
         notification.closed.connect(function(reason) {
             const reasonText = String(NotificationCloseReason.toString(reason));
@@ -399,25 +455,8 @@ Scope {
     }
 
     function clearNative(localId) {
-        const key = String(localId);
-
-        const nextMap = {};
-        const oldMap = root.localToNative || {};
-        for (const mapKey in oldMap) {
-            if (mapKey === key)
-                continue;
-            nextMap[mapKey] = oldMap[mapKey];
-        }
-        root.localToNative = nextMap;
-
-        const nextActions = {};
-        const oldActions = root.localToActions || {};
-        for (const actionKey in oldActions) {
-            if (actionKey === key)
-                continue;
-            nextActions[actionKey] = oldActions[actionKey];
-        }
-        root.localToActions = nextActions;
+        root.localToNative = root.mapWithoutKey(root.localToNative, localId);
+        root.localToActions = root.mapWithoutKey(root.localToActions, localId);
     }
 
     function onNativeNotification(notification) {
@@ -474,11 +513,10 @@ Scope {
     }
 
     function handleActionRequest(notificationId, actionKey, replyText) {
-        const key = String(notificationId);
         const action = String(actionKey || "");
         const text = String(replyText || "");
 
-        const notification = (root.localToNative || {})[key];
+        const notification = root.nativeNotificationFor(notificationId);
         if (!notification)
             return;
 
@@ -488,15 +526,14 @@ Scope {
             return;
         }
 
-        const actions = (root.localToActions || {})[key] || {};
+        const actions = root.nativeActionsFor(notificationId);
         const target = actions[action];
         if (target)
             target.invoke();
     }
 
     function handleDismissRequest(notificationId, expired) {
-        const key = String(notificationId);
-        const notification = (root.localToNative || {})[key];
+        const notification = root.nativeNotificationFor(notificationId);
         if (!notification)
             return;
 
