@@ -40,16 +40,19 @@ in {
           source =
             if cfg.devSourcePath != null
             then config.lib.file.mkOutOfStoreSymlink cfg.devSourcePath
-            else pkgs.runCommand "patched-stratum" {} ''
-              cp -r ${inputs.stratum} $out
-              chmod -R +w $out
-              rm -f $out/theme/Theme.qml
-            '';
+            else
+              pkgs.runCommand "patched-stratum" {} ''
+                cp -r ${inputs.stratum} $out
+                chmod -R +w $out
+                rm -f $out/theme/Theme.qml
+              '';
           recursive = true;
         };
 
         ".config/quickshell/theme/Theme.qml".source =
           config.lib.file.mkOutOfStoreSymlink "${cacheDir}/Theme.qml";
+
+        ".config/matugen/templates/stratum-theme.qml".source = "${inputs.stratum}/theme/Theme.qml.template";
       };
 
       activation = {
