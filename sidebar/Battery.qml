@@ -2,7 +2,6 @@ import Quickshell.Services.UPower
 import QtQuick
 import QtQuick.Layouts
 
-import "../theme"
 import "../globals"
 
 ColumnLayout {
@@ -49,16 +48,16 @@ ColumnLayout {
 
     function getBatteryColor() {
         if (!UPower.displayDevice.ready)
-            return Theme.surfaceContainerLow;
+            return Theme.palette.textMain;
         if (UPower.displayDevice.state === UPowerDeviceState.Charging)
-            return Theme.secondary;
+            return Theme.palette.success;
         if (UPower.displayDevice.state === UPowerDeviceState.FullyCharged)
-            return Theme.secondary;
+            return Theme.palette.success;
         if (UPower.displayDevice.state === UPowerDeviceState.PendingCharge)
-            return Theme.secondary;
+            return Theme.palette.success;
         if (UPower.displayDevice.percentage <= 0.20)
-            return Theme.error;
-        return Theme.primary;
+            return Theme.palette.error;
+        return Theme.palette.primary;
     }
 
     // Keep a fixed container so rotating the glyph does not affect layout bounds.
@@ -73,7 +72,7 @@ ColumnLayout {
             color: root.getBatteryColor()
             font.pixelSize: 24
             rotation: 90
-            font.family: Theme.font
+            font.family: Theme.palette.font
             Behavior on color {
                 ColorAnimation {
                     duration: 250
@@ -88,7 +87,7 @@ ColumnLayout {
         color: root.getBatteryColor()
         font.pixelSize: 11
         font.bold: true
-        font.family: Theme.font
+        font.family: Theme.palette.font
 
         Behavior on color {
             ColorAnimation {

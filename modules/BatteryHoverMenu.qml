@@ -1,10 +1,11 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -109,10 +110,10 @@ PanelWindow {
 
     function projectedColor() {
         if (batteryState === "fully-charged")
-            return Theme.secondary;
+            return Theme.palette.success;
         if (batteryState === "pending-charge")
-            return Theme.tertiary;
-        return Theme.on_Surface;
+            return Theme.palette.warning;
+        return Theme.palette.success;
     }
 
     function loadStatus() {
@@ -224,8 +225,8 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.background
-        border.color: Theme.outlineVariant
+        color: Theme.palette.bgMain
+        border.color: Theme.palette.borderActive
         border.width: 1
         radius: 10
 
@@ -245,19 +246,21 @@ PanelWindow {
 
                 Text {
                     text: "󰂄  Battery"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
+                    color: Theme.palette.error
                     font.pixelSize: 13
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
 
                     MouseArea {
                         id: closeHover
@@ -276,8 +279,8 @@ PanelWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             RowLayout {
@@ -285,21 +288,23 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.stateText() + " · " + hoverMenu.batteryPct + "%"
-                    color: Theme.on_Surface
+                    color: Theme.palette.textMain
                     font.pixelSize: 12
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     font.bold: true
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: hoverMenu.loading ? "Loading..." : ""
                     visible: hoverMenu.loading
-                    color: Theme.on_Surface
+                    color: Theme.palette.textMain
                     opacity: 0.5
                     font.pixelSize: 11
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
             }
 
@@ -309,20 +314,21 @@ PanelWindow {
 
                 Text {
                     text: "Screen On"
-                    color: Theme.on_Surface
-                    opacity: 0.6
+                    color: Theme.palette.textMain
                     font.pixelSize: 11
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: hoverMenu.screenOnTime
-                    color: Theme.on_Surface
+                    color: Theme.palette.textMain
                     font.pixelSize: 11
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
             }
 
@@ -332,20 +338,21 @@ PanelWindow {
 
                 Text {
                     text: hoverMenu.projectedLabel()
-                    color: Theme.on_Surface
-                    opacity: 0.6
+                    color: Theme.palette.textMain
                     font.pixelSize: 11
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: hoverMenu.projectedValue()
                     color: hoverMenu.projectedColor()
                     font.pixelSize: 11
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     font.bold: hoverMenu.batteryState === "fully-charged"
                 }
             }
@@ -359,43 +366,51 @@ PanelWindow {
                 SequentialAnimation on opacity {
                     running: chargingRow.visible
                     loops: Animation.Infinite
-                    NumberAnimation { to: 0.4; duration: 900; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutSine }
+                    NumberAnimation {
+                        to: 0.4
+                        duration: 900
+                        easing.type: Easing.InOutSine
+                    }
+                    NumberAnimation {
+                        to: 1.0
+                        duration: 900
+                        easing.type: Easing.InOutSine
+                    }
                 }
 
                 Text {
                     text: "󱐋  Rate"
-                    color: Theme.secondary
-                    opacity: 0.85
+                    color: Theme.palette.primary
                     font.pixelSize: 11
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: hoverMenu.chargingInfo
-                    color: Theme.secondary
+                    color: Theme.palette.primary
                     font.pixelSize: 11
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
-                opacity: 0.7
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             Text {
                 text: "Power Mode"
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 font.pixelSize: 11
                 font.bold: true
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             RowLayout {
@@ -404,12 +419,22 @@ PanelWindow {
 
                 Repeater {
                     model: [
-                        { key: "low-power", label: "Saver" },
-                        { key: "balanced", label: "Normal" },
-                        { key: "balanced-performance", label: "Performance" }
+                        {
+                            key: "low-power",
+                            label: "Saver"
+                        },
+                        {
+                            key: "balanced",
+                            label: "Normal"
+                        },
+                        {
+                            key: "balanced-performance",
+                            label: "Performance"
+                        }
                     ]
 
                     delegate: Rectangle {
+                        id: powerOption
                         required property var modelData
                         property bool selected: hoverMenu.activeProfile === modelData.key
                         property bool disabled: hoverMenu.switching
@@ -417,16 +442,15 @@ PanelWindow {
                         Layout.fillWidth: true
                         height: 30
                         radius: 6
-                        color: selected ? Theme.primary : (modeHover.containsMouse ? Theme.outlineVariant : Theme.surfaceContainerLowest)
+                        color: selected ? Theme.palette.bgWidget : (modeHover.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
                         border.width: 1
-                        border.color: selected ? Theme.primary : Theme.outlineVariant
-
+                        border.color: selected ? Theme.palette.borderActive : Theme.palette.borderInactive
                         Text {
                             anchors.centerIn: parent
-                            text: modelData.label
-                            color: selected ? Theme.surfaceContainerLowest : Theme.on_Surface
+                            text: powerOption.modelData.label
+                            color: Theme.palette.textMain
                             font.pixelSize: 10
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             font.bold: true
                         }
 
@@ -434,9 +458,9 @@ PanelWindow {
                             id: modeHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: disabled ? Qt.ArrowCursor : Qt.PointingHandCursor
-                            enabled: !disabled
-                            onClicked: hoverMenu.setProfile(modelData.key)
+                            cursorShape: powerOption.disabled ? Qt.ArrowCursor : Qt.PointingHandCursor
+                            enabled: !powerOption.disabled
+                            onClicked: hoverMenu.setProfile(powerOption.modelData.key)
                         }
                     }
                 }
@@ -445,10 +469,9 @@ PanelWindow {
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.primary
+                color: Theme.palette.primary
                 font.pixelSize: 11
-                font.family: Theme.font
-                opacity: 0.9
+                font.family: Theme.palette.font
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }

@@ -11,7 +11,6 @@
       flake = false;
     };
 
-    matugen.url = "github:InioX/matugen";
     quickshell.url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
   };
 
@@ -67,10 +66,7 @@
     };
 
     # Optional NixOS module that installs the CLI system-wide.
-    nixosModules.default = {
-      pkgs,
-      ...
-    }: let
+    nixosModules.default = {pkgs, ...}: let
       hostSystem = pkgs.stdenv.hostPlatform.system;
     in {
       environment.systemPackages = [self.packages.${hostSystem}.stratum-cli];

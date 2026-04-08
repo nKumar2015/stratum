@@ -1,8 +1,6 @@
 import QtQuick
-import Quickshell
 import QtQuick.Layouts
 import Quickshell.Io
-import "../theme"
 import "../globals"
 
 Item {
@@ -90,7 +88,7 @@ Item {
     Text {
         anchors.centerIn: parent
         text: root.icon
-        color: wifiHover.containsMouse ? Theme.primary : Theme.on_Surface
+        color: wifiHover.containsMouse ? Theme.palette.secondary : Theme.palette.textMain
         font.pixelSize: 20
 
         Behavior on color {

@@ -19,6 +19,8 @@ fn print_help() {
             "connect <mac> [--hover]",
             "disconnect <mac> [--hover]",
             "pair <mac> [--hover]",
+            "trust <mac>",
+            "untrust <mac>",
             "forget <mac>",
             "power <on|off>",
             "scan",
@@ -391,6 +393,16 @@ pub fn handle(args: &[String]) {
             let hover = has_hover_flag(sub_args);
             let mac = first_positional_arg(sub_args);
             cmd_pair(mac, hover);
+        }
+        "trust" => {
+            bluetooth_required();
+            let mac = args.get(1).map(String::as_str).unwrap_or("");
+            cmd_simple_action("trust", &["trust", mac], false);
+        }
+        "untrust" => {
+            bluetooth_required();
+            let mac = args.get(1).map(String::as_str).unwrap_or("");
+            cmd_simple_action("untrust", &["untrust", mac], false);
         }
         "forget" => {
             bluetooth_required();

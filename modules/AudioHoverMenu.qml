@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
@@ -5,7 +7,6 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -218,18 +219,18 @@ PanelWindow {
                 const sinks = Array.isArray(payload.sinks) ? payload.sinks : [];
                 const sources = Array.isArray(payload.sources) ? payload.sources : [];
 
-                hoverMenu.outputDevices = sinks.filter(function(row) {
+                hoverMenu.outputDevices = sinks.filter(function (row) {
                     return !!String(row.name || "").trim();
-                }).map(function(row) {
+                }).map(function (row) {
                     return {
                         name: String(row.name || "").trim(),
                         description: String(row.description || "").trim()
                     };
                 }).slice(0, 6);
 
-                hoverMenu.inputDevices = sources.filter(function(row) {
+                hoverMenu.inputDevices = sources.filter(function (row) {
                     return !!String(row.name || "").trim();
-                }).map(function(row) {
+                }).map(function (row) {
                     return {
                         name: String(row.name || "").trim(),
                         description: String(row.description || "").trim()
@@ -351,8 +352,8 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.background
-        border.color: Theme.outlineVariant
+        color: Theme.palette.bgMain
+        border.color: Theme.palette.outlineVariant
         border.width: 1
         radius: 10
 
@@ -372,19 +373,21 @@ PanelWindow {
 
                 Text {
                     text: "󰕾  Audio"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
+                    color: Theme.palette.error
                     font.pixelSize: 13
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
 
                     MouseArea {
                         id: closeHover
@@ -393,39 +396,43 @@ PanelWindow {
                         onClicked: GlobalState.showAudioHoverMenu = false
                     }
 
-                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 100
+                        }
+                    }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             Text {
                 visible: hoverMenu.loading
                 text: "Loading devices..."
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 opacity: 0.45
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length > 0
                 text: hoverMenu.errorMsg
-                color: Theme.error
+                color: Theme.palette.error
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.primary
+                color: Theme.palette.textMain
                 font.pixelSize: 11
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 opacity: 0.9
             }
 
@@ -440,8 +447,8 @@ PanelWindow {
 
                     Text {
                         text: hoverMenu.volumeIconFor(hoverMenu.currentVolume, hoverMenu.currentMuted)
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 13
                     }
 
@@ -449,7 +456,7 @@ PanelWindow {
                         id: volumeSlider
                         from: 0
                         to: hoverMenu.volumeMaxPercent
-                        value: currentVolume
+                        value: hoverMenu.currentVolume
                         enabled: !hoverMenu.switching
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
@@ -460,13 +467,13 @@ PanelWindow {
                             width: volumeSlider.availableWidth
                             height: 4
                             radius: 2
-                            color: Theme.outlineVariant
+                            color: Theme.palette.bgHover
 
                             Rectangle {
                                 width: volumeSlider.visualPosition * parent.width
                                 height: parent.height
                                 radius: 2
-                                color: Theme.primary
+                                color: Theme.palette.primary
                             }
                         }
 
@@ -476,7 +483,7 @@ PanelWindow {
                             implicitWidth: 12
                             implicitHeight: 12
                             radius: 6
-                            color: volumeSlider.pressed ? Theme.primary : Theme.on_Surface
+                            color: Theme.palette.primary
                         }
 
                         onValueChanged: {
@@ -497,10 +504,9 @@ PanelWindow {
 
                     Text {
                         text: Math.round(volumeSlider.value) + "%"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
-                        opacity: 0.75
                         horizontalAlignment: Text.AlignRight
                         Layout.preferredWidth: 34
                     }
@@ -509,35 +515,33 @@ PanelWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
-                opacity: 0.5
             }
 
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 text: "󰕾  Output"
-                color: Theme.on_Surface
-                opacity: 0.75
+                color: Theme.palette.textMain
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 font.bold: true
             }
 
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.outputDevices.length === 0
                 text: "No output devices"
-                color: Theme.on_Surface
-                opacity: 0.45
+                color: Theme.palette.textMain
                 font.pixelSize: 11
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Repeater {
                 model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? hoverMenu.outputDevices : []
 
                 delegate: Rectangle {
+                    id: outputItem
                     required property var modelData
 
                     Layout.fillWidth: true
@@ -545,7 +549,7 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultOutput
-                    color: outputHover.containsMouse ? Theme.outlineVariant : "transparent"
+                    color: outputHover.containsMouse ? Theme.palette.outlineVariant : "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -554,17 +558,17 @@ PanelWindow {
                         spacing: 8
 
                         Text {
-                            text: selected ? "◉" : "○"
-                            color: selected ? Theme.primary : Theme.on_Surface
+                            text: outputItem.selected ? "◉" : "○"
+                            color: outputItem.selected ? Theme.palette.textMain : Theme.palette.textMuted
                             font.pixelSize: 12
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: hoverMenu.deviceLabel(modelData.name, modelData.description)
-                            color: Theme.on_Surface
+                            text: hoverMenu.deviceLabel(outputItem.modelData.name, outputItem.modelData.description)
+                            color: Theme.palette.textMain
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -576,42 +580,40 @@ PanelWindow {
                         hoverEnabled: true
                         enabled: !hoverMenu.switching
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: hoverMenu.switchOutput(modelData.name)
+                        onClicked: hoverMenu.switchOutput(outputItem.modelData.name)
                     }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
-                opacity: 0.5
             }
 
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
                 text: "󰍬  Input"
-                color: Theme.on_Surface
-                opacity: 0.75
+                color: Theme.palette.textMain
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 font.bold: true
             }
 
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.inputDevices.length === 0
                 text: "No input devices"
-                color: Theme.on_Surface
-                opacity: 0.45
+                color: Theme.palette.textMain
                 font.pixelSize: 11
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Repeater {
                 model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? hoverMenu.inputDevices : []
 
                 delegate: Rectangle {
+                    id: inputItem
                     required property var modelData
 
                     Layout.fillWidth: true
@@ -619,7 +621,7 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultInput
-                    color: inputHover.containsMouse ? Theme.outlineVariant : "transparent"
+                    color: inputHover.containsMouse ? Theme.palette.outlineVariant : "transparent"
 
                     RowLayout {
                         anchors.fill: parent
@@ -628,17 +630,17 @@ PanelWindow {
                         spacing: 8
 
                         Text {
-                            text: selected ? "◉" : "○"
-                            color: selected ? Theme.secondary : Theme.on_Surface
+                            text: inputItem.selected ? "◉" : "○"
+                            color: inputItem.selected ? Theme.palette.textMain : Theme.palette.textMuted
                             font.pixelSize: 12
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: hoverMenu.deviceLabel(modelData.name, modelData.description)
-                            color: Theme.on_Surface
+                            text: hoverMenu.deviceLabel(inputItem.modelData.name, inputItem.modelData.description)
+                            color: Theme.palette.textMain
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -650,23 +652,22 @@ PanelWindow {
                         hoverEnabled: true
                         enabled: !hoverMenu.switching
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: hoverMenu.switchInput(modelData.name)
+                        onClicked: hoverMenu.switchInput(inputItem.modelData.name)
                     }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             Text {
                 text: "Open full settings →"
-                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
+                color: fullMenuHover.containsMouse ? Theme.palette.textMain : Theme.palette.textMuted
                 font.pixelSize: 11
-                font.family: Theme.font
-                opacity: fullMenuHover.containsMouse ? 1.0 : 0.6
+                font.family: Theme.palette.font
                 Layout.bottomMargin: 0
 
                 MouseArea {
@@ -681,9 +682,12 @@ PanelWindow {
                     }
                 }
 
-                Behavior on color { ColorAnimation { duration: 100 } }
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 100
+                    }
+                }
             }
         }
-        
     }
 }

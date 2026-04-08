@@ -28,32 +28,32 @@ ColumnLayout {
 
     Text {
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[0] : "--"
-        color: Theme.primary // Using your active workspace color for emphasis
+        color: Theme.palette.primary // Using your active workspace color for emphasis
         font {
             pixelSize: 18
             bold: true
-            family: Theme.font // Or your preferred monospace font
+            family: Theme.palette.font // Or your preferred monospace font
         }
     }
 
     Text {
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[1] : "--"
-        color: Theme.secondary
+        color: Theme.palette.secondary
         font {
             pixelSize: 18
             bold: true
-            family: Theme.font
+            family: Theme.palette.font
         }
     }
 
     Text {
         horizontalAlignment: Text.AlignHCenter
         text: clockRoot.timeParts.length > 0 ? clockRoot.timeParts[2] : "--"
-        color: Theme.secondary
+        color: Theme.palette.tertiary
         font {
             pixelSize: 18
             bold: false
-            family: Theme.font
+            family: Theme.palette.font
         }
     }
 

@@ -1,11 +1,13 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Window // Crucial! Without this, Window.window fails silently.
+import QtQuick.Window
 import Quickshell
-import Quickshell.Widgets // Provides Quickshell's IconImage component
+import Quickshell.Widgets
 import Quickshell.Services.SystemTray
 
-import "../theme"
+import "../globals"
 
 Flow {
     id: trayRoot
@@ -60,8 +62,8 @@ Flow {
             // Added Math.max so the popup never collapses to 0x0 while waiting for DBus
             implicitWidth: Math.max(120, menuLayout.implicitWidth + 8)
             implicitHeight: Math.max(32, menuLayout.implicitHeight + 8)
-            color: Theme.background
-            border.color: Theme.surfaceContainerLow
+            color: Theme.palette.bgMain
+            border.color: Theme.palette.borderActive
             border.width: 1
             radius: 6
 
@@ -74,11 +76,12 @@ Flow {
                     model: menuOpener.children
 
                     delegate: Rectangle {
+                        id: trayItem
                         required property var modelData
 
-                        implicitWidth: Math.max(100, entryText.implicitWidth + 24)
+                        implicitWidth: Math.max(150, entryText.implicitWidth + 24)
                         implicitHeight: modelData.isSeparator ? 1 : 28
-                        color: entryMouse.containsMouse ? Theme.surfaceContainer : "transparent"
+                        color: entryMouse.containsMouse ? Theme.palette.bgHover : "transparent"
                         radius: 4
 
                         Text {
@@ -86,29 +89,29 @@ Flow {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.left: parent.left
                             anchors.leftMargin: 8
-                            text: modelData.isSeparator ? "" : modelData.text.replace(/&/g, "")
-                            color: Theme.on_Surface
+                            text: trayItem.modelData.isSeparator ? "" : trayItem.modelData.text.replace(/&/g, "")
+                            color: Theme.palette.textMain
                             font.pixelSize: 13
-                            font.family: Theme.font
-                            visible: !modelData.isSeparator
+                            font.family: Theme.palette.font
+                            visible: !trayItem.modelData.isSeparator
                         }
 
                         Rectangle {
                             anchors.fill: parent
                             anchors.leftMargin: 4
                             anchors.rightMargin: 4
-                            color: Theme.surfaceContainerLow
-                            visible: modelData.isSeparator
+                            color: Theme.palette.secondary
+                            visible: trayItem.modelData.isSeparator
                         }
 
                         MouseArea {
                             id: entryMouse
                             anchors.fill: parent
                             hoverEnabled: true
-                            enabled: !modelData.isSeparator && modelData.enabled
+                            enabled: !trayItem.modelData.isSeparator && trayItem.modelData.enabled
 
                             onClicked: {
-                                modelData.triggered();
+                                trayItem.modelData.triggered();
                                 customMenu.visible = false;
                             }
                         }
@@ -135,7 +138,7 @@ Flow {
                     anchors.centerIn: parent
                     implicitWidth: 18
                     implicitHeight: 18
-                    source: modelData.icon ? modelData.icon : Quickshell.iconPath(modelData.id, "application-x-executable")
+                    source: trayIconWrap.modelData.icon ? trayIconWrap.modelData.icon : Quickshell.iconPath(trayIconWrap.modelData.id, "application-x-executable")
                 }
 
                 MouseArea {
@@ -145,7 +148,7 @@ Flow {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                     onContainsMouseChanged: {
-                        if (menuOpener.menu === modelData.menu) {
+                        if (menuOpener.menu === trayIconWrap.modelData.menu) {
                             customMenu.sourceIconHovered = containsMouse;
 
                             if (!containsMouse && customMenu.visible) {
@@ -156,10 +159,10 @@ Flow {
 
                     onClicked: mouse => {
                         if (mouse.button === Qt.LeftButton) {
-                            modelData.activate();
+                            trayIconWrap.modelData.activate();
                         } else if (mouse.button === Qt.RightButton) {
-                            if (modelData.hasMenu) {
-                                menuOpener.menu = modelData.menu;
+                            if (trayIconWrap.modelData.hasMenu) {
+                                menuOpener.menu = trayIconWrap.modelData.menu;
                                 customMenu.sourceIconHovered = true;
                                 let parentWindow = trayRoot.panelWindow;
 
@@ -176,7 +179,7 @@ Flow {
                                 }
                             } else {
                                 // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
-                                modelData.secondaryActivate();
+                                trayIconWrap.modelData.secondaryActivate();
                             }
                         }
                     }

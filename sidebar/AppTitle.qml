@@ -4,7 +4,7 @@ import Quickshell.Hyprland
 import Quickshell.Widgets
 import QtQuick.Layouts
 
-import "../theme"
+import "../globals"
 
 Item {
     id: appTitleRoot
@@ -62,8 +62,8 @@ Item {
             Text {
                 id: appText
                 text: appTitleRoot.displayWindow?.title || "\uf4a9  Desktop"
-                color: Theme.on_Surface
-                font.family: Theme.font
+                color: Theme.palette.textMain
+                font.family: Theme.palette.font
                 font.pixelSize: 14
 
                 Layout.fillWidth: true

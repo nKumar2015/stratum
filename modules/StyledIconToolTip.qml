@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-import "../theme"
+import "../globals"
 
 ToolTip {
     id: styledTip
@@ -11,15 +11,13 @@ ToolTip {
 
     contentItem: Text {
         text: styledTip.text
-        color: Theme.on_Surface
-        font.family: Theme.font
+        color: Theme.palette.textMain
+        font.family: Theme.palette.font
         font.pixelSize: 10
     }
 
     background: Rectangle {
-        color: "#111824"
-        border.color: Theme.outlineVariant
-        border.width: 1
+        color: Theme.palette.bgWidget
         radius: 5
     }
 }

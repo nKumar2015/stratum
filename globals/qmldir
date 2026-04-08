@@ -1,2 +1,3 @@
 singleton GlobalState 1.0 GlobalState.qml
 NotificationStore 1.0 NotificationStore.qml
+singleton Theme 1.0 GlobalTheme.qml

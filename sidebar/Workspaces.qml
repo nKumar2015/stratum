@@ -2,7 +2,8 @@ pragma ComponentBehavior: Bound
 import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
-import "../theme"
+
+import "../globals"
 
 Item {
     id: wsRoot
@@ -75,11 +76,11 @@ Item {
                 Layout.preferredHeight: 20
 
                 text: wsId
-                color: isActive ? Theme.primary : (hasOpenWindows ? Theme.secondary : Theme.tertiary)
+                color: isActive ? Theme.palette.primary : (hasOpenWindows ? Theme.palette.secondary : Theme.palette.textMuted)
                 font {
                     pixelSize: 15
                     bold: true
-                    family: Theme.font
+                    family: Theme.palette.font
                 }
 
                 Rectangle {
@@ -89,7 +90,7 @@ Item {
                     width: 14
                     height: 2
                     radius: 2
-                    color: Theme.primary
+                    color: Theme.palette.primary
                 }
 
                 Behavior on color {

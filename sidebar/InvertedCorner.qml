@@ -1,14 +1,14 @@
 import QtQuick
 import QtQuick.Shapes
 
-import "../theme"
+import "../globals"
 
 Shape {
     id: corner
     width: 20
     height: 20
 
-    property color color: Theme.background
+    property color color: Theme.palette.bgMain
     property bool flip: false // false = Top, true = Bottom
 
     layer.enabled: true

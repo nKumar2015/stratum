@@ -3,7 +3,7 @@ import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 
-import "../theme"
+import "../globals"
 
 PanelWindow {
     id: sidebarWindow
@@ -33,27 +33,27 @@ PanelWindow {
 
     Rectangle {
         id: sidebar
-        width: sidebarWidth
+        width: sidebarWindow.sidebarWidth
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.bottom: parent.bottom
 
-        color: Theme.background
+        color: Theme.palette.bgMain
         clip: true
         border.width: 1
         border.color: "transparent"
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.topMargin: sidebarPadding
-            anchors.bottomMargin: sidebarPadding
+            anchors.topMargin: sidebarWindow.sidebarPadding
+            anchors.bottomMargin: sidebarWindow.sidebarPadding
             anchors.leftMargin: 0
             anchors.rightMargin: 0
-            spacing: sidebarSpacing
+            spacing: sidebarWindow.sidebarSpacing
 
             Text {
                 text: ""
-                color: Theme.surfaceContainerHighest
+                color: Theme.palette.surfaceContainerHighest
                 font.pixelSize: 20
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -74,8 +74,8 @@ PanelWindow {
 
             Rectangle {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: quickPanelWidth
-                Layout.preferredHeight: quickPanelHeight
+                Layout.preferredWidth: sidebarWindow.quickPanelWidth
+                Layout.preferredHeight: sidebarWindow.quickPanelHeight
                 radius: 15
                 color: Theme.surfaceContainerLowest
                 border.width: 1
@@ -83,9 +83,9 @@ PanelWindow {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.topMargin: quickPanelInnerMargin
-                    anchors.bottomMargin: quickPanelInnerMargin
-                    spacing: quickPanelSpacing
+                    anchors.topMargin: sidebarWindow.quickPanelInnerMargin
+                    anchors.bottomMargin: sidebarWindow.quickPanelInnerMargin
+                    spacing: sidebarWindow.quickPanelSpacing
 
                     Audio {
                         monitorName: sidebarWindow.monitorName
@@ -107,8 +107,8 @@ PanelWindow {
             Battery {
                 monitorName: sidebarWindow.monitorName
                 Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: batteryVerticalNudge
-                Layout.bottomMargin: batteryVerticalNudge
+                Layout.topMargin: sidebarWindow.batteryVerticalNudge
+                Layout.bottomMargin: sidebarWindow.batteryVerticalNudge
             }
 
             Clock {
@@ -120,7 +120,6 @@ PanelWindow {
     InvertedCorner {
         anchors.top: sidebar.top
         anchors.left: sidebar.right
-        color: Theme.background
         flip: false
     }
 
@@ -128,6 +127,5 @@ PanelWindow {
         anchors.bottom: sidebar.bottom
         anchors.left: sidebar.right
         flip: true
-        color: Theme.background
     }
 }

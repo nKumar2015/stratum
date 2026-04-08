@@ -1,10 +1,11 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -193,8 +194,8 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.background
-        border.color: Theme.outlineVariant
+        color: Theme.palette.bgMain
+        border.color: Theme.palette.borderActive
         border.width: 1
         radius: 10
 
@@ -219,8 +220,8 @@ PanelWindow {
 
                 Text {
                     text: "󰂯  Quick Connect"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }
@@ -231,9 +232,9 @@ PanelWindow {
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
+                    color: Theme.palette.error
                     font.pixelSize: 13
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
 
                     MouseArea {
                         id: closeHover
@@ -252,17 +253,17 @@ PanelWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             // ── Status line (shown only when non-empty) ─────────────────
             Text {
                 visible: hoverMenu.statusMsg.length > 0
                 text: hoverMenu.statusMsg
-                color: Theme.primary
+                color: Theme.palette.textMain
                 font.pixelSize: 11
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
@@ -271,20 +272,20 @@ PanelWindow {
             Text {
                 visible: hoverMenu.loading && hoverMenu.devices.length === 0
                 text: "Loading..."
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 opacity: 0.45
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             // ── Empty state ──────────────────────────────────────────────
             Text {
                 visible: !hoverMenu.loading && hoverMenu.devices.length === 0 && hoverMenu.statusMsg.length === 0
                 text: "No paired devices"
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 opacity: 0.45
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             // ── Device rows (max 6) ──────────────────────────────────────
@@ -292,12 +293,13 @@ PanelWindow {
                 model: hoverMenu.devices.slice(0, 6)
 
                 delegate: Rectangle {
+                    id: deviceItem
                     required property var modelData
 
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: rowHover.containsMouse ? Theme.outlineVariant : "transparent"
+                    color: rowHover.containsMouse ? Theme.palette.bgHover : "transparent"
 
                     property bool isConnected: modelData.connected === "yes"
                     property bool isPending: hoverMenu.pendingMac === modelData.mac
@@ -309,32 +311,32 @@ PanelWindow {
                         spacing: 8
 
                         Text {
-                            text: isConnected ? "󰂱" : "󰂯"
-                            color: isConnected ? Theme.primary : Theme.on_Surface
+                            text: deviceItem.isConnected ? "󰂱" : "󰂯"
+                            color: deviceItem.isConnected ? Theme.palette.textMain : Theme.palette.textMuted
                             font.pixelSize: 15
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: modelData.name
-                            color: Theme.on_Surface
+                            text: deviceItem.modelData.name
+                            color: Theme.palette.textMain
                             font.pixelSize: 12
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
 
                         Text {
-                            text: isPending ? "󰔟" : (isConnected ? "●" : "○")
+                            text: deviceItem.isPending ? "󰔟" : (deviceItem.isConnected ? "●" : "○")
                             color: {
-                                if (isPending)
-                                    return Theme.tertiary;
-                                if (isConnected)
-                                    return Theme.secondary;
-                                return "#5c6370";
+                                if (deviceItem.isPending)
+                                    return Theme.palette.warning;
+                                if (deviceItem.isConnected)
+                                    return Theme.palette.success;
+                                return Theme.palette.textMain;
                             }
-                            font.pixelSize: isPending ? 14 : 10
-                            font.family: Theme.font
+                            font.pixelSize: deviceItem.isPending ? 14 : 10
+                            font.family: Theme.palette.font
                         }
                     }
 
@@ -342,13 +344,13 @@ PanelWindow {
                         id: rowHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        enabled: !isPending && hoverMenu.pendingMac === ""
+                        enabled: !deviceItem.isPending && hoverMenu.pendingMac === ""
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            if (isConnected)
-                                hoverMenu.disconnectDevice(modelData.mac, modelData.name);
+                            if (deviceItem.isConnected)
+                                hoverMenu.disconnectDevice(deviceItem.modelData.mac, deviceItem.modelData.name);
                             else
-                                hoverMenu.connectDevice(modelData.mac, modelData.name);
+                                hoverMenu.connectDevice(deviceItem.modelData.mac, deviceItem.modelData.name);
                         }
                     }
                 }
@@ -358,25 +360,23 @@ PanelWindow {
             Text {
                 visible: hoverMenu.devices.length > 6
                 text: "+" + (hoverMenu.devices.length - 6) + " more in full settings"
-                color: Theme.on_Surface
-                opacity: 0.45
+                color: Theme.palette.textMain
                 font.pixelSize: 11
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             // ── Footer: open full settings ───────────────────────────────
             Text {
                 text: "Open full settings →"
-                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
+                color: fullMenuHover.containsMouse ? Theme.palette.textMain : Theme.palette.textMuted
                 font.pixelSize: 11
-                font.family: Theme.font
-                opacity: fullMenuHover.containsMouse ? 1.0 : 0.6
+                font.family: Theme.palette.font
                 Layout.bottomMargin: 0
 
                 MouseArea {

@@ -1,6 +1,5 @@
 //@ pragma UseQApplication
 import Quickshell
-import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
 import QtQuick
@@ -8,10 +7,10 @@ import QtQuick.Layouts
 
 import "sidebar"
 import "modules"
-import "theme"
 import "globals"
 
 ShellRoot {
+
     PowerMenu {}
     LockScreen {}
     SystemOsd {}
@@ -73,27 +72,27 @@ ShellRoot {
 
             Rectangle {
                 id: sidebar
-                width: sidebarWidth
+                width: panelWindow.sidebarWidth
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom
 
-                color: Theme.background
+                color: Theme.palette.bgMain
                 clip: true
                 border.width: 1
                 border.color: "transparent"
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.topMargin: sidebarPadding
-                    anchors.bottomMargin: sidebarPadding
+                    anchors.topMargin: panelWindow.sidebarPadding
+                    anchors.bottomMargin: panelWindow.sidebarPadding
                     anchors.leftMargin: 0
                     anchors.rightMargin: 0
-                    spacing: sidebarSpacing
+                    spacing: panelWindow.sidebarSpacing
 
                     Text {
                         text: ""
-                        color: Theme.secondary
+                        color: Theme.palette.primary
                         font.pixelSize: 20
                         Layout.alignment: Qt.AlignHCenter
                     }
@@ -115,18 +114,18 @@ ShellRoot {
 
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
-                        Layout.preferredWidth: quickPanelWidth
-                        Layout.preferredHeight: quickPanelHeight
+                        Layout.preferredWidth: panelWindow.quickPanelWidth
+                        Layout.preferredHeight: panelWindow.quickPanelHeight
                         radius: 15
-                        color: Theme.surfaceContainerLowest
+                        color: Theme.palette.bgWidget
                         border.width: 1
-                        border.color: Theme.outlineVariant
+                        border.color: Theme.palette.borderActive
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.topMargin: quickPanelInnerMargin
-                            anchors.bottomMargin: quickPanelInnerMargin
-                            spacing: quickPanelSpacing
+                            anchors.topMargin: panelWindow.quickPanelInnerMargin
+                            anchors.bottomMargin: panelWindow.quickPanelInnerMargin
+                            spacing: panelWindow.quickPanelSpacing
 
                             Audio {
                                 monitorName: panelWindow.monitorName
@@ -148,8 +147,8 @@ ShellRoot {
                     Battery {
                         monitorName: panelWindow.monitorName
                         Layout.alignment: Qt.AlignHCenter
-                        Layout.topMargin: batteryVerticalNudge
-                        Layout.bottomMargin: batteryVerticalNudge
+                        Layout.topMargin: panelWindow.batteryVerticalNudge
+                        Layout.bottomMargin: panelWindow.batteryVerticalNudge
                     }
 
                     Clock {
@@ -161,7 +160,6 @@ ShellRoot {
             InvertedCorner {
                 anchors.top: sidebar.top
                 anchors.left: sidebar.right
-                color: Theme.background
                 flip: false
             }
 
@@ -169,7 +167,6 @@ ShellRoot {
                 anchors.bottom: sidebar.bottom
                 anchors.left: sidebar.right
                 flip: true
-                color: Theme.background
             }
         }
     }

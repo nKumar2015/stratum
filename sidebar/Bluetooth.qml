@@ -1,8 +1,6 @@
 import QtQuick
-import Quickshell
 import QtQuick.Layouts
 import Quickshell.Io
-import "../theme"
 import "../globals"
 
 Item {
@@ -84,7 +82,8 @@ Item {
     Text {
         anchors.centerIn: parent
         text: root.icon
-        color: bluetoothHover.containsMouse ? Theme.primary : Theme.on_Surface
+        color: bluetoothHover.containsMouse ? Theme.palette.secondary : Theme.palette.textMain
+
         font.pixelSize: 20
 
         Behavior on color {
