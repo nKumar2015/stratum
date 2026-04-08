@@ -186,9 +186,9 @@ PanelWindow {
                 Layout.fillWidth: true
 
                 Text {
-                    text: "  Network"
+                    text: "  Network"
                     color: Theme.palette.textMain
-                    font.family: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }

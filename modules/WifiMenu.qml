@@ -966,7 +966,7 @@ Window {
                                                 }
 
                                                 Text {
-                                                    text: wifiMenu.signalBars(modelData.signal) 
+                                                    text: wifiMenu.signalBars(modelData.signal)
                                                     color: modelData.signal >= 50 ? Theme.palette.success : Theme.palette.warning
                                                     font.family: Theme.palette.font
                                                     font.pixelSize: 10
@@ -1027,9 +1027,9 @@ Window {
 
                                         Text {
                                             text: "󰅂"
-                                            color: Theme.surfaceContainer
-                                            font.family: Theme.font
-                                            font.pixelSize: 12
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 20
                                             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                                         }
                                     }
