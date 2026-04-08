@@ -4,7 +4,6 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -419,7 +418,7 @@ PanelWindow {
             }
         }
     }
-    
+
     Shortcut {
         sequence: "Escape"
         onActivated: {
@@ -451,7 +450,7 @@ PanelWindow {
                 toolbar.updateHoverFromGeometry("");
         }
 
-        onPressed: function(mouse) {
+        onPressed: function (mouse) {
             if (!toolbar.freezeReady)
                 return;
             toolbar.pointerDown = true;
@@ -464,7 +463,7 @@ PanelWindow {
             toolbar.dragH = 1;
         }
 
-        onPositionChanged: function(mouse) {
+        onPositionChanged: function (mouse) {
             if (!toolbar.freezeReady)
                 return;
             if (toolbar.pointerDown)

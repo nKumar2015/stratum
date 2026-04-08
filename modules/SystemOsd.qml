@@ -4,7 +4,6 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -27,19 +26,19 @@ PanelWindow {
     property bool muted: false
     property real osdOpacity: 0
     property var channelConfig: ({
-        "volume": {
-            max: 150,
-            title: "Volume",
-            valueColor: "primary",
-            pollMs: 300
-        },
-        "brightness": {
-            max: 100,
-            title: "Brightness",
-            valueColor: "tertiary",
-            pollMs: 350
-        }
-    })
+            "volume": {
+                max: 150,
+                title: "Volume",
+                valueColor: Theme.palette.secondary,
+                pollMs: 300
+            },
+            "brightness": {
+                max: 100,
+                title: "Brightness",
+                valueColor: Theme.palette.tertiary,
+                pollMs: 350
+            }
+        })
 
     property int lastVolume: -1
     property bool lastMuted: false
@@ -91,7 +90,7 @@ PanelWindow {
 
     function channelAccent(kind) {
         const config = channelConfig[kind];
-        return config && config.valueColor === "tertiary" ? Theme.tertiary : Theme.primary;
+        return config.valueColor;
     }
 
     function parseCliJson(raw) {
@@ -203,7 +202,7 @@ PanelWindow {
 
     Timer {
         id: volumePoll
-        interval: channelConfig.volume.pollMs
+        interval: osd.channelConfig.volume.pollMs
         repeat: true
         running: true
         onTriggered: {
@@ -214,7 +213,7 @@ PanelWindow {
 
     Timer {
         id: brightnessPoll
-        interval: channelConfig.brightness.pollMs
+        interval: osd.channelConfig.brightness.pollMs
         repeat: true
         running: true
         onTriggered: {
@@ -232,7 +231,7 @@ PanelWindow {
         opacity: osd.osdOpacity
         radius: 12
         color: Qt.rgba(0.07, 0.07, 0.11, 0.95)
-        border.color: Theme.outlineVariant
+        border.color: Theme.palette.borderActive
         border.width: 1
 
         ColumnLayout {
@@ -246,17 +245,17 @@ PanelWindow {
 
                 Text {
                     text: osd.iconGlyph
-                    color: Theme.primary
+                    color: Theme.palette.textMain
                     font.pixelSize: 22
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
                 Text {
                     text: osd.titleText
-                    color: Theme.on_Surface
+                    color: Theme.palette.textMain
                     font.pixelSize: 13
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     Layout.fillWidth: true
                 }
 
@@ -265,7 +264,7 @@ PanelWindow {
                     color: osd.channelAccent(osd.channel)
                     font.pixelSize: 12
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
             }
 
@@ -273,7 +272,7 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 9
                 radius: 5
-                color: Theme.surfaceContainerLowest
+                color: Theme.palette.bgWidget
 
                 Rectangle {
                     width: parent.width * osd.progressRatio

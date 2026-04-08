@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import QtCore
@@ -7,7 +9,6 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -54,7 +55,7 @@ PanelWindow {
 
     screen: resolvedScreen
 
-    color: "#99000000"
+    color: "#00000000"
     visible: viewerInteractive
     exclusiveZone: -1
 
@@ -330,7 +331,6 @@ PanelWindow {
         portalSaveAsProc.running = true;
     }
 
-
     function clamp(value, minValue, maxValue) {
         return canvasOps.clamp(value, minValue, maxValue);
     }
@@ -362,7 +362,6 @@ PanelWindow {
     function stopPan() {
         canvasOps.stopPan();
     }
-
 
     Timer {
         id: clearStatusTimer
@@ -487,9 +486,7 @@ PanelWindow {
         width: Math.min(parent.width - 80, 1320)
         height: Math.min(parent.height - 80, 860)
         radius: 14
-        color: Theme.background
-        border.width: 1
-        border.color: Theme.outlineVariant
+        color: Theme.palette.bgMain
         visible: viewer.viewerInteractive
 
         MouseArea {
@@ -508,16 +505,16 @@ PanelWindow {
 
                 Text {
                     text: "Screenshot Viewer"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 14
                     font.bold: true
                 }
 
                 Text {
                     text: "Mode: " + viewer.captureMode
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.secondary
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
                 }
@@ -530,23 +527,23 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceContainerLowest
-                    border.width: 1
-                    border.color: Theme.outlineVariant
+                    color: clearMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰃢"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     MouseArea {
+                        id: clearMouse
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.clearAnnotations()
+                        hoverEnabled: true
                     }
                 }
 
@@ -554,23 +551,23 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceContainerLowest
-                    border.width: 1
-                    border.color: Theme.primary
+                    color: copyMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰆏"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     MouseArea {
+                        id: copyMouse
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.startPostAction("copy")
+                        hoverEnabled: true
                     }
                 }
 
@@ -578,23 +575,23 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceContainerLowest
-                    border.width: 1
-                    border.color: Theme.primary
+                    color: saveMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰆓"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     MouseArea {
+                        id: saveMouse
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.startPostAction("save")
+                        hoverEnabled: true
                     }
                 }
 
@@ -602,23 +599,23 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceContainerLowest
-                    border.width: 1
-                    border.color: Theme.primary
+                    color: saveAsMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.isWorking ? "󰔛" : "󰉋"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     MouseArea {
+                        id: saveAsMouse
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.startSaveAs()
+                        hoverEnabled: true
                     }
                 }
 
@@ -626,23 +623,23 @@ PanelWindow {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 42
                     radius: 8
-                    color: Theme.surfaceContainerLowest
-                    border.width: 1
-                    border.color: Theme.outlineVariant
+                    color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰅖"
-                        color: Theme.on_Surface
-                        font.family: Theme.font
+                        color: Theme.palette.error
+                        font.family: Theme.palette.font
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     MouseArea {
+                        id: closeMouse
                         anchors.fill: parent
                         enabled: !viewer.isWorking
                         onClicked: viewer.closeViewer()
+                        hoverEnabled: true
                     }
                 }
             }
@@ -653,25 +650,26 @@ PanelWindow {
 
                 Text {
                     text: "Annotation color"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.tertiary
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                 }
 
                 Repeater {
                     model: ["#ff3b30", "#34c759", "#0a84ff", "#ffd60a", "#ffffff", "#000000"]
                     delegate: Rectangle {
+                        id: colorPreset
                         required property var modelData
                         Layout.preferredWidth: 20
                         Layout.preferredHeight: 20
                         radius: 10
                         color: modelData
                         border.width: viewer.annotationColor == modelData ? 2 : 1
-                        border.color: viewer.annotationColor == modelData ? Theme.primary : Theme.outlineVariant
+                        border.color: viewer.annotationColor == modelData ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: viewer.annotationColor = modelData
+                            onClicked: viewer.annotationColor = colorPreset.modelData
                         }
                     }
                 }
@@ -682,53 +680,102 @@ PanelWindow {
 
                 Text {
                     text: "Pen"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                 }
 
                 Slider {
-                    id: penSizeSlider
-                    Layout.preferredWidth: 120
-                    from: 1
+                    id: penSlider
+                    from: 0
                     to: 16
-                    stepSize: 1
                     value: viewer.penSize
                     onMoved: viewer.penSize = Math.round(value)
+                    Layout.preferredWidth: 120
+
+                    background: Rectangle {
+                        x: penSlider.leftPadding
+                        y: penSlider.topPadding + penSlider.availableHeight / 2 - height / 2
+                        width: penSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: Theme.palette.bgHover
+
+                        Rectangle {
+                            width: penSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: 2
+                            color: Theme.palette.primary
+                        }
+                    }
+
+                    handle: Rectangle {
+                        x: penSlider.leftPadding + penSlider.visualPosition * (penSlider.availableWidth - width)
+                        y: penSlider.topPadding + penSlider.availableHeight / 2 - height / 2
+                        implicitWidth: 12
+                        implicitHeight: 12
+                        radius: 6
+                        color: Theme.palette.primary
+                    }
                 }
 
                 Binding {
-                    target: penSizeSlider
+                    target: penSlider
                     property: "value"
                     value: viewer.penSize
-                    when: !penSizeSlider.pressed
+                    when: !penSlider.pressed
                 }
 
                 Text {
                     text: String(viewer.penSize)
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     Layout.preferredWidth: 18
                 }
 
                 Text {
                     text: "Zoom"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     Layout.leftMargin: 8
                 }
 
                 Slider {
                     id: zoomSlider
-                    Layout.preferredWidth: 170
+                    Layout.preferredWidth: 120
                     from: viewer.minImageZoom
                     to: viewer.maxImageZoom
                     stepSize: 0.1
                     value: viewer.minImageZoom
+                    onMoved: viewer.setImageZoom(value, renderSurface.width / 2, renderSurface.height / 2) 
                     enabled: screenshotImage.status === Image.Ready
-                    onMoved: viewer.setImageZoom(value, renderSurface.width / 2, renderSurface.height / 2)
+
+                    background: Rectangle {
+                        x: zoomSlider.leftPadding
+                        y: zoomSlider.topPadding + zoomSlider.availableHeight / 2 - height / 2
+                        width: zoomSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: Theme.palette.bgHover
+
+                        Rectangle {
+                            width: zoomSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: 2
+                            color: Theme.palette.primary
+                        }
+                    }
+
+                    handle: Rectangle {
+                        x: zoomSlider.leftPadding + zoomSlider.visualPosition * (zoomSlider.availableWidth - width)
+                        y: zoomSlider.topPadding + zoomSlider.availableHeight / 2 - height / 2
+                        implicitWidth: 12
+                        implicitHeight: 12
+                        radius: 6
+                        color: Theme.palette.primary
+                    }
                 }
 
                 Binding {
@@ -740,8 +787,8 @@ PanelWindow {
 
                 Text {
                     text: Math.round(viewer.imageZoom * 100) + "%"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     Layout.preferredWidth: 42
                 }
@@ -918,15 +965,13 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: viewer.statusError ? "#662222" : "#1c2c1c"
-                border.width: 1
-                border.color: viewer.statusError ? "#aa4444" : "#3f8f3f"
+                color: viewer.statusError ? Theme.palette.error : Theme.palette.success
 
                 Text {
                     anchors.centerIn: parent
                     text: viewer.statusMessage
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     font.bold: true
                 }
