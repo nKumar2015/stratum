@@ -2,10 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
-import Quickshell
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 Window {
@@ -367,7 +365,7 @@ Window {
 
                 const parsed = Object.values(dedupBySsid);
                 wifiMenu.hiddenDuplicateCount = Math.max(0, candidateCount - parsed.length);
-                parsed.sort(function(a, b) {
+                parsed.sort(function (a, b) {
                     const aConnected = a.inUse === "*";
                     const bConnected = b.inUse === "*";
 
@@ -505,8 +503,7 @@ Window {
     Rectangle {
         id: menuCard
         anchors.fill: parent
-        color: Theme.background
-        border.width: 1
+        color: Theme.palette.bgMain
         radius: 12
 
         MouseArea {
@@ -523,8 +520,8 @@ Window {
 
                 Text {
                     text: "Wi-Fi"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -537,9 +534,7 @@ Window {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 98
                     radius: 6
-                    color: wifiToggleMouse.containsMouse ? "#263244" : "#1b2333"
-                    border.color: Theme.outlineVariant
-                    border.width: 1
+                    color: wifiToggleMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     RowLayout {
                         anchors.centerIn: parent
@@ -547,15 +542,15 @@ Window {
 
                         Text {
                             text: wifiMenu.wifiEnabled ? "󰤨" : "󰤮"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
                             font.pixelSize: 13
                         }
 
                         Text {
                             text: wifiMenu.wifiEnabled ? "On" : "Off"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
                             font.pixelSize: 12
                             font.bold: true
                         }
@@ -574,25 +569,14 @@ Window {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 38
                     radius: 6
-                    color: closeMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                    border.color: Theme.outlineVariant
-                    border.width: 1
+                    color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
-                    StyledIconToolTip {
-                        visible: closeMouse.containsMouse
-                        text: "Close"
-                    }
-
-                    RowLayout {
+                    Text {
                         anchors.centerIn: parent
-                        spacing: 6
-
-                        Text {
-                            text: "󰅖"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 13
-                        }
+                        text: "󰅖"
+                        color: Theme.palette.error
+                        font.family: Theme.palette.font
+                        font.pixelSize: 13
                     }
 
                     MouseArea {
@@ -607,15 +591,13 @@ Window {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 170
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 radius: 8
-                border.color: Theme.outlineVariant
-                border.width: 1
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 10
-                    spacing: 6
+                    spacing: 0
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -623,8 +605,8 @@ Window {
 
                         Text {
                             text: wifiMenu.activeSsid ? "Connected to " + wifiMenu.activeSsid : "Not connected"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
                             font.pixelSize: 13
                             font.bold: true
                             elide: Text.ElideRight
@@ -637,10 +619,7 @@ Window {
                             Layout.preferredHeight: 30
                             Layout.preferredWidth: 38
                             radius: 6
-                            color: !isEnabled ? "#23232d" : (topDisconnectMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.outlineVariant
-                            border.width: 1
-                            opacity: isEnabled ? 1.0 : 0.5
+                            color: !isEnabled ? Theme.palette.bgDark : (topDisconnectMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
 
                             StyledIconToolTip {
                                 visible: topDisconnectMouse.containsMouse
@@ -650,9 +629,9 @@ Window {
                             Text {
                                 anchors.centerIn: parent
                                 text: "󰖪"
-                                color: Theme.on_Surface
-                                font.family: Theme.font
-                                font.pixelSize: 12
+                                color: Theme.palette.textMain
+                                font.family: Theme.palette.font
+                                font.pixelSize: 20
                             }
 
                             MouseArea {
@@ -670,10 +649,7 @@ Window {
                             Layout.preferredHeight: 30
                             Layout.preferredWidth: 38
                             radius: 6
-                            color: !isEnabled ? "#23232d" : (forgetMouse.containsMouse ? "#3a1f27" : "#2b1720")
-                            border.color: Theme.outlineVariant
-                            border.width: 1
-                            opacity: isEnabled ? 1.0 : 0.5
+                            color: !isEnabled ? Theme.palette.bgDark : (forgetMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
 
                             StyledIconToolTip {
                                 visible: forgetMouse.containsMouse
@@ -683,9 +659,9 @@ Window {
                             Text {
                                 anchors.centerIn: parent
                                 text: "󰆴"
-                                color: Theme.on_Surface
-                                font.family: Theme.font
-                                font.pixelSize: 12
+                                color: Theme.palette.textMain
+                                font.family: Theme.palette.font
+                                font.pixelSize: 14
                             }
 
                             MouseArea {
@@ -698,41 +674,85 @@ Window {
                         }
                     }
 
-                    Text {
-                        text: "State: " + (wifiMenu.activeState ? wifiMenu.activeState : (wifiMenu.wifiEnabled ? "idle" : "wifi disabled"))
-                        color: Theme.secondary
-                        font.family: Theme.font
-                        font.pixelSize: 12
+                    RowLayout {
+                        Text {
+                            text: "State:"
+                            color: Theme.palette.secondary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: wifiMenu.activeState ? wifiMenu.activeState : (wifiMenu.wifiEnabled ? "idle" : "wifi disabled")
+                            color: Theme.palette.tertiary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
                     }
 
-                    Text {
-                        text: "Signal: " + (wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A")
-                        color: Theme.secondary
-                        font.family: Theme.font
-                        font.pixelSize: 12
+                    RowLayout {
+                        Text {
+                            text: "Signal:"
+                            color: Theme.palette.secondary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A"
+                            color: wifiMenu.activeSignal >= 50 ? Theme.palette.success : Theme.palette.warning
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
                     }
 
-                    Text {
-                        text: "Security: " + (wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A")
-                        color: Theme.secondary
-                        font.family: Theme.font
-                        font.pixelSize: 12
+                    RowLayout {
+                        Text {
+                            text: "Security:"
+                            color: Theme.palette.secondary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A"
+                            color: Theme.palette.tertiary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
                     }
 
-                    Text {
-                        text: "IP: " + (wifiMenu.activeIp ? wifiMenu.activeIp : "N/A")
-                        color: Theme.secondary
-                        font.family: Theme.font
-                        font.pixelSize: 12
+                    RowLayout {
+                        Text {
+                            text: "IP:"
+                            color: Theme.palette.secondary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: wifiMenu.activeIp ? wifiMenu.activeIp : "N/A"
+                            color: Theme.palette.tertiary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
                     }
 
-                    Text {
-                        text: "Gateway: " + (wifiMenu.activeGateway ? wifiMenu.activeGateway : "N/A")
-                        color: Theme.secondary
-                        font.family: Theme.font
-                        font.pixelSize: 12
-                    }
+                    RowLayout {
+                        Text {
+                            text: "Gateway:"
+                            color: Theme.palette.secondary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
 
+                        Text {
+                            text: wifiMenu.activeGateway ? wifiMenu.activeGateway : "N/A"
+                            color: Theme.palette.tertiary
+                            font.family: Theme.palette.font
+                            font.pixelSize: 12
+                        }
+                    }
                 }
             }
 
@@ -745,25 +765,19 @@ Window {
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 38
                     radius: 6
-                    color: refreshMouse.containsMouse ? "#243126" : "#19261b"
-                    border.color: Theme.outlineVariant
-                    border.width: 1
+                    color: refreshMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                     StyledIconToolTip {
                         visible: refreshMouse.containsMouse
                         text: "Refresh"
                     }
 
-                    RowLayout {
+                    Text {
                         anchors.centerIn: parent
-                        spacing: 6
-
-                        Text {
-                            text: "󰑐"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
-                            font.pixelSize: 13
-                        }
+                        text: "󰑐"
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
+                        font.pixelSize: 13
                     }
 
                     MouseArea {
@@ -779,9 +793,9 @@ Window {
                 }
 
                 Text {
-                    text: wifiMenu.networks.length + " networks" + (wifiMenu.hiddenDuplicateCount > 0 ? "  •  " + wifiMenu.hiddenDuplicateCount + " hidden" : "")
-                    color: Theme.surfaceContainer
-                    font.family: Theme.font
+                    text: wifiMenu.networks.length + " networks" + (wifiMenu.hiddenDuplicateCount > 0 ? "  •  " + wifiMenu.hiddenDuplicateCount + " de-duplicated" : "")
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                 }
 
@@ -790,11 +804,10 @@ Window {
                     visible: wifiMenu.listLoading
 
                     Rectangle {
-                        width: 8
-                        height: 8
+                        implicitWidth: 8
+                        implicitHeight: 8
                         radius: 4
-                        color: Theme.primary
-                        opacity: 0.35
+                        color: Theme.palette.success
 
                         SequentialAnimation on opacity {
                             running: wifiMenu.listLoading
@@ -818,8 +831,8 @@ Window {
 
                     Text {
                         text: "Scanning"
-                        color: Theme.primary
-                        font.family: Theme.font
+                        color: Theme.palette.success
+                        font.family: Theme.palette.font
                         font.pixelSize: 11
                     }
                 }
@@ -833,10 +846,8 @@ Window {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: Theme.background
+                    color: Theme.palette.bgMain
                     radius: 8
-                    border.color: Theme.outlineVariant
-                    border.width: 1
 
                     ScrollView {
                         id: wifiNetworkScroll
@@ -853,16 +864,16 @@ Window {
                                 model: wifiMenu.networks
 
                                 delegate: Rectangle {
+                                    id: networkRow
                                     required property int index
                                     required property var modelData
-                                    id: networkRow
                                     property bool shouldAnimateOnCreate: wifiMenu.animateRowsOnNextLoad
 
                                     width: parent.width
                                     height: 56
                                     radius: 6
-                                    color: wifiMenu.selectedSsid === modelData.ssid ? Theme.surfaceVariant : Theme.surface
-                                    border.color: modelData.inUse === "*" ? Theme.primary : Theme.outlineVariant
+                                    color: wifiMenu.selectedSsid === modelData.ssid ? Theme.palette.bgHover : Theme.palette.bgWidget
+                                    border.color: modelData.inUse === "*" ? Theme.palette.borderActive : Theme.palette.borderInactive
                                     border.width: 1
                                     opacity: 1
 
@@ -938,18 +949,75 @@ Window {
 
                                             Text {
                                                 text: modelData.ssid
-                                                color: Theme.on_Surface
-                                                font.family: Theme.font
+                                                color: Theme.palette.textMain
+                                                font.family: Theme.palette.font
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
                                             }
 
-                                            Text {
-                                                text: "Signal " + wifiMenu.signalBars(modelData.signal) + "  •  " + (modelData.security ? modelData.security : "Open") + (modelData.inUse === "*" ? "  •  Connected" : "")
-                                                color: Theme.secondary
-                                                font.family: Theme.font
-                                                font.pixelSize: 10
-                                                elide: Text.ElideRight
+                                            RowLayout {
+                                                Layout.fillWidth: true
+
+                                                Text {
+                                                    text: "Signal:"
+                                                    color: Theme.palette.secondary
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 12
+                                                }
+
+                                                Text {
+                                                    text: wifiMenu.signalBars(modelData.signal) 
+                                                    color: modelData.signal >= 50 ? Theme.palette.success : Theme.palette.warning
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 10
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    text: "•"
+                                                    color: Theme.palette.textMain
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 10
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    text: "Security:"
+                                                    color: Theme.palette.secondary
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 12
+                                                }
+
+                                                Text {
+                                                    text: modelData.security ? modelData.security : "Open"
+                                                    color: Theme.palette.tertiary
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 10
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    text: "•"
+                                                    color: Theme.palette.textMain
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 10
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Text {
+                                                    text: "State:"
+                                                    color: Theme.palette.secondary
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 12
+                                                }
+
+                                                Text {
+                                                    text: modelData.inUse === "*" ? "Connected" : "Disconnected"
+                                                    color: modelData.inUse === "*" ? Theme.palette.success : Theme.palette.error
+                                                    font.family: Theme.palette.font
+                                                    font.pixelSize: 10
+                                                    elide: Text.ElideRight
+                                                }
                                             }
                                         }
 
@@ -969,17 +1037,15 @@ Window {
                             }
                         }
                     }
-
                 }
 
                 Rectangle {
                     Layout.preferredWidth: wifiMenu.hasSelection ? 250 : 0
                     Layout.fillHeight: true
-                    color: Theme.surface
+                    color: Theme.palette.bgWidget
                     radius: 8
-                    border.color: Theme.outlineVariant
+                    border.color: Theme.palette.borderActive
                     border.width: 1
-                    opacity: wifiMenu.hasSelection ? 1 : 0
                     clip: true
 
                     Behavior on Layout.preferredWidth {
@@ -1005,8 +1071,8 @@ Window {
 
                             Text {
                                 text: "Selected Network"
-                                color: Theme.on_Surface
-                                font.family: Theme.font
+                                color: Theme.palette.textMuted
+                                font.family: Theme.palette.font
                                 font.pixelSize: 12
                                 font.bold: true
                             }
@@ -1016,12 +1082,10 @@ Window {
                             }
 
                             Rectangle {
-                                Layout.preferredWidth: 64
+                                Layout.preferredWidth: 30
                                 Layout.preferredHeight: 28
                                 radius: 5
-                                color: sideCloseMouse.containsMouse ? "#3a1f27" : "#2b1720"
-                                border.color: Theme.outlineVariant
-                                border.width: 1
+                                color: sideCloseMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                                 RowLayout {
                                     anchors.centerIn: parent
@@ -1029,17 +1093,9 @@ Window {
 
                                     Text {
                                         text: "󰅖"
-                                        color: Theme.on_Surface
-                                        font.family: Theme.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Text {
-                                        text: "Hide"
-                                        color: Theme.on_Surface
-                                        font.family: Theme.font
-                                        font.pixelSize: 10
-                                        font.bold: true
+                                        color: Theme.palette.error
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 16
                                     }
                                 }
 
@@ -1051,7 +1107,6 @@ Window {
                                 }
                             }
                         }
-
 
                         Item {
                             id: ssidTextClip
@@ -1069,21 +1124,21 @@ Window {
                             Text {
                                 id: ssidTextA
                                 text: wifiMenu.selectedSsid
-                                color: Theme.on_Surface
-                                font.family: Theme.font
+                                color: Theme.palette.textMain
+                                font.family: Theme.palette.font
                                 font.pixelSize: 14
                                 font.bold: true
                                 elide: Text.ElideNone
                                 wrapMode: Text.NoWrap
                                 anchors.verticalCenter: parent.verticalCenter
                                 x: ssidTextClip.titleOverflow ? ssidTextClip.tickerOffset : 0
-                            } 
+                            }
 
                             Text {
                                 id: ssidTextB
                                 text: "|  " + wifiMenu.selectedSsid
-                                color: Theme.on_Surface
-                                font.family: Theme.font
+                                color: Theme.palette.textMain
+                                font.family: Theme.palette.font
                                 font.pixelSize: 14
                                 font.bold: true
                                 elide: Text.ElideNone
@@ -1091,7 +1146,7 @@ Window {
                                 anchors.verticalCenter: parent.verticalCenter
                                 x: ssidTextClip.tickerOffset + ssidTextClip.loopSpan
                                 visible: ssidTextClip.titleOverflow
-                            } 
+                            }
 
                             NumberAnimation {
                                 id: ssidMarquee
@@ -1116,39 +1171,65 @@ Window {
                             }
                         }
 
-                        Text {
-                            text: "Security: " + (wifiMenu.selectedSecurity ? wifiMenu.selectedSecurity : "Open")
-                            color: Theme.secondary
-                            font.family: Theme.font
-                            font.pixelSize: 11
+                        RowLayout {
+                            Text {
+                                text: "State:"
+                                color: Theme.palette.secondary
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                text: wifiMenu.selectedInUse === "*" ? "Connected" : "Disconnected"
+                                color: wifiMenu.selectedInUse === "*" ? Theme.palette.success : Theme.palette.error
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
                         }
 
-                        Text {
-                            text: "Signal: " + (wifiMenu.selectedSignal >= 0 ? wifiMenu.signalBars(wifiMenu.selectedSignal) : "N/A")
-                            color: Theme.secondary
-                            font.family: Theme.font
-                            font.pixelSize: 11
+                        RowLayout {
+                            Text {
+                                text: "Signal:"
+                                color: Theme.palette.secondary
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                text: wifiMenu.activeSignal >= 0 ? wifiMenu.signalBars(wifiMenu.activeSignal) : "N/A"
+                                color: wifiMenu.activeSignal >= 50 ? Theme.palette.success : Theme.palette.warning
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
                         }
 
-                        Text {
-                            text: "Status: " + (wifiMenu.selectedInUse === "*" ? "Connected" : "Available")
-                            color: Theme.secondary
-                            font.family: Theme.font
-                            font.pixelSize: 11
+                        RowLayout {
+                            Text {
+                                text: "Security:"
+                                color: Theme.palette.secondary
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                text: wifiMenu.activeSecurity ? wifiMenu.activeSecurity : "N/A"
+                                color: Theme.palette.tertiary
+                                font.family: Theme.palette.font
+                                font.pixelSize: 12
+                            }
                         }
 
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 1
-                            color: Theme.outlineVariant
-                            opacity: 0.8
+                            color: Theme.palette.secondary
                         }
 
                         Text {
                             visible: wifiMenu.shouldShowPasswordField()
                             text: "Network Password"
-                            color: Theme.on_Surface
-                            font.family: Theme.font
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
                             font.pixelSize: 11
                             font.bold: true
                         }
@@ -1160,15 +1241,15 @@ Window {
                             placeholderText: "Enter password"
                             echoMode: TextInput.Password
                             enabled: visible
-                            color: Theme.on_Surface
-                            placeholderTextColor: Theme.surfaceBright
-                            selectionColor: Theme.primary
-                            selectedTextColor: Theme.surfaceContainerLowest
+                            color: Theme.palette.textMain
+                            placeholderTextColor: Theme.palette.textMuted
+                            selectionColor: Theme.palette.textMain
+                            selectedTextColor: Theme.palette.primary
 
                             background: Rectangle {
                                 radius: 6
-                                color: passwordInput.enabled ? Theme.surface : Theme.surfaceDim
-                                border.color: passwordInput.activeFocus ? Theme.primary : Theme.outlineVariant
+                                color: passwordInput.enabled ? Theme.palette.bgMain : Theme.palette.bgDark
+                                border.color: passwordInput.activeFocus ? Theme.palette.borderActive : Theme.palette.borderInactive
                                 border.width: 1
 
                                 Behavior on border.color {
@@ -1186,10 +1267,9 @@ Window {
                             Layout.preferredHeight: 36
                             Layout.fillWidth: true
                             radius: 6
-                            color: !isEnabled ? "#23232d" : (connectMainMouse.containsMouse ? "#29503a" : "#1f3e2c")
-                            border.color: Theme.outlineVariant
+                            color: connectMainMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
+                            border.color: Theme.palette.borderInactive
                             border.width: 1
-                            opacity: isEnabled ? 1.0 : 0.6
 
                             RowLayout {
                                 anchors.centerIn: parent
@@ -1197,15 +1277,15 @@ Window {
 
                                 Text {
                                     text: "󰖩"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
+                                    color: Theme.palette.textMain
+                                    font.family: Theme.palette.font
                                     font.pixelSize: 13
                                 }
 
                                 Text {
-                                    text: wifiMenu.selectedInUse === "*" ? "Connected" : "Connect"
-                                    color: Theme.on_Surface
-                                    font.family: Theme.font
+                                    text: wifiMenu.selectedInUse === "*" ? "Disconnect" : "Connect"
+                                    color: Theme.palette.textMain
+                                    font.family: Theme.palette.font
                                     font.pixelSize: 12
                                     font.bold: true
                                 }
@@ -1215,8 +1295,7 @@ Window {
                                 id: connectMainMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                enabled: parent.isEnabled
-                                onClicked: wifiMenu.connectSelectedNetwork()
+                                onClicked: wifiMenu.selectedInUse === "*" ? wifiMenu.disconnectCurrentNetwork() : wifiMenu.connectSelectedNetwork()
                             }
                         }
 
@@ -1230,8 +1309,8 @@ Window {
             Text {
                 Layout.fillWidth: true
                 text: wifiMenu.statusMessage
-                color: Theme.tertiary
-                font.family: Theme.font
+                color: Theme.palette.tertiary
+                font.family: Theme.palette.font
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
                 visible: text.length > 0

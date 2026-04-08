@@ -1,10 +1,11 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -79,7 +80,6 @@ PanelWindow {
     }
 
     // ── Fetch: type + ssid + signal from nmcli ──────────────────────────
-    // Output format per active device: TYPE|DEVICE|SSID|SIGNAL|IP|GW
     Process {
         id: statusProc
         command: ["stratum-cli", "wifi", "state", "--hover"]
@@ -111,17 +111,18 @@ PanelWindow {
                     const rawSig = String(entry.signal || "").trim();
                     const parsedSignal = rawSig.length > 0 ? parseInt(rawSig) : -1;
                     parsed.push({
-                        type:      type,
-                        ssid:      String(entry.connection || ""),
+                        type: type,
+                        ssid: String(entry.connection || ""),
                         signalPct: isNaN(parsedSignal) ? -1 : parsedSignal,
                         ipAddress: String(entry.ip_address || ""),
-                        gateway:   String(entry.gateway || "")
+                        gateway: String(entry.gateway || "")
                     });
                 }
 
                 // Sort: ethernet first, then wifi
                 parsed.sort((a, b) => {
-                    if (a.type === b.type) return 0;
+                    if (a.type === b.type)
+                        return 0;
                     return a.type === "ethernet" ? -1 : 1;
                 });
                 hoverMenu.connections = parsed;
@@ -162,8 +163,8 @@ PanelWindow {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.background
-        border.color: Theme.outlineVariant
+        color: Theme.palette.bgMain
+        border.color: Theme.palette.borderActive
         border.width: 1
         radius: 10
 
@@ -186,19 +187,21 @@ PanelWindow {
 
                 Text {
                     text: "  Network"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.textMain
                     font.pixelSize: 13
                     font.bold: true
                 }
 
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: "󰅖"
-                    color: closeHover.containsMouse ? Theme.error : Theme.on_Surface
+                    color: Theme.palette.error
                     font.pixelSize: 13
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
 
                     MouseArea {
                         id: closeHover
@@ -207,33 +210,36 @@ PanelWindow {
                         onClicked: GlobalState.showWifiHoverMenu = false
                     }
 
-                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: 100
+                        }
+                    }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             // ── Loading ────────────────────────────────────────────────
             Text {
                 visible: hoverMenu.loading
                 text: "Loading..."
-                color: Theme.on_Surface
-                opacity: 0.45
+                color: Theme.palette.textMuted
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             // ── Error ──────────────────────────────────────────────────
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length > 0
                 text: hoverMenu.errorMsg
-                color: Theme.error
+                color: Theme.palette.error
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
@@ -242,10 +248,10 @@ PanelWindow {
             Text {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.connections.length === 0
                 text: "Not connected"
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 opacity: 0.45
                 font.pixelSize: 12
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             // ── One block per active connection ────────────────────────
@@ -253,6 +259,7 @@ PanelWindow {
                 model: hoverMenu.connections
 
                 delegate: ColumnLayout {
+                    id: connectionItem
                     required property var modelData
                     required property int index
 
@@ -261,11 +268,10 @@ PanelWindow {
 
                     // Divider between connections
                     Rectangle {
-                        visible: index > 0
+                        visible: connectionItem.index > 0
                         Layout.fillWidth: true
-                        height: 1
-                        color: Theme.outlineVariant
-                        opacity: 0.5
+                        implicitHeight: 1
+                        color: Theme.palette.secondary
                     }
 
                     // Connection type + name row
@@ -274,17 +280,17 @@ PanelWindow {
                         spacing: 8
 
                         Text {
-                            text: modelData.type === "ethernet" ? "\udb80\ude00" : "󰤨"
-                            color: Theme.primary
+                            text: connectionItem.modelData.type === "ethernet" ? "\udb80\ude00" : "󰤨"
+                            color: Theme.palette.primary
                             font.pixelSize: 16
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: modelData.ssid.length > 0 ? modelData.ssid : (modelData.type === "ethernet" ? "Ethernet" : "Unknown")
-                            color: Theme.on_Surface
+                            text: connectionItem.modelData.ssid.length > 0 ? connectionItem.modelData.ssid : (connectionItem.modelData.type === "ethernet" ? "Ethernet" : "Unknown")
+                            color: Theme.palette.primary
                             font.pixelSize: 13
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             font.bold: true
                             elide: Text.ElideRight
                             Layout.fillWidth: true
@@ -292,85 +298,82 @@ PanelWindow {
 
                         // Signal bars (wifi only)
                         Text {
-                            visible: modelData.type === "wifi" && modelData.signalPct >= 0
-                            text: hoverMenu.signalBars(modelData.signalPct)
-                            color: modelData.signalPct >= 50 ? Theme.secondary : Theme.tertiary
+                            visible: connectionItem.modelData.type === "wifi" && connectionItem.modelData.signalPct >= 0
+                            text: hoverMenu.signalBars(connectionItem.modelData.signalPct)
+                            color: connectionItem.modelData.signalPct >= 50 ? Theme.palette.success : Theme.palette.warning
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             font.letterSpacing: -1
                         }
                     }
 
                     // IP address row
                     RowLayout {
-                        visible: modelData.ipAddress.length > 0
+                        visible: connectionItem.modelData.ipAddress.length > 0
                         Layout.fillWidth: true
                         spacing: 6
 
                         Text {
                             text: "IP"
-                            color: Theme.on_Surface
-                            opacity: 0.5
+                            color: Theme.palette.tertiary
                             font.pixelSize: 11
-                            font.family: Theme.font
-                            font.bold: true
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: modelData.ipAddress
-                            color: Theme.on_Surface
+                            text: connectionItem.modelData.ipAddress
+                            color: Theme.palette.tertiary
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             elide: Text.ElideRight
                             Layout.fillWidth: true
+                            font.bold: true
                         }
                     }
 
                     // Gateway row
                     RowLayout {
-                        visible: modelData.gateway.length > 0
+                        visible: connectionItem.modelData.gateway.length > 0
                         Layout.fillWidth: true
                         spacing: 6
 
                         Text {
                             text: "GW"
-                            color: Theme.on_Surface
-                            opacity: 0.5
+                            color: Theme.palette.tertiary
                             font.pixelSize: 11
-                            font.family: Theme.font
-                            font.bold: true
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: modelData.gateway
-                            color: Theme.on_Surface
+                            text: connectionItem.modelData.gateway
+                            color: Theme.palette.tertiary
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             elide: Text.ElideRight
                             Layout.fillWidth: true
+                            font.bold: true
                         }
                     }
 
                     // Signal percentage row (wifi only)
                     RowLayout {
-                        visible: modelData.type === "wifi" && modelData.signalPct >= 0
+                        visible: connectionItem.modelData.type === "wifi" && connectionItem.modelData.signalPct >= 0
                         Layout.fillWidth: true
                         spacing: 6
 
                         Text {
                             text: "Signal"
-                            color: Theme.on_Surface
-                            opacity: 0.5
+                            color: Theme.palette.tertiary
                             font.pixelSize: 11
-                            font.family: Theme.font
-                            font.bold: true
+                            font.family: Theme.palette.font
                         }
 
                         Text {
-                            text: modelData.signalPct + "%"
-                            color: modelData.signalPct >= 50 ? Theme.secondary : Theme.tertiary
+                            text: connectionItem.modelData.signalPct + "%"
+                            color: connectionItem.modelData.signalPct >= 50 ? Theme.palette.success : Theme.palette.warning
                             font.pixelSize: 11
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
+                            font.bold: true
                         }
                     }
                 }
@@ -378,17 +381,16 @@ PanelWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 1
-                color: Theme.outlineVariant
+                implicitHeight: 1
+                color: Theme.palette.secondary
             }
 
             // ── Footer ─────────────────────────────────────────────────
             Text {
                 text: "Open full settings →"
-                color: fullMenuHover.containsMouse ? Theme.primary : Theme.on_Surface
+                color: fullMenuHover.containsMouse ? Theme.palette.textMain : Theme.palette.textMuted
                 font.pixelSize: 11
-                font.family: Theme.font
-                opacity: fullMenuHover.containsMouse ? 1.0 : 0.6
+                font.family: Theme.palette.font
                 Layout.bottomMargin: 0
 
                 MouseArea {
@@ -402,7 +404,11 @@ PanelWindow {
                     }
                 }
 
-                Behavior on color { ColorAnimation { duration: 100 } }
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 100
+                    }
+                }
             }
         }
     }

@@ -738,7 +738,6 @@ Window {
         id: menuCard
         anchors.fill: parent
         color: Theme.palette.bgMain
-        border.width: 1
         radius: 12
 
         MouseArea {
@@ -776,7 +775,6 @@ Window {
                         spacing: 6
 
                         Text {
-                            id: toggleIcon
                             text: bluetoothMenu.pendingAction === "toggle" ? "󰔟" : (bluetoothMenu.bluetoothEnabled ? "󰂯" : "󰂲")
                             color: Theme.palette.textMain
                             font.family: Theme.palette.font
@@ -1003,8 +1001,8 @@ Window {
                     visible: bluetoothMenu.listLoading
 
                     Rectangle {
-                        width: 8
-                        height: 8
+                        implicitWidth: 8
+                        implicitHeight: 8
                         radius: 4
                         color: Theme.palette.success
 
@@ -1148,7 +1146,7 @@ Window {
                                             Text {
                                                 text: modelData.name
                                                 color: Theme.palette.textMain
-                                                font.family: Theme.font
+                                                font.family: Theme.palette.font
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
                                             }
