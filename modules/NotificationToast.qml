@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Widgets
 
-import "../theme"
+import "../globals"
 
 Item {
     id: root
@@ -41,9 +43,9 @@ Item {
     readonly property bool visualLoading: hasImageSource && visualImage.status === Image.Loading
     readonly property bool visualReady: (hasImageSource && visualImage.status === Image.Ready) || (!hasImageSource && hasAppIconSource)
     readonly property string iconGlyph: urgency >= 2 ? "" : (urgency <= 0 ? "" : "")
-    readonly property color accentColor: urgency >= 2 ? Theme.error : (urgency <= 0 ? Theme.tertiary : Theme.primary)
-    readonly property color accentContainerColor: urgency >= 2 ? Theme.errorContainer : (urgency <= 0 ? Theme.tertiaryContainer : Theme.primaryContainer)
-    readonly property color onAccentContainerColor: urgency >= 2 ? Theme.on_ErrorContainer : (urgency <= 0 ? Theme.on_TertiaryContainer : Theme.on_PrimaryContainer)
+    readonly property color accentColor: urgency >= 2 ? Theme.palette.error : (urgency <= 0 ? Theme.palette.tertiary : Theme.palette.primary)
+    readonly property color accentContainerColor: urgency >= 2 ? Theme.palette.error : (urgency <= 0 ? Theme.palette.success : Theme.palette.warning)
+    readonly property color onAccentContainerColor: Theme.palette.textMain
     readonly property string inlineReplyPreviewText: String(notification.lastInlineReplyText || "")
     readonly property var interactiveActions: {
         const actions = notification.actions || [];
@@ -175,9 +177,9 @@ Item {
         topRightRadius: 12
         bottomLeftRadius: 0
         bottomRightRadius: 12
-        color: Theme.surfaceContainerHigh
+        color: Theme.palette.bgMain
         border.width: 1
-        border.color: root.hovered ? Theme.outline : Theme.outlineVariant
+        border.color: root.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
         opacity: root.showDismissedState && root.dismissed ? 0.72 : 1.0
 
         Behavior on border.color {
@@ -223,9 +225,9 @@ Item {
                 Layout.preferredWidth: 20
                 Layout.preferredHeight: 20
                 radius: 5
-                color: Theme.surfaceContainerHighest
+                color: Theme.palette.bgMain
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.borderInactive
                 visible: root.visualReady || root.visualLoading
 
                 Image {
@@ -251,25 +253,25 @@ Item {
                 text: root.iconGlyph
                 color: root.accentColor
                 font.pixelSize: 16
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 visible: !root.visualReady
             }
 
             Text {
                 Layout.fillWidth: true
                 text: String(notification.summary || "Notification")
-                color: Theme.on_Surface
+                color: Theme.palette.textMain
                 elide: Text.ElideRight
                 font.pixelSize: 12
                 font.bold: true
-                font.family: Theme.font
+                font.family: Theme.palette.font
             }
 
             Text {
                 text: String(notification.appName || "")
-                color: Theme.on_SurfaceVariant
+                color: Theme.palette.textMain
                 font.pixelSize: 10
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 visible: text.length > 0
             }
 
@@ -277,16 +279,16 @@ Item {
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 radius: 9
-                color: dismissHover.containsMouse ? Theme.surfaceContainer : Theme.surfaceContainerHighest
+                color: dismissHover.containsMouse ? Theme.palette.bgHover : Theme.palette.bgMain
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
                     text: "✕"
-                    color: Theme.on_SurfaceVariant
+                    color: Theme.palette.error
                     font.pixelSize: 10
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
                 MouseArea {
@@ -301,22 +303,22 @@ Item {
         Text {
             Layout.fillWidth: true
             text: String(notification.body || "")
-            color: Theme.on_Surface
+            color: Theme.palette.textMain
             wrapMode: Text.Wrap
             maximumLineCount: compact ? 3 : 6
             elide: Text.ElideRight
             font.pixelSize: 11
-            font.family: Theme.font
+            font.family: Theme.palette.font
             visible: text.length > 0
         }
 
         Text {
             Layout.fillWidth: true
             text: String(notification.category || "")
-            color: Theme.on_SurfaceVariant
+            color: Theme.palette.textMain
             elide: Text.ElideRight
             font.pixelSize: 10
-            font.family: Theme.font
+            font.family: Theme.palette.font
             visible: text.length > 0
         }
 
@@ -329,9 +331,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 6
                 radius: 3
-                color: Theme.surfaceContainerHighest
+                color: Theme.palette.bgMain
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.borderInactive
 
                 Rectangle {
                     anchors.top: parent.top
@@ -346,9 +348,9 @@ Item {
             Text {
                 Layout.alignment: Qt.AlignRight
                 text: root.progressValue + "%"
-                color: Theme.on_SurfaceVariant
+                color: Theme.palette.textMain
                 font.pixelSize: 10
-                font.family: Theme.font
+                font.family: Theme.palette.font
                 visible: !root.compact
             }
         }
@@ -376,7 +378,7 @@ Item {
                         color: root.onAccentContainerColor
                         font.pixelSize: 10
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     MouseArea {
@@ -399,9 +401,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.surfaceContainerHighest
+                color: Theme.palette.bgMain
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.borderInactive
 
                 TextInput {
                     id: replyInput
@@ -409,11 +411,11 @@ Item {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
-                    color: Theme.on_Surface
-                    selectionColor: Theme.primary
-                    selectedTextColor: Theme.on_Primary
+                    color: Theme.palette.bgWidget
+                    selectionColor: Theme.palette.primary
+                    selectedTextColor: Theme.palette.textMain
                     font.pixelSize: 11
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     clip: true
 
                     property string placeholderText: String(notification.inlineReplyPlaceholder || "Reply...")
@@ -433,10 +435,10 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 8
                     text: replyInput.placeholderText
-                    color: Theme.on_SurfaceVariant
+                    color: Theme.palette.textMuted
                     visible: replyInput.text.length === 0 && !replyInput.activeFocus
                     font.pixelSize: 10
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
             }
 
@@ -453,7 +455,7 @@ Item {
                     color: root.onAccentContainerColor
                     font.pixelSize: 10
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                 }
 
                 MouseArea {
@@ -482,9 +484,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.surfaceContainerHighest
+                color: Theme.palette.bgMain
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.borderInactive
 
                 RowLayout {
                     anchors.fill: parent
@@ -494,20 +496,20 @@ Item {
 
                     Text {
                         text: "Reply:"
-                        color: Theme.on_SurfaceVariant
+                        color: Theme.palette.textMain
                         font.pixelSize: 10
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     Text {
                         Layout.fillWidth: true
                         text: root.inlineReplyPreviewText.length > 0 ? root.inlineReplyPreviewText : "(no reply sent)"
-                        color: Theme.on_Surface
+                        color: Theme.palette.textMain
                         elide: Text.ElideRight
                         wrapMode: Text.NoWrap
                         clip: true
                         font.pixelSize: 10
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
                 }
             }
