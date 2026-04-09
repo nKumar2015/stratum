@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 
-import "../theme"
+import "../globals"
 
 Rectangle {
     id: root
@@ -53,10 +53,10 @@ Rectangle {
     }
 
     implicitHeight: calendarColumn.implicitHeight + 8
-    color: Theme.background
+    color: Theme.palette.bgMain
     radius: 10
     border.width: 1
-    border.color: Theme.outlineVariant
+    border.color: Theme.palette.borderInactive
 
     ColumnLayout {
         id: calendarColumn
@@ -66,8 +66,8 @@ Rectangle {
 
         Text {
             text: root.title.length > 0 ? root.title : "Calendar"
-            color: Theme.on_Surface
-            font.family: Theme.font
+            color: Theme.palette.textMain
+            font.family: Theme.palette.font
             font.pixelSize: 16
             font.bold: true
             horizontalAlignment: Text.AlignHCenter
@@ -95,7 +95,7 @@ Rectangle {
                     width: (root.calendarCellWidth * 7) + (6 * root.calendarWeekdayGap)
                     height: root.calendarWeekdayHeight
                     radius: 8
-                    color: Theme.background
+                    color: Theme.palette.bgWidget
                     clip: true
 
                     Rectangle {
@@ -103,7 +103,7 @@ Rectangle {
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         height: 1
-                        color: Theme.outline
+                        color: Theme.palette.secondary
                     }
 
                     Row {
@@ -122,8 +122,8 @@ Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: 3
                                     text: root.weekdayLabel(modelData)
-                                    color: Theme.on_Background
-                                    font.family: Theme.font
+                                    color: Theme.palette.textMain
+                                    font.family: Theme.palette.font
                                     font.pixelSize: 11
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
@@ -169,15 +169,15 @@ Rectangle {
                             implicitWidth: root.calendarCellWidth
                             implicitHeight: root.calendarCellHeight
                             radius: 6
-                            color: isToday ? Theme.primary : Theme.background
+                            color: inCurrentMonth ? Theme.palette.bgWidget : Theme.palette.bgMain
                             border.width: isToday ? 1 : 0
-                            border.color: Theme.primary
+                            border.color: isToday ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                             Text {
                                 anchors.centerIn: parent
                                 text: String(dayValue)
-                                color: isToday ? Theme.background : (inCurrentMonth ? Theme.on_Surface : Theme.surfaceContainerLow)
-                                font.family: Theme.font
+                                color: inCurrentMonth ? Theme.palette.textMain : Theme.palette.textMuted
+                                font.family: Theme.palette.font
                                 font.pixelSize: 12
                                 font.bold: isToday
                             }
@@ -199,20 +199,22 @@ Rectangle {
                 Layout.preferredWidth: 38
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: prevYearButton.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
-                    text: "<<"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    text: "󰅁󰅁"
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 MouseArea {
+                    id: prevYearButton
+                    hoverEnabled: true
                     anchors.fill: parent
                     onClicked: {
                         root.previousYearRequested();
@@ -225,20 +227,22 @@ Rectangle {
                 Layout.preferredWidth: 38
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: prevMonthButton.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
-                    text: "<"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    text: "󰅁"
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 12
                     font.bold: true
                 }
 
                 MouseArea {
+                    id: prevMonthButton
+                    hoverEnabled: true
                     anchors.fill: parent
                     onClicked: {
                         root.previousMonthRequested();
@@ -251,20 +255,22 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: todayButton.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
                     text: "Today"
-                    color: Theme.primary
-                    font.family: Theme.font
+                    color: Theme.palette.secondary
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 MouseArea {
+                    id: todayButton
+                    hoverEnabled: true
                     anchors.fill: parent
                     onClicked: {
                         root.todayRequested();
@@ -277,20 +283,22 @@ Rectangle {
                 Layout.preferredWidth: 38
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: nextMonthButton.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
-                    text: ">"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    text: "󰅂"
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 12
                     font.bold: true
                 }
 
                 MouseArea {
+                    id: nextMonthButton
+                    hoverEnabled: true
                     anchors.fill: parent
                     onClicked: {
                         root.nextMonthRequested();
@@ -303,20 +311,22 @@ Rectangle {
                 Layout.preferredWidth: 38
                 Layout.preferredHeight: 28
                 radius: 6
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: nextYearButton.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive
 
                 Text {
                     anchors.centerIn: parent
-                    text: ">>"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    text: "󰅂󰅂"
+                    color: Theme.palette.textMain
+                    font.family: Theme.palette.font
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 MouseArea {
+                    id: nextYearButton
+                    hoverEnabled: true
                     anchors.fill: parent
                     onClicked: {
                         root.nextYearRequested();

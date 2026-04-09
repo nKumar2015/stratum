@@ -4,7 +4,6 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -15,14 +14,7 @@ PanelWindow {
 
     property string calendarTitle: ""
     property var calendarWeekdays: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
-    property var calendarRows: [
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0]
-    ]
+    property var calendarRows: [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]]
     property int todayDay: -1
     property int selectedCalendarYear: (new Date()).getFullYear()
     property int selectedCalendarMonth: (new Date()).getMonth() + 1
@@ -146,33 +138,19 @@ PanelWindow {
     }
 
     function metricColor(percent) {
-        if (percent >= 85)
-            return Theme.error;
-        if (percent >= 65)
-            return Theme.tertiary;
-        return Theme.secondary;
+        if (percent >= 90)
+            return Theme.palette.error;
+        if (percent >= 75)
+            return Theme.palette.warning;
+        return Theme.palette.success;
     }
 
     function resetCalendarRows() {
-        calendarRows = [
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0]
-        ];
+        calendarRows = [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]];
     }
 
     function createEmptyCalendarRows() {
-        return [
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0]
-        ];
+        return [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]];
     }
 
     function calendarCacheKey(year, month) {
@@ -316,13 +294,7 @@ PanelWindow {
         calendarPrefetchYear = next.year;
         calendarPrefetchMonth = next.month;
         calendarPrefetchRunning = true;
-        calendarPrefetchProc.command = [
-            "stratum-cli",
-            "dashboard",
-            "calendar",
-            String(calendarPrefetchYear),
-            String(calendarPrefetchMonth)
-        ];
+        calendarPrefetchProc.command = ["stratum-cli", "dashboard", "calendar", String(calendarPrefetchYear), String(calendarPrefetchMonth)];
         calendarPrefetchProc.running = true;
     }
 
@@ -344,7 +316,12 @@ PanelWindow {
                 return;
         }
 
-        calendarPrefetchQueue = calendarPrefetchQueue.concat([{ year: year, month: month }]);
+        calendarPrefetchQueue = calendarPrefetchQueue.concat([
+            {
+                year: year,
+                month: month
+            }
+        ]);
         runCalendarPrefetch();
     }
 
@@ -460,13 +437,7 @@ PanelWindow {
     function refreshDashboard() {
         loading = true;
         lastError = "";
-        dataProc.command = [
-            "stratum-cli",
-            "dashboard",
-            "all",
-            String(selectedCalendarYear),
-            String(selectedCalendarMonth)
-        ];
+        dataProc.command = ["stratum-cli", "dashboard", "all", String(selectedCalendarYear), String(selectedCalendarMonth)];
         dataProc.running = true;
     }
 
@@ -546,7 +517,7 @@ PanelWindow {
 
     Process {
         id: dataProc
-        command: ["stratum-cli", "dashboard", "all", String(selectedCalendarYear), String(selectedCalendarMonth)]
+        command: ["stratum-cli", "dashboard", "all", String(dashboard.selectedCalendarYear), String(dashboard.selectedCalendarMonth)]
         running: false
         stdout: StdioCollector {
             onStreamFinished: {
@@ -615,10 +586,10 @@ PanelWindow {
         anchors.top: parent.top
         anchors.topMargin: GlobalState.showDashboardMenu ? 12 : -height - 18
 
-        color: Theme.background
+        color: Theme.palette.bgMain
         radius: 14
         border.width: 1
-        border.color: Theme.outlineVariant
+        border.color: Theme.palette.borderInactive
 
         Behavior on anchors.topMargin {
             NumberAnimation {
@@ -641,12 +612,14 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: visible ? implicitHeight : 0
                 Layout.minimumHeight: visible ? implicitHeight : 0
-                Item { Layout.fillWidth: true }
+                Item {
+                    Layout.fillWidth: true
+                }
 
                 Text {
                     text: dashboard.lastError
-                    color: Theme.error
-                    font.family: Theme.font
+                    color: Theme.palette.error
+                    font.family: Theme.palette.font
                     font.pixelSize: 10
                     elide: Text.ElideRight
                     Layout.maximumWidth: 280
@@ -695,16 +668,16 @@ PanelWindow {
                     calendarWeekdayHeight: dashboard.calendarWeekdayHeight
                     calendarWeekdayGap: dashboard.calendarWeekdayGap
                     calendarWeekdayToDatesGap: dashboard.calendarWeekdayToDatesGap
-                    gridDayValueFn: function(index) {
+                    gridDayValueFn: function (index) {
                         return dashboard.gridDayValue(index);
                     }
-                    gridCellCurrentMonthFn: function(index) {
+                    gridCellCurrentMonthFn: function (index) {
                         return dashboard.gridCellCurrentMonth(index);
                     }
-                    gridCellIsTodayFn: function(index) {
+                    gridCellIsTodayFn: function (index) {
                         return dashboard.gridCellIsToday(index);
                     }
-                    weekdayLabelFn: function(label) {
+                    weekdayLabelFn: function (label) {
                         return dashboard.weekdayLabel(label);
                     }
                     onPreviousYearRequested: dashboard.changeCalendarYear(-1)
@@ -736,5 +709,4 @@ PanelWindow {
             }
         }
     }
-
 }

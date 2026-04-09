@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 
-import "../theme"
+import "../globals"
 
 Rectangle {
     id: root
@@ -18,18 +18,18 @@ Rectangle {
     property int storagePercent: 0
 
     function metricColor(percent) {
-        if (percent >= 85)
-            return Theme.error;
-        if (percent >= 65)
-            return Theme.tertiary;
-        return Theme.secondary;
+        if (percent >= 90)
+            return Theme.palette.error;
+        if (percent >= 75)
+            return Theme.palette.warning;
+        return Theme.palette.success;
     }
 
     implicitHeight: performanceColumn.implicitHeight + 20
-    color: Theme.background
+    color: Theme.palette.bgMain
     radius: 10
     border.width: 1
-    border.color: Theme.outlineVariant
+    border.color: Theme.palette.borderInactive
 
     ColumnLayout {
         id: performanceColumn
@@ -39,8 +39,8 @@ Rectangle {
 
         Text {
             text: "Performance"
-            color: Theme.on_Background
-            font.family: Theme.font
+            color: Theme.palette.textMain
+            font.family: Theme.palette.font
             font.pixelSize: 14
             font.bold: true
         }
@@ -49,9 +49,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 70
             radius: 8
-            color: Theme.background
+            color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.outlineVariant
+            border.color: Theme.palette.borderInative
 
             ColumnLayout {
                 anchors.fill: parent
@@ -63,15 +63,15 @@ Rectangle {
 
                     Text {
                         text: ""
-                        color: Theme.primary
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 11
                     }
 
                     Text {
                         text: "CPU"
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -80,7 +80,7 @@ Rectangle {
                 Text {
                     text: String(root.cpuPercent) + "%"
                     color: root.metricColor(root.cpuPercent)
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     font.pixelSize: 17
                     font.bold: true
                 }
@@ -96,9 +96,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 70
             radius: 8
-            color: Theme.background
+            color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.outlineVariant
+            border.color: Theme.palette.boderInactive
 
             ColumnLayout {
                 anchors.fill: parent
@@ -110,31 +110,31 @@ Rectangle {
 
                     Text {
                         text: "󰢮"
-                        color: Theme.primary
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 11
                     }
 
                     Text {
                         text: "GPU"
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
                         font.bold: true
                     }
 
                     Text {
                         text: "|"
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
                     }
 
                     Text {
                         Layout.fillWidth: true
                         text: root.gpuSource
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 9
                         elide: Text.ElideRight
                         font.bold: true
@@ -143,8 +143,8 @@ Rectangle {
 
                 Text {
                     text: root.gpuPercentText === "N/A" ? "N/A" : root.gpuPercentText + "%"
-                    color: root.gpuPercentText === "N/A" ? Theme.on_Background : Theme.secondary
-                    font.family: Theme.font
+                    color: root.gpuPercentText === "N/A" ? Theme.palette.textMuted : root.metricColor(root.gpuPercentValue)
+                    font.family: Theme.palette.font
                     font.pixelSize: 17
                     font.bold: true
                 }
@@ -152,7 +152,7 @@ Rectangle {
                 DashboardMetricProgressBar {
                     visible: root.gpuPercentText !== "N/A"
                     percent: root.gpuPercentValue
-                    fillColor: Theme.secondary
+                    fillColor: metricColor(root.gpuPercentValue)
                 }
             }
         }
@@ -161,9 +161,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 82
             radius: 8
-            color: Theme.background
+            color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.outlineVariant
+            border.color: Theme.palette.borderInactive
 
             ColumnLayout {
                 anchors.fill: parent
@@ -175,15 +175,15 @@ Rectangle {
 
                     Text {
                         text: "󰍛"
-                        color: Theme.primary
+                        color: Theme.palette.textMain
                         font.family: Theme.font
                         font.pixelSize: 11
                     }
 
                     Text {
                         text: "RAM"
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -191,8 +191,8 @@ Rectangle {
 
                 Text {
                     text: root.ramUsedGiB.toFixed(1) + " / " + root.ramTotalGiB.toFixed(1) + " GiB"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: root.metricColor(root.ramPercent)
+                    font.family: Theme.palette.font
                     font.pixelSize: 12
                 }
 
@@ -215,9 +215,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 82
             radius: 8
-            color: Theme.background
+            color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.outlineVariant
+            border.color: Theme.palette.borderInactive
 
             ColumnLayout {
                 anchors.fill: parent
@@ -229,15 +229,15 @@ Rectangle {
 
                     Text {
                         text: ""
-                        color: Theme.primary
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 11
                     }
 
                     Text {
                         text: "Storage"
-                        color: Theme.on_Background
-                        font.family: Theme.font
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -245,15 +245,15 @@ Rectangle {
 
                 Text {
                     text: root.storageUsedGiB.toFixed(1) + " / " + root.storageTotalGiB.toFixed(1) + " GiB"
-                    color: Theme.on_Surface
-                    font.family: Theme.font
+                    color: root.metricColor(root.storagePercent)
+                    font.family: Theme.palette.font
                     font.pixelSize: 12
                 }
 
                 Text {
                     text: String(root.storagePercent) + "%"
                     color: root.metricColor(root.storagePercent)
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }
