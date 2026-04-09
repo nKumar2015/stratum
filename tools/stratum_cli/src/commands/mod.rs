@@ -8,4 +8,5 @@ pub mod osd;
 pub mod portal_save_file;
 pub mod screenshot_menu;
 pub mod screenshot_post;
+pub mod theme;
 pub mod wifi;

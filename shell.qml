@@ -23,6 +23,7 @@ ShellRoot {
     AudioHoverMenu {}
     BatteryHoverMenu {}
     DashboardMenu {}
+    ThemeSwitcher {}
     Variants {
         model: Quickshell.screens
 

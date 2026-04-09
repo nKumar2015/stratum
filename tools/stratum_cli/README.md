@@ -37,6 +37,7 @@ Supported IPC targets:
 - `powermenu`
 - `lockscreen`
 - `screenshot`
+- `theme`
 - `dashboard` (only `open|close|toggle`; data commands remain under dashboard subcommands)
 
 ## Command Groups and Effects
@@ -63,11 +64,23 @@ Supported IPC targets:
   - Functions: `open`, `close`, `toggle`
   - Example: `stratum-cli dashboard toggle`
 
+- `theme`
+  - Functions: `open`, `close`, `toggle`, `set <themeName>`
+  - Example: `stratum-cli theme open`
+  - Example: `stratum-cli theme set TokyoNight`
+
 Notes:
 
 - `dashboard` also has non-IPC data subcommands (`all`, `calendar`, `music`, `performance`).
+- `theme` also has a non-IPC data subcommand (`list`).
 - `stratum-cli dashboard open|close|toggle` routes to shell IPC.
 - `stratum-cli dashboard all|calendar|music|performance` keeps existing data behavior.
+- `stratum-cli theme open|close|toggle|set` routes to shell IPC.
+- `stratum-cli theme list` returns available themes in human-readable format.
+- All help commands show comprehensive subcommands including IPC targets:
+  - `stratum-cli <command> help`
+  - `stratum-cli <command> --help`
+  - `stratum-cli <command>`
 
 ## `audio`
 
@@ -106,6 +119,24 @@ Notes:
   - `scan`: starts a short scan window.
 - Side effects:
   - Pairing/trusting/removing devices, power toggle, and scan operations all mutate Bluetooth state.
+
+## `theme`
+
+- List available themes and control theme switching via IPC.
+- Subcommands:
+  - `list`: returns available themes in human-readable format.
+  - `open`: opens the theme switcher UI panel (IPC).
+  - `close`: closes the theme switcher UI panel (IPC).
+  - `toggle`: toggles theme switcher UI panel visibility (IPC).
+  - `set <themeName>`: switches to specified theme directly (IPC).
+- Side effects:
+  - `list` is read-only.
+  - `set` and IPC functions mutate active UI theme state.
+- Available themes: `Carbon`, `Gruvbox`, `RosePine`, `TokyoNight`.
+- Examples:
+  - `stratum-cli theme list` → lists available themes
+  - `stratum-cli theme set RosePine` → switches to RosePine theme
+  - `stratum-cli theme help` → shows all available commands with IPC targets
 
 ## `dashboard`
 

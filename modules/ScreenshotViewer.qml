@@ -4,15 +4,27 @@ import QtQuick
 import QtQuick.Layouts
 import QtCore
 import QtQuick.Controls
+import QtQuick.Window
 import Quickshell
-import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
 
-PanelWindow {
+Window {
     id: viewer
+
+    title: "Screenshot Viewer"
+    flags: Qt.Window
+    width: 1200
+    height: 820
+    minimumWidth: 820
+    minimumHeight: 560
+
+    onClosing: function (close) {
+        close.accepted = false;
+        viewer.closeViewer();
+    }
 
     property bool visibleState: false
     property string captureMode: "window"
@@ -46,22 +58,8 @@ PanelWindow {
     readonly property int annotatedExportPollMs: 16
     readonly property int annotatedExportMaxRetries: 60
 
-    anchors {
-        top: true
-        bottom: true
-        left: true
-        right: true
-    }
-
-    screen: resolvedScreen
-
-    color: "#00000000"
-    visible: viewerInteractive
-    exclusiveZone: -1
-
-    // Keep the viewer above normal UI during editing and Save As flow.
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: viewerInteractive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    color: "transparent"
+    visible: visibleState
 
     ScreenshotWorkflowHelper {
         id: workflow
@@ -139,7 +137,21 @@ PanelWindow {
         annotatedExportPending = false;
         if (!postProc.running)
             cleanupPostActionTempPath();
+        positionOnTargetMonitor();
         paintCanvas.requestPaint();
+    }
+
+    function positionOnTargetMonitor() {
+        const mon = resolvedScreen ? Hyprland.monitorFor(resolvedScreen) : null;
+        const monX = Number(mon?.x);
+        const monY = Number(mon?.y);
+        const monW = Number(mon?.width);
+        const monH = Number(mon?.height);
+
+        if (!isNaN(monX) && !isNaN(monY) && monW > 0 && monH > 0) {
+            x = Math.round(monX + Math.max(0, (monW - width) / 2));
+            y = Math.round(monY + Math.max(0, (monH - height) / 2));
+        }
     }
 
     function closeViewer() {
@@ -474,20 +486,12 @@ PanelWindow {
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        enabled: viewer.viewerInteractive
-        onClicked: viewer.closeViewer()
-    }
-
     Rectangle {
         id: frame
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 80, 1320)
-        height: Math.min(parent.height - 80, 860)
+        anchors.fill: parent
         radius: 14
         color: Theme.palette.bgMain
-        visible: viewer.viewerInteractive
+        visible: viewer.visibleState
 
         MouseArea {
             anchors.fill: parent
@@ -520,7 +524,18 @@ PanelWindow {
                 }
 
                 Item {
+                    id: dragHandle
                     Layout.fillWidth: true
+                    Layout.preferredHeight: 32
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.SizeAllCursor
+                        onPressed: function (mouse) {
+                            if (mouse.button === Qt.LeftButton)
+                                viewer.startSystemMove();
+                        }
+                    }
                 }
 
                 Rectangle {

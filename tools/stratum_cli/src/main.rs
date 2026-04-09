@@ -5,10 +5,10 @@ use std::env;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, wifi};
+use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, theme, wifi};
 use common::{emit_help, emit_json, fail, is_help_flag, run_command_capture};
 
-const ROOT_COMMANDS: [&str; 15] = [
+const ROOT_COMMANDS: [&str; 16] = [
     "audio",
     "battery",
     "bluetooth",
@@ -23,6 +23,7 @@ const ROOT_COMMANDS: [&str; 15] = [
     "screenshot",
     "screenshot-menu",
     "screenshot-post",
+    "theme",
     "wifi",
 ];
 
@@ -50,6 +51,20 @@ fn print_dashboard_help() {
     );
 }
 
+fn print_theme_help() {
+    emit_help(
+        "theme",
+        "stratum-cli theme <list|open|close|toggle|set> [args]",
+        &[
+            "list",
+            "open",
+            "close",
+            "toggle",
+            "set <themeName>",
+        ],
+    );
+}
+
 fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open", "close", "toggle"]),
@@ -57,6 +72,7 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),
         "screenshot" => Some(&["start"]),
+        "theme" => Some(&["open", "close", "toggle", "set"]),
         _ => None,
     }
 }
@@ -210,6 +226,32 @@ fn dispatch(command: &str, args: &[String]) -> bool {
         }
 
         dashboard::handle(args);
+        return true;
+    }
+
+    if command == "theme" {
+        let first = args.first().map(String::as_str).unwrap_or("");
+
+        if first.is_empty() {
+            print_theme_help();
+            return true;
+        }
+
+        if is_help_flag(first) {
+            print_theme_help();
+            return true;
+        }
+
+        if matches!(first, "list") {
+            theme::handle(args);
+            return true;
+        }
+
+        if matches!(first, "open" | "close" | "toggle" | "set") {
+            return dispatch_ipc_target("theme", args);
+        }
+
+        print_theme_help();
         return true;
     }
 

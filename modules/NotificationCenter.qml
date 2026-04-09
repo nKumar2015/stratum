@@ -244,8 +244,6 @@ PanelWindow {
         anchors.rightMargin: center.centerOpen ? 12 : -width - 24
         radius: 12
         color: Theme.palette.bgMain
-        border.width: 1
-        border.color: Theme.palette.borderActive
         visible: center.centerOpen
 
         Timer {

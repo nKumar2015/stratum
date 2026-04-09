@@ -1115,6 +1115,8 @@ Window {
                             implicitHeight: ssidTextA.implicitHeight
                             clip: true
 
+                            readonly property string seperator: "    |    "
+
                             property int marqueeGap: 24
                             property real scrollSpeed: 42
                             property bool titleOverflow: ssidTextA.implicitWidth > width
@@ -1123,7 +1125,7 @@ Window {
 
                             Text {
                                 id: ssidTextA
-                                text: wifiMenu.selectedSsid
+                                text: wifiMenu.selectedSsid + ssidTextClip.seperator
                                 color: Theme.palette.textMain
                                 font.family: Theme.palette.font
                                 font.pixelSize: 14
@@ -1136,7 +1138,7 @@ Window {
 
                             Text {
                                 id: ssidTextB
-                                text: "|  " + wifiMenu.selectedSsid
+                                text: wifiMenu.selectedSsid + ssidTextClip.seperator
                                 color: Theme.palette.textMain
                                 font.family: Theme.palette.font
                                 font.pixelSize: 14
@@ -1154,7 +1156,7 @@ Window {
                                 property: "tickerOffset"
                                 from: 0
                                 to: -ssidTextClip.loopSpan
-                                duration: Math.max(1, Math.round((ssidTextClip.loopSpan / ssidTextClip.scrollSpeed) * 1000))
+                                duration: Math.round((ssidTextClip.loopSpan / ssidTextClip.scrollSpeed) * 1000)
                                 easing.type: Easing.Linear
                                 running: wifiMenu.visible && ssidTextClip.titleOverflow
                                 loops: Animation.Infinite
@@ -1245,6 +1247,7 @@ Window {
                             placeholderTextColor: Theme.palette.textMuted
                             selectionColor: Theme.palette.textMain
                             selectedTextColor: Theme.palette.primary
+                            font.family: Theme.palette.font
 
                             background: Rectangle {
                                 radius: 6
