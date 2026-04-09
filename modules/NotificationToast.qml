@@ -411,7 +411,7 @@ Item {
                     anchors.leftMargin: 8
                     anchors.rightMargin: 8
                     verticalAlignment: TextInput.AlignVCenter
-                    color: Theme.palette.bgWidget
+                    color: Theme.palette.textMain
                     selectionColor: Theme.palette.primary
                     selectedTextColor: Theme.palette.textMain
                     font.pixelSize: 11

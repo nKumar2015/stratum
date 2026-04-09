@@ -1,10 +1,11 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 
-import "../theme"
 import "../globals"
 
 PanelWindow {
@@ -207,6 +208,7 @@ PanelWindow {
         }
 
         delegate: Item {
+            id: notifItem
             required property var modelData
             width: toastStack.width
             height: toastItem.implicitHeight
@@ -214,7 +216,7 @@ PanelWindow {
             NotificationToast {
                 id: toastItem
                 anchors.right: parent.right
-                notification: modelData
+                notification: notifItem.modelData
                 compact: true
                 autoDismissEnabled: true
                 onDismissRequested: notificationId => GlobalState.dismissNotification(notificationId)
@@ -241,9 +243,9 @@ PanelWindow {
         anchors.bottomMargin: 12
         anchors.rightMargin: center.centerOpen ? 12 : -width - 24
         radius: 12
-        color: Theme.background
+        color: Theme.palette.bgMain
         border.width: 1
-        border.color: Theme.outlineVariant
+        border.color: Theme.palette.bgActive
         visible: center.centerOpen
 
         Timer {
@@ -314,10 +316,10 @@ PanelWindow {
 
                 Text {
                     text: "Notifications"
-                    color: Theme.on_Surface
+                    color: Theme.palette.textMain
                     font.pixelSize: 14
                     font.bold: true
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     Layout.fillWidth: true
                 }
 
@@ -325,17 +327,17 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: GlobalState.doNotDisturb ? Theme.error : Theme.surfaceContainerLowest
+                    color: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgWidget
                     border.width: 1
-                    border.color: GlobalState.doNotDisturb ? Theme.error : Theme.outlineVariant
+                    border.color: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderInactive
 
                     Text {
                         anchors.centerIn: parent
                         text: GlobalState.doNotDisturb ? "󰂛" : "󰂚"
-                        color: Theme.on_Surface
+                        color: Theme.palette.textMain
                         font.pixelSize: 13
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     MouseArea {
@@ -348,17 +350,17 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceContainerLowest
+                    color: Theme.palette.bgWidget
                     border.width: 1
-                    border.color: Theme.outlineVariant
+                    border.color: Theme.palette.borderInactive
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰄬"
-                        color: Theme.on_Surface
+                        color: Theme.palette.textMain
                         font.pixelSize: 13
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     MouseArea {
@@ -371,17 +373,17 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceContainerLowest
+                    color: Theme.palette.bgWidget
                     border.width: 1
-                    border.color: Theme.outlineVariant
+                    border.color: Theme.palette.borderInactive
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰃢"
-                        color: Theme.on_Surface
+                        color: Theme.palette.textMain
                         font.pixelSize: 13
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     MouseArea {
@@ -394,17 +396,17 @@ PanelWindow {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
                     radius: 6
-                    color: Theme.surfaceContainerLowest
+                    color: Theme.palette.bgWidget
                     border.width: 1
-                    border.color: Theme.outlineVariant
+                    border.color: Theme.palette.borderInactive
 
                     Text {
                         anchors.centerIn: parent
                         text: "󰅖"
-                        color: Theme.on_Surface
+                        color: Theme.palette.textMain
                         font.pixelSize: 13
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     MouseArea {
@@ -420,10 +422,10 @@ PanelWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: Theme.background
+                color: Theme.palette.bgWidget
                 radius: 10
                 border.width: 1
-                border.color: Theme.outlineVariant
+                border.color: Theme.palette.bgInactive
 
                 Flickable {
                     id: listFlick

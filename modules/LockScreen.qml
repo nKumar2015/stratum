@@ -1,4 +1,5 @@
 pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -8,7 +9,7 @@ import Quickshell.Io
 import QtQuick.Effects
 import Quickshell.Widgets
 
-import "../theme"
+import "../globals"
 
 Scope {
     id: lockRoot
@@ -96,11 +97,11 @@ Scope {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: lockRoot.timeString
-                        color: Theme.primary // Using your active workspace color for emphasis
+                        color: Theme.palette.primary
                         font {
                             pixelSize: 50
                             bold: true
-                            family: Theme.font // Or your preferred monospace font
+                            family: Theme.palette.font
                         }
                     }
 
@@ -111,7 +112,7 @@ Scope {
                         radius: 60
                         color: "transparent"
                         border.width: 3
-                        border.color: Theme.primary
+                        border.color: Theme.palette.primary
                         ClippingWrapperRectangle {
                             width: 120
                             height: 120
@@ -132,19 +133,19 @@ Scope {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: "Enter Password"
-                        color: Theme.on_Surface
+                        color: Theme.palette.secondary
                         font.pixelSize: 20
                         font.bold: true
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
 
                     Rectangle {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.preferredWidth: 300
                         Layout.preferredHeight: 50
-                        color: Theme.surfaceContainerLowest
+                        color: Theme.palette.bgWidget
                         radius: 8
-                        border.color: passwordInput.activeFocus ? Theme.primary : Theme.surfaceContainer
+                        border.color: passwordInput.activeFocus ? Theme.palette.borderActive : Theme.palette.borderInactive
                         border.width: 2
 
                         TextInput {
@@ -152,7 +153,7 @@ Scope {
                             anchors.fill: parent
                             anchors.margins: 14
                             verticalAlignment: TextInput.AlignVCenter
-                            color: Theme.on_Surface
+                            color: Theme.palette.textMain
                             font.pixelSize: 18
                             echoMode: TextInput.Password
                             focus: true
@@ -181,11 +182,10 @@ Scope {
                     Text {
                         id: errorText
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Incorrect password, try again."
-                        color: Theme.error
+                        text: lockRoot.authFailed ? "Incorrect password, try again." : ""
+                        color: Theme.palette.error
                         font.pixelSize: 14
-                        visible: lockRoot.authFailed
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                     }
                 }
             }
