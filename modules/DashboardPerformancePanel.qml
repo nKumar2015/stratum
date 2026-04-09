@@ -51,7 +51,7 @@ Rectangle {
             radius: 8
             color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.palette.borderInative
+            border.color: Theme.palette.borderInactive
 
             ColumnLayout {
                 anchors.fill: parent
@@ -98,7 +98,7 @@ Rectangle {
             radius: 8
             color: Theme.palette.bgWidget
             border.width: 1
-            border.color: Theme.palette.boderInactive
+            border.color: Theme.palette.borderInactive
 
             ColumnLayout {
                 anchors.fill: parent
@@ -176,7 +176,7 @@ Rectangle {
                     Text {
                         text: "󰍛"
                         color: Theme.palette.textMain
-                        font.family: Theme.font
+                        font.family: Theme.palette.font
                         font.pixelSize: 11
                     }
 
@@ -199,7 +199,7 @@ Rectangle {
                 Text {
                     text: String(root.ramPercent) + "%"
                     color: root.metricColor(root.ramPercent)
-                    font.family: Theme.font
+                    font.family: Theme.palette.font
                     font.pixelSize: 13
                     font.bold: true
                 }

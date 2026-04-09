@@ -245,7 +245,7 @@ PanelWindow {
         radius: 12
         color: Theme.palette.bgMain
         border.width: 1
-        border.color: Theme.palette.bgActive
+        border.color: Theme.palette.borderActive
         visible: center.centerOpen
 
         Timer {
@@ -425,7 +425,7 @@ PanelWindow {
                 color: Theme.palette.bgWidget
                 radius: 10
                 border.width: 1
-                border.color: Theme.palette.bgInactive
+                border.color: Theme.palette.borderInactive
 
                 Flickable {
                     id: listFlick

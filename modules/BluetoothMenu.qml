@@ -1282,7 +1282,7 @@ Window {
                         Text {
                             text: bluetoothMenu.selectedName
                             color: Theme.palette.textMain
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             font.pixelSize: 14
                             font.bold: true
                             elide: Text.ElideRight
@@ -1291,7 +1291,7 @@ Window {
                         Text {
                             text: "MAC: " + bluetoothMenu.selectedMac
                             color: Theme.palette.secondary
-                            font.family: Theme.font
+                            font.family: Theme.palette.font
                             font.pixelSize: 11
                         }
 
@@ -1310,7 +1310,7 @@ Window {
                             Text {
                                 text: "•"
                                 color: Theme.palette.textMain
-                                font.family: Theme.font
+                                font.family: Theme.palette.font
                                 font.pixelSize: 11
                             }
 
@@ -1377,7 +1377,7 @@ Window {
                                 id: pairMainMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                enabled: parent.isEnabled
+                                enabled: parent.enabled
                                 onClicked: bluetoothMenu.selectedPaired ? bluetoothMenu.removeSelectedDevice() : bluetoothMenu.pairSelectedDevice()
                             }
                         }

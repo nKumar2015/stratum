@@ -353,7 +353,7 @@ PanelWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.palette.bgMain
-        border.color: Theme.palette.outlineVariant
+        border.color: Theme.palette.borderActive
         border.width: 1
         radius: 10
 
