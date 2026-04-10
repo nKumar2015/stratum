@@ -21,10 +21,13 @@ ApplicationWindow {
     visible: GlobalState.showAudioMenu
     onVisibleChanged: {
         if (visible) {
-            musicProc.running = true;
+            loadDevices();
+            devicesRefreshTimer.start();
+            MusicProvider.acquire();
         } else {
             GlobalState.showAudioMenu = false;
-            musicRefreshTimer.stop();
+            devicesRefreshTimer.stop();
+            MusicProvider.release();
         }
     }
 
@@ -53,14 +56,14 @@ ApplicationWindow {
     property string defaultInputName: ""
     property bool routeSwitching: false
     property string routeStatusMsg: ""
-    property string musicStatus: "Stopped"
-    property string musicTitle: "Nothing playing"
-    property string musicArtist: "N/A"
-    property string musicAlbum: "N/A"
-    property string musicArtUrl: ""
-    property int musicPositionSec: 0
-    property int musicLengthSec: 0
-    readonly property int musicPollMs: 1200
+    readonly property string musicStatus: MusicProvider.musicStatus
+    readonly property string musicTitle: MusicProvider.musicTitle
+    readonly property string musicArtist: MusicProvider.musicArtist
+    readonly property string musicAlbum: MusicProvider.musicAlbum
+    readonly property string musicArtUrl: MusicProvider.musicArtUrl
+    readonly property int musicPositionSec: MusicProvider.musicPositionSec
+    readonly property int musicLengthSec: MusicProvider.musicLengthSec
+    readonly property int devicePollMs: 5000
 
     readonly property var eqFrequencies: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"]
     readonly property var eqFilterTypes: ["peaking", "low_shelf", "high_shelf", "low_pass", "high_pass", "band_pass"]
@@ -385,60 +388,11 @@ ApplicationWindow {
         routeProc.running = true;
     }
 
-    function parseTimeToSeconds(timeStr) {
-        const str = String(timeStr || "0:00").trim();
-        const parts = str.split(":").map(p => parseInt(p, 10) || 0);
-        if (parts.length === 2)
-            return parts[0] * 60 + parts[1];
-        if (parts.length === 3)
-            return parts[0] * 3600 + parts[1] * 60 + parts[2];
-        return 0;
-    }
-
-    function applyMusicPayload(music) {
-        const m = (music && typeof music === "object") ? music : {};
-        musicStatus = String(m.status || "Stopped").trim();
-        musicTitle = String(m.title || "Nothing playing").trim();
-        musicArtist = String(m.artist || "N/A").trim();
-        musicAlbum = String(m.album || "N/A").trim();
-        musicArtUrl = String(m.art_url || "").trim();
-
-        const posSec = parseTimeToSeconds(m.position || "0:00");
-        const lenSec = parseTimeToSeconds(m.length || "0:00");
-        musicPositionSec = Math.max(0, Math.round(posSec));
-        musicLengthSec = Math.max(0, Math.round(lenSec));
-    }
-
     function hasPlayableMusic() {
         const status = String(musicStatus || "");
         if (status === "Playing" || status === "Paused")
             return true;
         return musicTitle.length > 0 && musicTitle !== "Nothing playing";
-    }
-
-    function mediaPlay() {
-        mediaProc.command = ["playerctl", "play"];
-        mediaProc.running = true;
-    }
-
-    function mediaPause() {
-        mediaProc.command = ["playerctl", "pause"];
-        mediaProc.running = true;
-    }
-
-    function mediaPlayPause() {
-        mediaProc.command = ["playerctl", "play-pause"];
-        mediaProc.running = true;
-    }
-
-    function mediaPrevious() {
-        mediaProc.command = ["playerctl", "previous"];
-        mediaProc.running = true;
-    }
-
-    function mediaNext() {
-        mediaProc.command = ["playerctl", "next"];
-        mediaProc.running = true;
     }
 
     function deviceLabel(name, description) {
@@ -729,7 +683,7 @@ ApplicationWindow {
 											horizontalAlignment: Text.AlignHCenter
 											verticalAlignment: Text.AlignVCenter
 										}
-										onClicked: audioMenu.mediaPrevious()
+                                        onClicked: MusicProvider.mediaPrevious()
 									}
 
 									Button {
@@ -752,7 +706,7 @@ ApplicationWindow {
 											horizontalAlignment: Text.AlignHCenter
 											verticalAlignment: Text.AlignVCenter
 										}
-									onClicked: audioMenu.mediaPlayPause()
+                                    onClicked: MusicProvider.mediaPlayPause()
 									}
 
 									Button {
@@ -774,7 +728,7 @@ ApplicationWindow {
 											horizontalAlignment: Text.AlignHCenter
 											verticalAlignment: Text.AlignVCenter
 										}
-										onClicked: audioMenu.mediaNext()
+                                        onClicked: MusicProvider.mediaNext()
 									}
 								}
                             ColumnLayout {
@@ -1174,32 +1128,13 @@ ApplicationWindow {
         }
     }
 
-    Process {
-        id: mediaProc
-        stdout: StdioCollector {}
-    }
-
-    Process {
-        id: musicProc
-        command: ["stratum-cli", "dashboard", "music"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                if (payload && payload.ok === true && payload.music) {
-                    audioMenu.applyMusicPayload(payload.music);
-                }
-                musicRefreshTimer.start();
-            }
-        }
-    }
-
     Timer {
-        id: musicRefreshTimer
-        interval: audioMenu.musicPollMs
-        repeat: false
+        id: devicesRefreshTimer
+        interval: audioMenu.devicePollMs
+        repeat: true
         onTriggered: {
-            if (audioMenu.visible)
-                musicProc.running = true;
+            if (audioMenu.visible && !audioMenu.loading && !devicesProc.running)
+                audioMenu.loadDevices();
         }
     }
 
@@ -1299,6 +1234,11 @@ ApplicationWindow {
         audioMenu.loadDevices();
         audioMenu.loadPresetsForDevice();
         if (audioMenu.visible)
-            musicProc.running = true;
+            MusicProvider.acquire();
+    }
+
+    Component.onDestruction: {
+        if (audioMenu.visible)
+            MusicProvider.release();
     }
 }

@@ -36,15 +36,12 @@ PanelWindow {
     property int calendarPrefetchMonth: 0
     readonly property int dashboardRefreshMs: 2000
 
-    property string musicStatus: "Unknown"
-    property string musicPlayer: "N/A"
-    property string musicTitle: "Nothing playing"
-    property string musicArtist: "N/A"
-    property string musicAlbum: "N/A"
-    property string musicPlayerTitle: "N/A"
-    property string musicPosition: "00:00"
-    property string musicLength: "00:00"
-    property string musicArtUrl: ""
+    readonly property string musicStatus: MusicProvider.musicStatus
+    readonly property string musicPlayer: MusicProvider.musicPlayer
+    readonly property string musicTitle: MusicProvider.musicTitle
+    readonly property string musicArtist: MusicProvider.musicArtist
+    readonly property string musicAlbum: MusicProvider.musicAlbum
+    readonly property string musicArtUrl: MusicProvider.musicArtUrl
 
     property int cpuPercent: 0
     property string gpuPercentText: "N/A"
@@ -69,19 +66,6 @@ PanelWindow {
 
         const parsedText = parseInt(String(textValue || "N/A"));
         return isNaN(parsedText) ? 0 : clampPercent(String(parsedText));
-    }
-
-    function applyMusicPayload(musicPayload) {
-        const music = (musicPayload && typeof musicPayload === "object") ? musicPayload : {};
-        musicStatus = String(music.status || "Unknown").trim();
-        musicPlayer = String(music.player || "N/A").trim();
-        musicTitle = String(music.title || "Nothing playing").trim();
-        musicArtist = String(music.artist || "N/A").trim();
-        musicAlbum = String(music.album || "N/A").trim();
-        musicPosition = String(music.position || "00:00").trim();
-        musicLength = String(music.length || "00:00").trim();
-        musicArtUrl = String(music.art_url || "").trim();
-        musicPlayerTitle = String(music.player_title || musicPlayer || "N/A").trim();
     }
 
     function applyPerformancePayload(performancePayload) {
@@ -113,9 +97,15 @@ PanelWindow {
             }
         }
 
-        applyMusicPayload(response.music);
         applyPerformancePayload(response.performance);
         lastError = "";
+    }
+
+    function formatTime(totalSeconds) {
+        const s = Math.max(0, Math.round(Number(totalSeconds) || 0));
+        const mins = Math.floor(s / 60);
+        const secs = s % 60;
+        return (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
     }
 
     function parseCliJson(raw) {
@@ -450,8 +440,14 @@ PanelWindow {
             return;
         }
 
-        controlProc.command = ["playerctl", "-p", musicPlayer, action];
-        controlProc.running = true;
+        if (action === "previous")
+            MusicProvider.mediaPrevious();
+        else if (action === "play-pause")
+            MusicProvider.mediaPlayPause();
+        else if (action === "next")
+            MusicProvider.mediaNext();
+
+        MusicProvider.refreshNow();
     }
 
     anchors {
@@ -470,14 +466,26 @@ PanelWindow {
 
     onVisibleChanged: {
         if (visible) {
+            MusicProvider.acquire();
             applyCachedCalendar(selectedCalendarYear, selectedCalendarMonth);
             preloadNearbyCalendars(selectedCalendarYear, selectedCalendarMonth);
             refreshDashboard();
             refreshTimer.restart();
         } else {
             refreshTimer.stop();
+            MusicProvider.release();
             resetCalendarSelection();
         }
+    }
+
+    Component.onCompleted: {
+        if (visible)
+            MusicProvider.acquire();
+    }
+
+    Component.onDestruction: {
+        if (visible)
+            MusicProvider.release();
     }
 
     IpcHandler {
@@ -559,16 +567,6 @@ PanelWindow {
 
                 dashboard.calendarPrefetchRunning = false;
                 dashboard.runCalendarPrefetch();
-            }
-        }
-    }
-
-    Process {
-        id: controlProc
-        running: false
-        stdout: StdioCollector {
-            onStreamFinished: {
-                dashboard.refreshDashboard();
             }
         }
     }
@@ -699,8 +697,8 @@ PanelWindow {
                     musicTitle: dashboard.musicTitle
                     musicArtist: dashboard.musicArtist
                     musicAlbum: dashboard.musicAlbum
-                    musicPosition: dashboard.musicPosition
-                    musicLength: dashboard.musicLength
+                    musicPosition: dashboard.formatTime(MusicProvider.musicPositionSec)
+                    musicLength: dashboard.formatTime(MusicProvider.musicLengthSec)
                     musicArtUrl: dashboard.musicArtUrl
                     onPreviousRequested: dashboard.sendPlayerAction("previous")
                     onPlayPauseRequested: dashboard.sendPlayerAction("play-pause")

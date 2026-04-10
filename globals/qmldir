@@ -1,3 +1,4 @@
 singleton GlobalState 1.0 GlobalState.qml
+singleton MusicProvider 1.0 MusicProvider.qml
 NotificationStore 1.0 NotificationStore.qml
 singleton Theme 1.0 GlobalTheme.qml
