@@ -47,6 +47,8 @@ PanelWindow {
 
     visible: GlobalState.showAudioHoverMenu
     color: "transparent"
+    readonly property color hoverSurface: Theme.palette.bgWidget
+    readonly property color hoverBorder: Theme.palette.outlineVariant || Qt.rgba(1, 1, 1, 0.14)
 
     property bool loading: false
     property var outputDevices: []
@@ -285,11 +287,6 @@ PanelWindow {
                 hoverMenu.loadStatus(false);
             }
         }
-    }
-
-    Process {
-        id: openPavucontrolProc
-        command: ["stratum-cli", "audio", "open-control"]
     }
 
     Timer {
@@ -677,7 +674,7 @@ PanelWindow {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         GlobalState.audioHoverIntent = false;
-                        openPavucontrolProc.running = true;
+                        GlobalState.showAudioMenu = true;
                         GlobalState.showAudioHoverMenu = false;
                     }
                 }

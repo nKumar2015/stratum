@@ -90,7 +90,13 @@ Notes:
   - `set-output <sink>`: sets the default output sink.
   - `set-input <source>`: sets the default input source.
   - `set-volume <0-150>`: sets default sink volume percentage.
+  - `equalizer capabilities`: returns EQ engine/tool capability metadata and supported parametric ranges/types.
+  - `equalizer apply-parametric <device> <json_payload>`: validates and applies current parametric payload without saving a preset.
+  - `equalizer save-preset-parametric <device> <name> <json_payload>`: saves a parametric preset with structured bands (`frequency_hz`, `gain_db`, `q`, `filter_type`, `enabled`) and optional `preamp_db`.
   - `open-control`: launches `pavucontrol`.
+
+Parametric apply note:
+- `equalizer apply-preset` currently runs in validated dry-run mode for parametric details. It validates target sink/tooling and returns structured apply metadata while full PipeWire graph programming is implemented.
 - Side effects:
   - Changes default audio routes and volume.
   - Launches a GUI app for `open-control`.

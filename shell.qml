@@ -21,6 +21,7 @@ ShellRoot {
     WifiMenu {}
     WifiHoverMenu {}
     AudioHoverMenu {}
+    AudioMenu {}
     BatteryHoverMenu {}
     DashboardMenu {}
     ThemeSwitcher {}

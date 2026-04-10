@@ -362,7 +362,9 @@ fn music_payload() -> Value {
         "artist": artist,
         "album": album,
         "position": format_mmss(pos_seconds),
+        "position_sec": pos_seconds,
         "length": format_mmss(len_seconds),
+        "length_sec": len_seconds,
         "art_url": art_url,
         "player_title": player_title,
     })

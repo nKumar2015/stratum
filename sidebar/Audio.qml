@@ -16,6 +16,7 @@ Item {
     readonly property int volumeLowThreshold: 34
     readonly property int volumeMidThreshold: 67
     readonly property int statusPollMs: 2500
+    readonly property int musicPollMs: 200
     readonly property int iconFadeMs: 150
 
     property string icon: "󰖀"
@@ -68,6 +69,21 @@ Item {
         applyIconState();
     }
 
+    function updateMusic(output) {
+        const payload = parseCliJson(output);
+        if (!payload || payload.ok !== true)
+            return;
+
+        GlobalState.musicTitle = String(payload.title || "");
+        GlobalState.musicArtist = String(payload.artist || "");
+        GlobalState.musicAlbum = String(payload.album || "");
+        GlobalState.musicPlayer = String(payload.player || "");
+        GlobalState.musicStatus = String(payload.status || "");
+        GlobalState.musicPosition = Number(payload.position_sec || 0);
+        GlobalState.musicLength = Number(payload.length_sec || 0);
+        GlobalState.musicArtUrl = String(payload.art_url || "");
+    }
+
     Connections {
         target: GlobalState
         function onAudioVolumePercentChanged() {
@@ -99,6 +115,27 @@ Item {
         interval: root.statusPollMs
         repeat: false
         onTriggered: audioProc.running = true
+    }
+
+    Process {
+        id: musicProc
+        command: ["stratum-cli", "dashboard", "music"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                if (result)
+                    root.updateMusic(result);
+                musicRefreshTimer.start();
+            }
+        }
+    }
+
+    Timer {
+        id: musicRefreshTimer
+        interval: root.musicPollMs
+        repeat: false
+        onTriggered: musicProc.running = true
     }
 
     Process {
@@ -157,7 +194,7 @@ Item {
         onClicked: {
             hoverExitGraceTimer.stop();
             GlobalState.audioHoverIntent = false;
-            openPavucontrolProc.running = true;
+            GlobalState.showAudioMenu = true;
             GlobalState.showAudioHoverMenu = false;
         }
     }

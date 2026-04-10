@@ -1,4 +1,6 @@
+use std::env;
 use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
@@ -74,5 +76,22 @@ pub fn command_available(program: &str) -> bool {
         Ok(_) => true,
         Err(err) => !matches!(err.kind(), ErrorKind::NotFound),
     }
+}
+
+pub fn config_dir() -> PathBuf {
+    if let Ok(path) = env::var("XDG_CONFIG_HOME") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path).join("stratum");
+        }
+    }
+
+    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".config/stratum")
+}
+
+pub fn ensure_config_dir() -> PathBuf {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(&format!("failed to create config dir: {}", e)));
+    dir
 }
 

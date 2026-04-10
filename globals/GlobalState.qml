@@ -14,6 +14,15 @@ QtObject {
     property int audioVolumePercent: 0
     property bool audioMuted: true
     property bool audioUserAdjusting: false
+    property bool showAudioMenu: false
+    property string musicTitle: ""
+    property string musicArtist: ""
+    property string musicAlbum: ""
+    property string musicPlayer: ""
+    property string musicStatus: ""
+    property int musicPosition: 0
+    property int musicLength: 0
+    property string musicArtUrl: ""
     property bool showBluetoothSettings: false
     property bool showBluetoothHoverMenu: false
     property real bluetoothIconY: 0
