@@ -7,6 +7,7 @@ import Quickshell
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 ApplicationWindow {
     id: audioMenu
@@ -31,7 +32,6 @@ ApplicationWindow {
         }
     }
 
-
     // EQ state
     property var eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     property var eqParametricBands: []
@@ -55,6 +55,7 @@ ApplicationWindow {
     property string defaultOutputName: ""
     property string defaultInputName: ""
     property bool routeSwitching: false
+    property string routeSwitchKind: ""
     property string routeStatusMsg: ""
     readonly property string musicStatus: MusicProvider.musicStatus
     readonly property string musicTitle: MusicProvider.musicTitle
@@ -80,6 +81,21 @@ ApplicationWindow {
         } catch (_error) {
             return null;
         }
+    }
+
+    function closeMenu() {
+        if (savePresetDialog.opened) {
+            savePresetDialog.close();
+            return;
+        }
+        GlobalState.showAudioMenu = false;
+    }
+
+    Shortcut {
+        sequence: "Esc"
+        context: Qt.WindowShortcut
+        enabled: audioMenu.visible
+        onActivated: audioMenu.closeMenu()
     }
 
     function formatTime(seconds) {
@@ -175,24 +191,24 @@ ApplicationWindow {
         const defaults = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
         const src = Array.isArray(gains) ? gains : [];
         return defaults.map((freq, idx) => ({
-                               frequency_hz: freq,
-                               gain_db: Number(src[idx]) || 0,
-                               q: 0.707,
-                               filter_type: "peaking",
-                               enabled: true
-                           }));
+                    frequency_hz: freq,
+                    gain_db: Number(src[idx]) || 0,
+                    q: 0.707,
+                    filter_type: "peaking",
+                    enabled: true
+                }));
     }
 
     function applyEqStateFromPayloadBands(parametricBands, legacyBands, preampDb) {
         let bands = [];
         if (Array.isArray(parametricBands) && parametricBands.length > 0) {
             bands = parametricBands.map((band, idx) => ({
-                                         frequency_hz: Number(band.frequency_hz) || [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000][idx] || 1000,
-                                         gain_db: Number(band.gain_db) || 0,
-                                         q: Number(band.q) || 0.707,
-                                         filter_type: String(band.filter_type || "peaking"),
-                                         enabled: band.enabled !== false
-                                     }));
+                        frequency_hz: Number(band.frequency_hz) || [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000][idx] || 1000,
+                        gain_db: Number(band.gain_db) || 0,
+                        q: Number(band.q) || 0.707,
+                        filter_type: String(band.filter_type || "peaking"),
+                        enabled: band.enabled !== false
+                    }));
         } else {
             bands = makeParametricBandsFromLegacy(legacyBands);
         }
@@ -281,12 +297,12 @@ ApplicationWindow {
 
         const nextFreq = bands.length > 0 ? Math.min(20000, Math.round((Number(bands[bands.length - 1].frequency_hz) || 1000) * 1.35)) : 1000;
         bands.push({
-                       frequency_hz: nextFreq,
-                       gain_db: 0,
-                       q: 0.707,
-                       filter_type: "peaking",
-                       enabled: true
-                   });
+            frequency_hz: nextFreq,
+            gain_db: 0,
+            q: 0.707,
+            filter_type: "peaking",
+            enabled: true
+        });
         audioMenu.eqParametricBands = bands;
         audioMenu.eqSelectedBandIndex = bands.length - 1;
         audioMenu.syncLegacyEqBandsFromParametric();
@@ -312,13 +328,11 @@ ApplicationWindow {
         if (!cleanName.length)
             return;
 
-        const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0)
-            ? audioMenu.eqParametricBands
-            : makeParametricBandsFromLegacy(audioMenu.eqBands);
+        const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0) ? audioMenu.eqParametricBands : makeParametricBandsFromLegacy(audioMenu.eqBands);
         const payload = JSON.stringify({
-                                           bands: bands,
-                                           preamp_db: Number(audioMenu.eqPreampDb) || 0
-                                       });
+            bands: bands,
+            preamp_db: Number(audioMenu.eqPreampDb) || 0
+        });
         savePresetProc.command = ["stratum-cli", "audio", "equalizer", "save-preset-parametric", audioMenu.currentDevice, cleanName, payload];
         savePresetProc.running = true;
         currentPresetName = cleanName;
@@ -327,13 +341,11 @@ ApplicationWindow {
     }
 
     function applyCurrentEq() {
-        const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0)
-            ? audioMenu.eqParametricBands
-            : makeParametricBandsFromLegacy(audioMenu.eqBands);
+        const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0) ? audioMenu.eqParametricBands : makeParametricBandsFromLegacy(audioMenu.eqBands);
         const payload = JSON.stringify({
-                                           bands: bands,
-                                           preamp_db: Number(audioMenu.eqPreampDb) || 0
-                                       });
+            bands: bands,
+            preamp_db: Number(audioMenu.eqPreampDb) || 0
+        });
 
         eqStatusMsg = "Applying current EQ...";
         eqApplyOk = true;
@@ -383,8 +395,21 @@ ApplicationWindow {
             return;
 
         routeSwitching = true;
+        routeSwitchKind = "input";
         routeStatusMsg = "Switching input...";
         routeProc.command = ["stratum-cli", "audio", "set-input", target];
+        routeProc.running = true;
+    }
+
+    function switchOutputRoute(deviceName) {
+        const target = String(deviceName || "").trim();
+        if (!target.length || routeSwitching || target === defaultOutputName)
+            return;
+
+        routeSwitching = true;
+        routeSwitchKind = "output";
+        routeStatusMsg = "Switching output...";
+        routeProc.command = ["stratum-cli", "audio", "set-output", target];
         routeProc.running = true;
     }
 
@@ -441,8 +466,8 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-		color: Theme.palette.bgMain
-	}
+        color: Theme.palette.bgMain
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -467,22 +492,25 @@ ApplicationWindow {
             }
 
             Rectangle {
-                implicitWidth: 260
-                implicitHeight: 34
-                radius: 17
-                color: Theme.palette.bgWidget
-                border.color: Theme.palette.borderInactive
-                border.width: 1
+                id: closeButton
+                Layout.preferredHeight: 34
+                Layout.preferredWidth: 40
+                radius: 6
+                color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
 
                 Text {
                     anchors.centerIn: parent
-                    width: parent.width - 16
-                    text: "Output: " + (audioMenu.currentDeviceLabel || "Default")
-                    color: Theme.palette.textMain
+                    text: "󰅖"
+                    color: Theme.palette.error
                     font.family: Theme.palette.font
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 13
+                }
+
+                MouseArea {
+                    id: closeMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: audioMenu.closeMenu()
                 }
             }
         }
@@ -498,7 +526,7 @@ ApplicationWindow {
             }
 
             TabButton {
-                text: "Now Playing"
+                text: "Playback"
                 implicitHeight: 40
                 hoverEnabled: true
                 contentItem: Text {
@@ -513,38 +541,16 @@ ApplicationWindow {
                 background: Rectangle {
                     color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
                     radius: 10
-					border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
-					border.width: 1
+                    border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
+                    border.width: 1
                 }
-            }
-
-            TabButton {
-                text: "Routing"
-                implicitHeight: 40
-                hoverEnabled: true
-				contentItem: Text {
-                    text: parent.text
-                    color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
-                    font.family: Theme.palette.font
-                    font.pixelSize: 12
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                    radius: 10
-					border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
-					border.width: 1
-                }
-
             }
 
             TabButton {
                 text: "Equalizer"
                 implicitHeight: 40
                 hoverEnabled: true
-				contentItem: Text {
+                contentItem: Text {
                     text: parent.text
                     color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
                     font.family: Theme.palette.font
@@ -556,10 +562,9 @@ ApplicationWindow {
                 background: Rectangle {
                     color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
                     radius: 10
-					border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
-					border.width: 1
+                    border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
+                    border.width: 1
                 }
-
             }
         }
 
@@ -567,245 +572,6 @@ ApplicationWindow {
             currentIndex: tabBar.currentIndex
             Layout.fillWidth: true
             Layout.fillHeight: true
-
-            Rectangle {
-                color: Theme.palette.bgWidget
-                radius: 14
-                border.color: Theme.palette.borderInactive
-                border.width: 1
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
-
-                    Item {
-                        visible: !audioMenu.hasPlayableMusic()
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "No music playing right now"
-                            color: Theme.palette.textMuted
-                            font.family: Theme.palette.font
-                            font.pixelSize: 15
-                        }
-                    }
-
-                    ColumnLayout {
-                        visible: audioMenu.hasPlayableMusic()
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 20
-
-                        Item {
-                            Layout.fillHeight: true
-                        }
-
-                        ColumnLayout {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: 320
-                            spacing: 16
-
-                            Rectangle {
-                                Layout.alignment: Qt.AlignHCenter
-                                implicitWidth: 280
-                                implicitHeight: 280
-                                radius: 14
-                                color: audioMenu.surfaceSecondary
-                                border.color: audioMenu.strokeSoft
-                                border.width: 1
-
-                                Image {
-                                    anchors.fill: parent
-                                    source: audioMenu.musicArtUrl
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                }
-                            }
-
-							Text {
-								Layout.alignment: Qt.AlignHCenter
-								text: audioMenu.musicTitle || "Unknown Title"
-								color: Theme.palette.textMain
-								font.family: Theme.palette.font
-								font.pixelSize: 18
-								font.bold: true
-								wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-								maximumLineCount: 2
-								horizontalAlignment: Text.AlignHCenter
-							}
-
-							Text {
-								Layout.alignment: Qt.AlignHCenter
-								text: audioMenu.musicArtist || "Unknown Artist"
-								color: Theme.palette.textMuted
-								font.family: Theme.palette.font
-								font.pixelSize: 14
-								wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-								maximumLineCount: 1
-								horizontalAlignment: Text.AlignHCenter
-							}
-
-							Text {
-								Layout.alignment: Qt.AlignHCenter
-								text: audioMenu.musicAlbum || ""
-								color: Theme.palette.textMuted
-								font.family: Theme.palette.font
-								font.pixelSize: 12
-								wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-								maximumLineCount: 1
-								horizontalAlignment: Text.AlignHCenter
-								visible: audioMenu.musicAlbum && audioMenu.musicAlbum !== "N/A"
-                            }
-							
-							RowLayout {
-									Layout.fillWidth: true
-									spacing: 12
-
-									Button {
-										text: ""
-										Layout.fillWidth: true
-										implicitHeight: 40
-										hoverEnabled: true
-										background: Rectangle {
-											color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-											border.width: 1
-											border.color: parent.hovered ? Theme.palette.borderActive: Theme.palette.borderInactive
-											radius: 8
-										}
-										contentItem: Text {
-											text: parent.text
-											color: Theme.palette.textMain
-											font.family: Theme.palette.font
-											font.pixelSize: 30
-											horizontalAlignment: Text.AlignHCenter
-											verticalAlignment: Text.AlignVCenter
-										}
-                                        onClicked: MusicProvider.mediaPrevious()
-									}
-
-									Button {
-										text: audioMenu.musicStatus === "Playing" ? "" : ""
-
-										Layout.fillWidth: true
-										implicitHeight: 40
-										hoverEnabled: true
-											background: Rectangle {
-											color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-											border.width: 1
-											border.color: parent.hovered ? Theme.palette.borderActive: Theme.palette.borderInactive
-											radius: 8
-										}
-										contentItem: Text {
-											text: parent.text
-											color: Theme.palette.textMain
-											font.family: Theme.palette.font
-											font.pixelSize: 30
-											horizontalAlignment: Text.AlignHCenter
-											verticalAlignment: Text.AlignVCenter
-										}
-                                    onClicked: MusicProvider.mediaPlayPause()
-									}
-
-									Button {
-										text: ""
-										Layout.fillWidth: true
-										implicitHeight: 40
-										hoverEnabled: true
-										background: Rectangle {
-											color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-											border.width: 1
-											border.color: parent.hovered ? Theme.palette.borderActive: Theme.palette.borderInactive
-											radius: 8
-										}
-										contentItem: Text {
-											text: parent.text
-											color: Theme.palette.textMain
-											font.family: Theme.palette.font
-											font.pixelSize: 30
-											horizontalAlignment: Text.AlignHCenter
-											verticalAlignment: Text.AlignVCenter
-										}
-                                        onClicked: MusicProvider.mediaNext()
-									}
-								}
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Slider {
-                                    id: menuSeekSlider
-                                    from: 0
-                                    to: Math.max(1, audioMenu.musicLengthSec)
-                                    value: audioMenu.musicPositionSec
-                                    Layout.fillWidth: true
-
-                                    background: Rectangle {
-                                        x: menuSeekSlider.leftPadding
-                                        y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
-                                        width: menuSeekSlider.availableWidth
-                                        height: 4
-                                        radius: 2
-                                        color: Theme.palette.bgHover
-
-                                        Rectangle {
-                                            width: menuSeekSlider.visualPosition * parent.width
-                                            height: parent.height
-                                            radius: 2
-                                            color: Theme.palette.primary
-                                        }
-                                    }
-
-                                    handle: Rectangle {
-                                        x: menuSeekSlider.leftPadding + menuSeekSlider.visualPosition * (menuSeekSlider.availableWidth - width)
-                                        y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
-                                        implicitWidth: 12
-                                        implicitHeight: 12
-                                        radius: 6
-                                        color: Theme.palette.primary
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            onReleased: {
-                                                const newPos = Math.round(menuSeekSlider.value);
-                                                menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
-                                                menuSeekProc.running = true;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-
-                                    Text {
-                                        text: formatTime(audioMenu.musicPositionSec)
-                                        color: Theme.palette.textMuted
-                                        font.family: Theme.palette.font
-                                        font.pixelSize: 11
-                                    }
-
-                                    Item {
-                                        Layout.fillWidth: true
-                                    }
-
-                                    Text {
-                                        text: formatTime(audioMenu.musicLengthSec)
-                                        color: Theme.palette.textMuted
-                                        font.family: Theme.palette.font
-                                        font.pixelSize: 11
-                                    }
-                                }
-
-								
-                            }
-                        }
-                    }
-                }
-            }
 
             Rectangle {
                 color: Theme.palette.bgMain
@@ -816,166 +582,335 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 16
-                    spacing: 14
+                    spacing: 12
 
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        spacing: 14
+                        spacing: 20
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
+                        Item {
                             Layout.fillHeight: true
-                            spacing: 8
+                        }
 
-                            Text {
-                                text: "Input Routing"
-                                color: Theme.palette.textMain
-                                font.family: Theme.palette.font
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            Layout.preferredWidth: 700
+                            spacing: 18
 
-                            Text {
-                                visible: audioMenu.inputDevices.length === 0
-                                text: "No input devices"
-                                color: Theme.palette.textMuted
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                            }
+                            Rectangle {
+                                Layout.alignment: Qt.AlignBottom
+                                implicitWidth: 400
+                                implicitHeight: 400
+                                radius: 14
+                                color: Theme.palette.bgWidget
+                                border.color: Theme.palette.borderInactive
+                                border.width: 1
 
-                            Repeater {
-                                model: audioMenu.inputDevices
+                                Image {
+                                    id: albumArt
+                                    anchors.fill: parent
+                                    source: audioMenu.musicArtUrl
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                }
 
-                                delegate: Rectangle {
-                                    id: inputItem
-                                    required property var modelData
-
-                                    Layout.fillWidth: true
-                                    Layout.topMargin: -4
-                                    height: 32
-                                    radius: 6
-                                    property bool selected: modelData.name === audioMenu.defaultInputName
-                                    color: inputHover.containsMouse ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
-
-                                    MouseArea {
-                                        id: inputHover
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: audioMenu.switchInput(modelData.name)
-                                    }
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        spacing: 8
-
-                                        Text {
-                                            text: inputItem.selected ? "◉" : "○"
-                                            color: inputItem.selected ? Theme.palette.textMain : Theme.palette.textMuted
-                                            font.pixelSize: 12
-                                            font.family: Theme.palette.font
-                                        }
-
-                                        Text {
-                                            text: audioMenu.deviceLabel(inputItem.modelData.name, inputItem.modelData.description)
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-                                    }
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: audioMenu.musicArtUrl == ""
+                                    text: "󰎆"
+                                    color: Theme.palette.textMain
+                                    font.family: Theme.palette.font
+                                    font.pixelSize: 75
                                 }
                             }
 
-                            Item {
-                                Layout.fillHeight: true
-                            }
-                        }
+                            ColumnLayout {
+                                Layout.alignment: Qt.AlignBottom
+                                Layout.fillWidth: true
+                                spacing: 12
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            spacing: 8
-
-                            Text {
-                                text: "Output Routing"
-                                color: Theme.palette.textMain
-                                font.family: Theme.palette.font
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
-
-                            Text {
-                                visible: audioMenu.outputDevices.length === 0
-                                text: "No output devices"
-                                color: Theme.palette.textMuted
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                            }
-
-                            Repeater {
-                                model: audioMenu.outputDevices
-
-                                delegate: Rectangle {
-                                    id: outputItem
-                                    required property var modelData
-
+                                Item {
+                                    id: marqueeRoot
                                     Layout.fillWidth: true
-                                    Layout.topMargin: -4
-                                    height: 32
-                                    radius: 6
-                                    property bool selected: modelData.name === audioMenu.currentDevice
-                                    color: outputHover.containsMouse ? Qt.rgba(1, 1, 1, 0.05) : "transparent"
+                                    implicitHeight: 28
+                                    clip: true
 
-                                    MouseArea {
-                                        id: outputHover
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: audioMenu.switchOutput(modelData.name, modelData.description)
+                                    readonly property int marqueeGap: 42
+                                    readonly property bool needsMarquee: titleText.implicitWidth > width
+
+                                    Row {
+                                        id: titleMarqueeRow
+                                        x: 0
+                                        y: (parent.height - height) / 2
+                                        spacing: parent.marqueeGap
+
+                                        Text {
+                                            id: titleText
+                                            text: audioMenu.hasPlayableMusic() ? (audioMenu.musicTitle || "Unknown Title") : "Nothing is playing right now"
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            wrapMode: Text.NoWrap
+                                        }
+
+                                        Text {
+                                            visible: marqueeRoot.needsMarquee
+                                            text: titleText.text
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            wrapMode: Text.NoWrap
+                                        }
+                                    }
+
+                                    SequentialAnimation {
+                                        running: marqueeRoot.needsMarquee
+                                        loops: Animation.Infinite
+
+                                        PauseAnimation {
+                                            duration: 650
+                                        }
+
+                                        NumberAnimation {
+                                            target: titleMarqueeRow
+                                            property: "x"
+                                            from: 0
+                                            to: -(titleText.implicitWidth + marqueeRoot.marqueeGap)
+                                            duration: Math.max(3200, Math.round((titleText.implicitWidth + marqueeRoot.marqueeGap) * 24))
+                                            easing.type: Easing.Linear
+                                        }
+                                    }
+
+                                    onNeedsMarqueeChanged: {
+                                        if (!needsMarquee)
+                                            titleMarqueeRow.x = 0;
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: audioMenu.musicArtist || "Unknown Artist"
+                                    color: Theme.palette.textMuted
+                                    font.family: Theme.palette.font
+                                    font.pixelSize: 14
+                                    maximumLineCount: 1
+                                    horizontalAlignment: Text.AlignLeft
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: audioMenu.musicAlbum || ""
+                                    color: Theme.palette.textMuted
+                                    font.family: Theme.palette.font
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                    maximumLineCount: 1
+                                    horizontalAlignment: Text.AlignLeft
+                                    visible: audioMenu.musicAlbum && audioMenu.musicAlbum !== "N/A"
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Slider {
+                                        id: menuSeekSlider
+                                        from: 0
+                                        to: Math.max(1, audioMenu.musicLengthSec)
+                                        value: audioMenu.musicPositionSec
+                                        Layout.fillWidth: true
+
+                                        background: Rectangle {
+                                            x: menuSeekSlider.leftPadding
+                                            y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
+                                            width: menuSeekSlider.availableWidth
+                                            height: 4
+                                            radius: 2
+                                            color: Theme.palette.bgHover
+
+                                            Rectangle {
+                                                width: menuSeekSlider.visualPosition * parent.width
+                                                height: parent.height
+                                                radius: 2
+                                                color: Theme.palette.primary
+                                            }
+                                        }
+
+                                        handle: Rectangle {
+                                            x: menuSeekSlider.leftPadding + menuSeekSlider.visualPosition * (menuSeekSlider.availableWidth - width)
+                                            y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
+                                            implicitWidth: 12
+                                            implicitHeight: 12
+                                            radius: 6
+                                            color: Theme.palette.primary
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                anchors.margins: -4
+                                                onReleased: {
+                                                    const newPos = Math.round(menuSeekSlider.value);
+                                                    menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
+                                                    menuSeekProc.running = true;
+                                                }
+                                            }
+                                        }
                                     }
 
                                     RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        spacing: 8
+                                        Layout.fillWidth: true
 
                                         Text {
-                                            text: outputItem.selected ? "◉" : "○"
-                                            color: outputItem.selected ? Theme.palette.textMain : Theme.palette.textMuted
-                                            font.pixelSize: 12
+                                            text: formatTime(audioMenu.musicPositionSec)
+                                            color: Theme.palette.textMuted
                                             font.family: Theme.palette.font
+                                            font.pixelSize: 11
+                                        }
+
+                                        Item {
+                                            Layout.fillWidth: true
                                         }
 
                                         Text {
-                                            text: audioMenu.deviceLabel(outputItem.modelData.name, outputItem.modelData.description)
-                                            color: Theme.palette.textMain
+                                            text: formatTime(audioMenu.musicLengthSec)
+                                            color: Theme.palette.textMuted
                                             font.family: Theme.palette.font
                                             font.pixelSize: 11
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
                                         }
                                     }
                                 }
-                            }
 
-                            Item {
-                                Layout.fillHeight: true
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+
+                                    Button {
+                                        text: ""
+                                        Layout.fillWidth: true
+                                        implicitHeight: 40
+                                        hoverEnabled: true
+                                        background: Rectangle {
+                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                                            border.width: 1
+                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                                            radius: 8
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 30
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        onClicked: MusicProvider.mediaPrevious()
+                                    }
+
+                                    Button {
+                                        text: audioMenu.musicStatus === "Playing" ? "" : ""
+
+                                        Layout.fillWidth: true
+                                        implicitHeight: 40
+                                        hoverEnabled: true
+                                        background: Rectangle {
+                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                                            border.width: 1
+                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                                            radius: 8
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 30
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        onClicked: MusicProvider.mediaPlayPause()
+                                    }
+
+                                    Button {
+                                        text: ""
+                                        Layout.fillWidth: true
+                                        implicitHeight: 40
+                                        hoverEnabled: true
+                                        background: Rectangle {
+                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                                            border.width: 1
+                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                                            radius: 8
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: Theme.palette.textMain
+                                            font.family: Theme.palette.font
+                                            font.pixelSize: 30
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        onClicked: MusicProvider.mediaNext()
+                                    }
+                                }
                             }
                         }
-                    }
 
-                    Text {
-                        visible: audioMenu.routeStatusMsg.length > 0
-                        text: audioMenu.routeStatusMsg
-                        color: Theme.palette.textMuted
-                        font.family: Theme.palette.font
-                        font.pixelSize: 11
+                        RowLayout {
+                            id: routeSelectorsRow
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 0
+                                spacing: 6
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "Audio Input"
+                                    color: Theme.palette.textMuted
+                                    font.family: Theme.palette.font
+                                    font.pixelSize: 11
+                                }
+
+                                ThemedComboBox {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    items: audioMenu.inputDevices
+                                    selectedName: audioMenu.defaultInputName
+                                    placeholderText: "Select input device"
+                                    labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
+                                    onItemChosen: item => audioMenu.switchInput(item?.name)
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 0
+                                spacing: 6
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "Audio Output"
+                                    color: Theme.palette.textMuted
+                                    font.family: Theme.palette.font
+                                    font.pixelSize: 11
+                                }
+
+                                ThemedComboBox {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    items: audioMenu.outputDevices
+                                    selectedName: audioMenu.defaultOutputName
+                                    placeholderText: "Select output device"
+                                    labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
+                                    onItemChosen: item => audioMenu.switchOutputRoute(item?.name)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -991,14 +926,14 @@ ApplicationWindow {
                     anchors.margins: 12
                     spacing: 10
 
-                        AudioEqualizerPanel {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            audioMenu: audioMenu
-                        }
-                    }
-                    Item {
+                    AudioEqualizerPanel {
+                        Layout.fillWidth: true
                         Layout.fillHeight: true
+                        audioMenu: audioMenu
+                    }
+                }
+                Item {
+                    Layout.fillHeight: true
                 }
             }
         }
@@ -1122,7 +1057,8 @@ ApplicationWindow {
                     return;
                 }
 
-                audioMenu.routeStatusMsg = "Input switched";
+                audioMenu.routeStatusMsg = audioMenu.routeSwitchKind === "output" ? "Output switched" : "Input switched";
+                audioMenu.routeSwitchKind = "";
                 audioMenu.loadDevices();
             }
         }
