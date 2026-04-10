@@ -13,10 +13,11 @@ ComboBox {
     property string placeholderText: "Select item"
     property int popupMaxHeight: 220
     property var labelProvider: null
+    property var boxHeight: 36
 
     signal itemChosen(var item, int index)
 
-    implicitHeight: 36
+    implicitHeight: root.boxHeight
     model: root.items
     leftPadding: 12
     rightPadding: 28
@@ -72,8 +73,6 @@ ComboBox {
         background: Rectangle {
             radius: 6
             color: parent.highlighted ? Theme.palette.bgHover : "transparent"
-            border.width: root.currentIndex === parent.index ? 1 : 0
-            border.color: Theme.palette.borderActive
         }
     }
 

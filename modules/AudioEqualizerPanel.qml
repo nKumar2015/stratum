@@ -410,7 +410,8 @@ Rectangle {
                         text: "+ Add Band"
                         hoverEnabled: true
                         background: Rectangle {
-                            color: parent.hovered ? Qt.lighter(Theme.palette.secondary, 1.08) : Theme.palette.secondary
+                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
                             radius: 7
                         }
                         contentItem: Text {
@@ -540,27 +541,20 @@ Rectangle {
                                                 Layout.fillWidth: true
                                                 spacing: 5
 
-                                                ComboBox {
+                                                ThemedComboBox {
                                                     id: filterTypeCombo
-                                                    model: audioMenu.eqFilterTypes
-                                                    currentIndex: Math.max(0, audioMenu.eqFilterTypes.indexOf(String(modelData.filter_type || "peaking")))
-                                                    Layout.minimumWidth: 80
-                                                    onActivated: audioMenu.setParametricBandField(index, "filter_type", currentText)
+                                                    Layout.minimumWidth: 110
+                                                    Layout.preferredWidth: 120
+                                                    boxHeight: 20
 
-                                                    contentItem: Text {
-                                                        text: parent.displayText
-                                                        color: Theme.palette.textMain
-                                                        font.family: Theme.palette.font
-                                                        verticalAlignment: Text.AlignVCenter
-                                                        leftPadding: 8
-                                                    }
-
-                                                    background: Rectangle {
-                                                        color: Theme.palette.bgWidget
-                                                        border.color: Theme.palette.borderInactive
-                                                        border.width: 1
-                                                        radius: 6
-                                                    }
+                                                    items: audioMenu.eqFilterTypes.map(t => ({
+                                                                                                  name: String(t || ""),
+                                                                                                  description: String(t || "")
+                                                                                              }))
+                                                    selectedName: String(modelData.filter_type || "peaking")
+                                                    placeholderText: "Filter"
+                                                    labelProvider: item => String(item?.name || "")
+                                                    onItemChosen: item => audioMenu.setParametricBandField(index, "filter_type", String(item?.name || "peaking"))
                                                 }
 
                                                 Text {
@@ -822,7 +816,8 @@ Rectangle {
                     id: presetCombo
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-
+                    boxHeight: 30
+                    
                     items: {
                         const names = audioMenu.eqPresets
                             .map(p => String(p.name || ""))
@@ -834,7 +829,7 @@ Rectangle {
                     }
 
                     selectedName: audioMenu.defaultInputName
-                    placeholderText: "Select input device"
+                    placeholderText: "Select Preset"
                     labelProvider: item => String(item?.name || "")
                     onItemChosen: item => {
                         const name = String(item?.name || "");
