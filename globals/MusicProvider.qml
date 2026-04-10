@@ -4,7 +4,7 @@ import QtQuick
 import Quickshell.Io
 import "."
 
-QtObject {
+Item {
     id: musicProvider
 
     readonly property int pollMs: 1000
