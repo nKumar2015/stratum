@@ -877,6 +877,16 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
         });
     }
 
+    // Some PipeWire setups acknowledge load-module but do not instantiate the
+    // filter-chain node (policy/security/runtime limitation). Only report
+    // success when the virtual sink really exists.
+    if find_node_id_by_name("effect_input.stratum_eq").is_none() {
+        return Err(
+            "PipeWire did not create 'effect_input.stratum_eq' after module load; dynamic filter-chain loading is likely unavailable in this runtime"
+                .to_string(),
+        );
+    }
+
     // Make the virtual sink active default for new streams.
     let _ = run_command_capture("wpctl", &["set-default", "effect_input.stratum_eq"]);
 
