@@ -7,6 +7,7 @@ import Quickshell.Wayland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: center
@@ -321,98 +322,42 @@ PanelWindow {
                     Layout.fillWidth: true
                 }
 
-                Rectangle {
+                CompactIconButton {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
-                    radius: 6
-                    color: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgWidget
-                    border.width: 1
-                    border.color: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderInactive
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: GlobalState.doNotDisturb ? "󰂛" : "󰂚"
-                        color: Theme.palette.textMain
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.palette.font
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: GlobalState.setDoNotDisturb(!GlobalState.doNotDisturb)
-                    }
+                    iconText: GlobalState.doNotDisturb ? "󰂛" : "󰂚"
+                    iconColor: Theme.palette.textMain
+                    backgroundColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgWidget
+                    hoverBackgroundColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgHover
+                    borderColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderInactive
+                    hoverBorderColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderActive
+                    onClicked: GlobalState.setDoNotDisturb(!GlobalState.doNotDisturb)
                 }
 
-                Rectangle {
+                CompactIconButton {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
-                    radius: 6
-                    color: Theme.palette.bgWidget
-                    border.width: 1
-                    border.color: Theme.palette.borderInactive
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰄬"
-                        color: Theme.palette.textMain
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.palette.font
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: GlobalState.markAllRead()
-                    }
+                    iconText: "󰄬"
+                    iconColor: Theme.palette.textMain
+                    onClicked: GlobalState.markAllRead()
                 }
 
-                Rectangle {
+                CompactIconButton {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
-                    radius: 6
-                    color: Theme.palette.bgWidget
-                    border.width: 1
-                    border.color: Theme.palette.borderInactive
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰃢"
-                        color: Theme.palette.textMain
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.palette.font
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: GlobalState.clearAllNotifications()
-                    }
+                    iconText: "󰃢"
+                    iconColor: Theme.palette.textMain
+                    onClicked: GlobalState.clearAllNotifications()
                 }
 
-                Rectangle {
+                CompactIconButton {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
-                    radius: 6
-                    color: Theme.palette.bgWidget
-                    border.width: 1
-                    border.color: Theme.palette.borderInactive
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰅖"
-                        color: Theme.palette.textMain
-                        font.pixelSize: 13
-                        font.bold: true
-                        font.family: Theme.palette.font
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            GlobalState.showNotificationCenter = false;
-                            center.releaseKeyboardFocus();
-                        }
+                    iconText: "󰅖"
+                    iconColor: Theme.palette.textMain
+                    onClicked: {
+                        GlobalState.showNotificationCenter = false;
+                        center.releaseKeyboardFocus();
                     }
                 }
             }

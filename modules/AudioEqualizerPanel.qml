@@ -8,6 +8,28 @@ import "../components"
 Rectangle {
     id: eqPanel
     required property var audioMenu
+    readonly property int eqCapabilityMaxBands: {
+        const caps = audioMenu.eqCapabilities;
+        const maxBands = Number(caps && caps.parametric ? caps.parametric.max_bands : NaN);
+        if (isFinite(maxBands) && maxBands > 0)
+            return Math.round(maxBands);
+        const activeBands = Array.isArray(audioMenu.eqParametricBands) ? audioMenu.eqParametricBands.length : 0;
+        return Math.max(10, activeBands);
+    }
+    readonly property real eqCapabilityGainSpanDb: {
+        const caps = audioMenu.eqCapabilities;
+        const range = caps && caps.parametric ? caps.parametric.gain_range_db : null;
+        if (Array.isArray(range) && range.length >= 2) {
+            const minDb = Number(range[0]);
+            const maxDb = Number(range[1]);
+            if (isFinite(minDb) && isFinite(maxDb) && maxDb > minDb)
+                return maxDb - minDb;
+        }
+        return Math.abs(audioMenu.eqGraphMaxDb - audioMenu.eqGraphMinDb);
+    }
+    readonly property int eqGraphPreferredWidth: Math.round(Math.max(560, Math.min(1040, 460 + eqCapabilityMaxBands * 14)))
+    readonly property int eqGraphPreferredHeight: Math.round(Math.max(250, Math.min(420, 220 + eqCapabilityGainSpanDb * 2.2)))
+
     color: "transparent"
 
     ColumnLayout {
@@ -15,7 +37,10 @@ Rectangle {
         spacing: 12
 
         Text {
-            text: "Parametric EQ"
+            text: {
+                const deviceName = String(audioMenu.currentDeviceLabel || audioMenu.currentDevice || "").trim();
+                return deviceName.length > 0 ? ("Parametric EQ (" + deviceName + ")") : "Parametric EQ";
+            }
             color: Theme.palette.textMain
             font.family: Theme.palette.font
             font.pixelSize: 13
@@ -29,8 +54,9 @@ Rectangle {
             ColumnLayout {
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 680
+                    Layout.preferredWidth: eqPanel.eqGraphPreferredWidth
+                    Layout.preferredHeight: eqPanel.eqGraphPreferredHeight
+                    Layout.minimumHeight: 240
                     radius: 8
                     color: Theme.palette.bgWidget
                     border.color: Theme.palette.borderInactive
@@ -70,25 +96,61 @@ Rectangle {
                                 return topPad + (1 - t) * chartH;
                             }
 
-                            const dbTicks = [-24, -12, 0, 12, 24];
+                            function canvasFont(sizePx) {
+                                const family = String(Theme.palette.font || "monospace").replace(/'/g, "\\'");
+                                return sizePx + "px '" + family + "', monospace";
+                            }
+
+                            function formatDbTick(db) {
+                                const rounded = Math.round(Number(db) * 10) / 10;
+                                if (Math.abs(rounded - Math.round(rounded)) < 0.05)
+                                    return (rounded > 0 ? "+" : "") + String(Math.round(rounded));
+                                return (rounded > 0 ? "+" : "") + rounded.toFixed(1);
+                            }
+
+                            const minDb = Number(audioMenu.eqGraphMinDb);
+                            const maxDb = Number(audioMenu.eqGraphMaxDb);
+                            const dbTicksBase = [minDb, (minDb + 0) / 2, 0, (0 + maxDb) / 2, maxDb];
+                            const dbTicks = [];
+                            for (let i = 0; i < dbTicksBase.length; i++) {
+                                const tick = Math.max(minDb, Math.min(maxDb, dbTicksBase[i]));
+                                if (!dbTicks.some(v => Math.abs(v - tick) < 0.05))
+                                    dbTicks.push(tick);
+                            }
+                            dbTicks.sort((a, b) => a - b);
+
                             for (let i = 0; i < dbTicks.length; i++) {
                                 const db = dbTicks[i];
                                 const y = yAtDb(db);
                                 ctx.beginPath();
                                 ctx.moveTo(leftPad, y);
                                 ctx.lineTo(leftPad + chartW, y);
-                                ctx.lineWidth = db === 0 ? 1.5 : 1;
-                                ctx.strokeStyle = db === 0 ? Theme.palette.primary : Qt.rgba(1, 1, 1, 0.14);
+                                const isZero = Math.abs(db) < 0.05;
+                                ctx.lineWidth = isZero ? 1.5 : 1;
+                                ctx.strokeStyle = isZero ? Theme.palette.primary : Qt.rgba(1, 1, 1, 0.14);
                                 ctx.stroke();
 
                                 ctx.fillStyle = Theme.palette.textMuted;
-                                ctx.font = "10px " + Theme.palette.font;
+                                ctx.font = canvasFont(10);
                                 ctx.textAlign = "right";
                                 ctx.textBaseline = "middle";
-                                ctx.fillText((db > 0 ? "+" : "") + db, leftPad - 6, y);
+                                ctx.fillText(formatDbTick(db), leftPad - 6, y);
                             }
 
-                            const freqTicks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+                            const minHz = Math.max(1, Number(audioMenu.eqGraphMinFreqHz) || 20);
+                            const maxHz = Math.max(minHz + 1, Number(audioMenu.eqGraphMaxFreqHz) || 20000);
+                            const freqTicksBase = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+                            const freqTicks = [];
+                            if (!freqTicksBase.some(v => Math.abs(v - minHz) < 0.5))
+                                freqTicks.push(minHz);
+                            for (let i = 0; i < freqTicksBase.length; i++) {
+                                const hz = freqTicksBase[i];
+                                if (hz >= minHz && hz <= maxHz)
+                                    freqTicks.push(hz);
+                            }
+                            if (!freqTicks.some(v => Math.abs(v - maxHz) < 0.5))
+                                freqTicks.push(maxHz);
+
                             for (let i = 0; i < freqTicks.length; i++) {
                                 const f = freqTicks[i];
                                 const x = xAtFreq(f);
@@ -100,10 +162,30 @@ Rectangle {
                                 ctx.stroke();
 
                                 ctx.fillStyle = Theme.palette.textMuted;
-                                ctx.font = "9px " + Theme.palette.font;
+                                ctx.font = canvasFont(9);
                                 ctx.textAlign = "center";
                                 ctx.textBaseline = "top";
-                                ctx.fillText(f >= 1000 ? (f / 1000) + "k" : String(f), x, topPad + chartH + 4);
+                                const fRounded = Math.round(f);
+                                const fLabel = fRounded >= 1000 ? ((Math.round((fRounded / 100)) / 10) + "k") : String(fRounded);
+                                ctx.fillText(fLabel, x, topPad + chartH + 4);
+                            }
+
+                            function responseDbWithPreview(freq) {
+                                const bands = Array.isArray(audioMenu.eqParametricBands) ? audioMenu.eqParametricBands : [];
+                                let total = Number(audioMenu.eqPreampDb) || 0;
+                                for (let i = 0; i < bands.length; i++) {
+                                    const baseBand = bands[i] || {};
+                                    const usePreview = eqGraphDragArea.hasDragPreview && eqGraphDragArea.dragBandIndex === i;
+                                    const bandForGraph = usePreview ? {
+                                        frequency_hz: Number(eqGraphDragArea.dragFreqHz) || Number(baseBand.frequency_hz) || 1000,
+                                        gain_db: Number(eqGraphDragArea.dragGainDb),
+                                        q: Number(baseBand.q) || 0.707,
+                                        filter_type: String(baseBand.filter_type || "peaking"),
+                                        enabled: baseBand.enabled !== false
+                                    } : baseBand;
+                                    total += audioMenu.eqGraphBandContributionDb(freq, bandForGraph);
+                                }
+                                return Math.max(audioMenu.eqGraphMinDb, Math.min(audioMenu.eqGraphMaxDb, total));
                             }
 
                             const points = 320;
@@ -111,7 +193,7 @@ Rectangle {
                             for (let i = 0; i < points; i++) {
                                 const t = i / (points - 1);
                                 const freq = audioMenu.eqGraphFrequencyAt(t);
-                                const db = audioMenu.eqGraphResponseDb(freq);
+                                const db = responseDbWithPreview(freq);
                                 const x = leftPad + t * chartW;
                                 const y = yAtDb(db);
                                 if (i === 0)
@@ -183,15 +265,13 @@ Rectangle {
                                 return;
 
                             const b = chartBounds();
-                            const x = Math.max(b.left, Math.min(b.right, mx));
                             const y = Math.max(b.top, Math.min(b.bottom, my));
 
-                            const tX = (x - b.left) / Math.max(1, b.right - b.left);
-                            const freq = audioMenu.eqGraphFrequencyAt(tX);
                             const tY = 1 - ((y - b.top) / Math.max(1, b.bottom - b.top));
                             const db = audioMenu.eqGraphMinDb + tY * (audioMenu.eqGraphMaxDb - audioMenu.eqGraphMinDb);
+                            const fixedFreq = Number(bands[dragBandIndex].frequency_hz) || dragFreqHz || 1000;
 
-                            dragFreqHz = freq;
+                            dragFreqHz = fixedFreq;
                             dragGainDb = db - Number(audioMenu.eqPreampDb || 0);
                             hasDragPreview = true;
                             eqGraphCanvas.requestPaint();
@@ -200,13 +280,12 @@ Rectangle {
                         function commitDragPreview() {
                             if (!hasDragPreview || dragBandIndex < 0)
                                 return;
-                            audioMenu.setParametricBandField(dragBandIndex, "frequency_hz", dragFreqHz);
                             audioMenu.setParametricBandField(dragBandIndex, "gain_db", dragGainDb);
                             hasDragPreview = false;
                             dragBandIndex = -1;
                         }
 
-                        onPressed: {
+                        onPressed: function(mouse) {
                             const bands = Array.isArray(audioMenu.eqParametricBands) ? audioMenu.eqParametricBands : [];
                             if (bands.length === 0)
                                 return;
@@ -230,12 +309,14 @@ Rectangle {
                             if (nearest >= 0) {
                                 audioMenu.eqSelectedBandIndex = nearest;
                                 dragBandIndex = nearest;
+                                dragFreqHz = Number(bands[nearest].frequency_hz) || 1000;
+                                dragGainDb = Number(bands[nearest].gain_db) || 0;
                                 draggingPoint = true;
                                 setDragPreviewFromMouse(mouse.x, mouse.y);
                             }
                         }
 
-                        onPositionChanged: {
+                        onPositionChanged: function(mouse) {
                             if (draggingPoint)
                                 setDragPreviewFromMouse(mouse.x, mouse.y);
                         }
@@ -408,6 +489,7 @@ Rectangle {
 
                     Button {
                         text: "+ Add Band"
+                        enabled: (Array.isArray(audioMenu.eqParametricBands) ? audioMenu.eqParametricBands.length : 0) < audioMenu.eqMaxParametricBands
                         hoverEnabled: true
                         background: Rectangle {
                             color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
@@ -457,20 +539,23 @@ Rectangle {
                             if (!bandItem)
                                 return;
 
+                            const flick = bandScrollView.contentItem;
+                            if (!flick || flick.contentY === undefined)
+                                return;
+
                             const topPadding = 8;
                             const bottomPadding = 8;
-                            const bandTop = bandItem.y;
-                            const bandBottom = bandItem.y + bandItem.height;
-                            const viewportHeight = bandScrollView.height;
-                            const contentHeight = Math.max(bandColumn.implicitHeight, bandColumn.height);
+                            const mapped = bandItem.mapToItem(flick.contentItem || bandColumn, 0, 0);
+                            const bandTop = mapped.y;
+                            const bandBottom = bandTop + bandItem.height;
+                            const viewportHeight = flick.height;
+                            const contentHeight = Math.max(Number(flick.contentHeight) || 0, bandColumn.implicitHeight, bandColumn.height);
                             const maxY = Math.max(0, contentHeight - viewportHeight);
 
                             if (maxY <= 0)
                                 return;
 
-                            let currentY = 0;
-                            if (bandScrollView.ScrollBar.vertical)
-                                currentY = bandScrollView.ScrollBar.vertical.position * maxY;
+                            const currentY = clamp(Number(flick.contentY) || 0, 0, maxY);
 
                             const viewportTop = currentY;
                             const viewportBottom = currentY + viewportHeight;
@@ -485,16 +570,7 @@ Rectangle {
                             if (Math.abs(targetY - currentY) <= 0.5)
                                 return;
 
-                            const targetPos = clamp(targetY / maxY, 0, 1);
-                            if (bandScrollView.ScrollBar.vertical) {
-                                bandScrollView.ScrollBar.vertical.position = targetPos;
-                                return;
-                            }
-
-                            // Fallback for styles/platforms where direct scrollbar access isn't available.
-                            const flick = bandScrollView.contentItem;
-                            if (flick && flick.contentY !== undefined)
-                                flick.contentY = targetY;
+                            flick.contentY = clamp(targetY, 0, maxY);
                         }
 
                         ColumnLayout {
@@ -548,9 +624,9 @@ Rectangle {
                                                     boxHeight: 20
 
                                                     items: audioMenu.eqFilterTypes.map(t => ({
-                                                                                                  name: String(t || ""),
-                                                                                                  description: String(t || "")
-                                                                                              }))
+                                                                name: String(t || ""),
+                                                                description: String(t || "")
+                                                            }))
                                                     selectedName: String(modelData.filter_type || "peaking")
                                                     placeholderText: "Filter"
                                                     labelProvider: item => String(item?.name || "")
@@ -612,8 +688,8 @@ Rectangle {
                                                     horizontalAlignment: TextInput.AlignRight
                                                     rightPadding: 8
                                                     validator: IntValidator {
-                                                        bottom: 20
-                                                        top: 20000
+                                                        bottom: Math.round(audioMenu.eqGraphMinFreqHz)
+                                                        top: Math.round(audioMenu.eqGraphMaxFreqHz)
                                                     }
                                                     inputMethodHints: Qt.ImhDigitsOnly
                                                     selectByMouse: true
@@ -627,7 +703,7 @@ Rectangle {
 
                                                     onEditingFinished: {
                                                         const parsed = parseInt(text, 10);
-                                                        const clamped = Math.max(20, Math.min(20000, isNaN(parsed) ? (Number(modelData.frequency_hz) || 1000) : parsed));
+                                                        const clamped = Math.max(audioMenu.eqGraphMinFreqHz, Math.min(audioMenu.eqGraphMaxFreqHz, isNaN(parsed) ? (Number(modelData.frequency_hz) || 1000) : parsed));
                                                         text = String(clamped);
                                                         audioMenu.setParametricBandField(index, "frequency_hz", clamped);
                                                     }
@@ -817,15 +893,16 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     boxHeight: 30
-                    
+
                     items: {
-                        const names = audioMenu.eqPresets
-                            .map(p => String(p.name || ""))
-                            .filter(n => n.length > 0);
+                        const names = audioMenu.eqPresets.map(p => String(p.name || "")).filter(n => n.length > 0);
                         if (!names.includes("Custom"))
                             names.push("Custom");
 
-                        return names.map(n => ({ name: n, description: n }));;
+                        return names.map(n => ({
+                                    name: n,
+                                    description: n
+                                }));
                     }
 
                     selectedName: audioMenu.defaultInputName
@@ -854,7 +931,7 @@ Rectangle {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
-                    onClicked: audioMenu.savePresetDialog.open()
+                    onClicked: audioMenu.openSavePresetDialog()
                 }
 
                 Button {

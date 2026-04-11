@@ -4,10 +4,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
 import Quickshell
-import Quickshell.Widgets
 import Quickshell.Services.SystemTray
 
 import "../globals"
+import "../components"
 
 Flow {
     id: trayRoot
@@ -120,67 +120,59 @@ Flow {
             }
         }
     }
+
     ColumnLayout {
         Repeater {
             model: SystemTray.items
 
-            delegate: Rectangle {
+            delegate: CompactIconButton {
                 id: trayIconWrap
                 required property var modelData
 
                 implicitWidth: 24
                 implicitHeight: 24
-                color: mouseArea.containsMouse ? "#313244" : "transparent"
-                radius: 4
+                buttonRadius: 4
+                backgroundColor: "transparent"
+                hoverBackgroundColor: "#313244"
+                borderColor: "transparent"
+                hoverBorderColor: "transparent"
+                iconSource: trayIconWrap.modelData.icon ? trayIconWrap.modelData.icon : Quickshell.iconPath(trayIconWrap.modelData.id, "application-x-executable")
+                iconImageWidth: 18
+                iconImageHeight: 18
 
-                // Replaced QtQuick Image with Quickshell IconImage
-                IconImage {
-                    anchors.centerIn: parent
-                    implicitWidth: 18
-                    implicitHeight: 18
-                    source: trayIconWrap.modelData.icon ? trayIconWrap.modelData.icon : Quickshell.iconPath(trayIconWrap.modelData.id, "application-x-executable")
-                }
+                onHoveredChanged: hovered => {
+                    if (menuOpener.menu === trayIconWrap.modelData.menu) {
+                        customMenu.sourceIconHovered = hovered;
 
-                MouseArea {
-                    id: mouseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                    onContainsMouseChanged: {
-                        if (menuOpener.menu === trayIconWrap.modelData.menu) {
-                            customMenu.sourceIconHovered = containsMouse;
-
-                            if (!containsMouse && customMenu.visible) {
-                                customMenu.checkHoverStatus();
-                            }
+                        if (!hovered && customMenu.visible) {
+                            customMenu.checkHoverStatus();
                         }
                     }
+                }
 
-                    onClicked: mouse => {
-                        if (mouse.button === Qt.LeftButton) {
-                            trayIconWrap.modelData.activate();
-                        } else if (mouse.button === Qt.RightButton) {
-                            if (trayIconWrap.modelData.hasMenu) {
-                                menuOpener.menu = trayIconWrap.modelData.menu;
-                                customMenu.sourceIconHovered = true;
-                                let parentWindow = trayRoot.panelWindow;
+                onClicked: mouse => {
+                    if (mouse.button === Qt.LeftButton) {
+                        trayIconWrap.modelData.activate();
+                    } else if (mouse.button === Qt.RightButton) {
+                        if (trayIconWrap.modelData.hasMenu) {
+                            menuOpener.menu = trayIconWrap.modelData.menu;
+                            customMenu.sourceIconHovered = true;
+                            let parentWindow = trayRoot.panelWindow;
 
-                                if (parentWindow) {
-                                    customMenu.anchor.window = parentWindow;
-                                    let baseRect = parentWindow.itemRect(trayIconWrap);
-                                    let shiftX = 10;
-                                    customMenu.anchor.rect = Qt.rect(baseRect.x + shiftX, baseRect.y, baseRect.width, baseRect.height);
-                                    customMenu.anchor.edges = Edges.Right;
-                                    customMenu.anchor.gravity = Edges.Right;
-                                    customMenu.visible = true;
-                                } else {
-                                    console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.");
-                                }
+                            if (parentWindow) {
+                                customMenu.anchor.window = parentWindow;
+                                let baseRect = parentWindow.itemRect(trayIconWrap);
+                                let shiftX = 10;
+                                customMenu.anchor.rect = Qt.rect(baseRect.x + shiftX, baseRect.y, baseRect.width, baseRect.height);
+                                customMenu.anchor.edges = Edges.Right;
+                                customMenu.anchor.gravity = Edges.Right;
+                                customMenu.visible = true;
                             } else {
-                                // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
-                                trayIconWrap.modelData.secondaryActivate();
+                                console.warn("Failed to find Window. Check your imports or pass the Sidebar ID directly.");
                             }
+                        } else {
+                            // FALLBACK: App doesn't use DBus menus, but expects a right-click signal!
+                            trayIconWrap.modelData.secondaryActivate();
                         }
                     }
                 }

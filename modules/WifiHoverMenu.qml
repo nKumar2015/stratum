@@ -7,6 +7,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: hoverMenu
@@ -218,11 +219,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             // ── Loading ────────────────────────────────────────────────
             Text {
@@ -267,11 +264,8 @@ PanelWindow {
                     spacing: 6
 
                     // Divider between connections
-                    Rectangle {
+                    Divider {
                         visible: connectionItem.index > 0
-                        Layout.fillWidth: true
-                        implicitHeight: 1
-                        color: Theme.palette.secondary
                     }
 
                     // Connection type + name row
@@ -308,82 +302,40 @@ PanelWindow {
                     }
 
                     // IP address row
-                    RowLayout {
+                    StatusRow {
                         visible: connectionItem.modelData.ipAddress.length > 0
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            text: "IP"
-                            color: Theme.palette.tertiary
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                        }
-
-                        Text {
-                            text: connectionItem.modelData.ipAddress
-                            color: Theme.palette.tertiary
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            font.bold: true
-                        }
+                        labelText: "IP"
+                        valueText: connectionItem.modelData.ipAddress
+                        labelColor: Theme.palette.tertiary
+                        valueColor: Theme.palette.tertiary
                     }
 
                     // Gateway row
-                    RowLayout {
+                    StatusRow {
                         visible: connectionItem.modelData.gateway.length > 0
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            text: "GW"
-                            color: Theme.palette.tertiary
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                        }
-
-                        Text {
-                            text: connectionItem.modelData.gateway
-                            color: Theme.palette.tertiary
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            font.bold: true
-                        }
+                        labelText: "GW"
+                        valueText: connectionItem.modelData.gateway
+                        labelColor: Theme.palette.tertiary
+                        valueColor: Theme.palette.tertiary
                     }
 
                     // Signal percentage row (wifi only)
-                    RowLayout {
+                    StatusRow {
                         visible: connectionItem.modelData.type === "wifi" && connectionItem.modelData.signalPct >= 0
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            text: "Signal"
-                            color: Theme.palette.tertiary
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                        }
-
-                        Text {
-                            text: connectionItem.modelData.signalPct + "%"
-                            color: connectionItem.modelData.signalPct >= 50 ? Theme.palette.success : Theme.palette.warning
-                            font.pixelSize: 11
-                            font.family: Theme.palette.font
-                            font.bold: true
-                        }
+                        labelText: "Signal"
+                        valueText: connectionItem.modelData.signalPct + "%"
+                        labelColor: Theme.palette.tertiary
+                        valueColor: connectionItem.modelData.signalPct >= 50 ? Theme.palette.success : Theme.palette.warning
+                        valueFillWidth: false
+                        valueElideRight: false
                     }
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             // ── Footer ─────────────────────────────────────────────────
             Text {

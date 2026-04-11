@@ -7,6 +7,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: hoverMenu
@@ -277,11 +278,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             RowLayout {
                 Layout.fillWidth: true
@@ -399,11 +396,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             Text {
                 text: "Power Mode"

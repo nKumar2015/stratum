@@ -242,8 +242,8 @@ fn eq_capabilities_json() -> Value {
             "wpctl_status_ok": wpctl_status_ok,
         },
         "parametric": {
-            "supported": wpctl_available,
-            "apply_mode": "dry-run",
+            "supported": wpctl_available && pw_cli_available,
+            "apply_mode": if wpctl_available && pw_cli_available { "pipewire-filter-chain" } else { "dry-run" },
             "max_bands": EQ_MAX_BANDS,
             "gain_range_db": [EQ_MIN_GAIN_DB, EQ_MAX_GAIN_DB],
             "freq_range_hz": [EQ_MIN_FREQ_HZ, EQ_MAX_FREQ_HZ],
@@ -775,8 +775,129 @@ fn cmd_equalizer_list_presets(device_id: &str) {
     }));
 }
 
+fn map_filter_type_for_pipewire(filter_type: &str) -> &'static str {
+    match normalized_filter_type(filter_type).as_str() {
+        "peaking" => "bq_peaking",
+        "low_shelf" => "bq_lowshelf",
+        "high_shelf" => "bq_highshelf",
+        "low_pass" => "bq_lowpass",
+        "high_pass" => "bq_highpass",
+        "band_pass" => "bq_bandpass",
+        _ => "bq_peaking",
+    }
+}
+
+fn pw_escape_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn find_node_id_by_name(node_name: &str) -> Option<u32> {
+    let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
+    let mut current_id: Option<u32> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("id ") {
+            let id_part = trimmed
+                .trim_start_matches("id ")
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim();
+            current_id = id_part.parse::<u32>().ok();
+            continue;
+        }
+
+        if trimmed.starts_with("node.name =") {
+            let name = trimmed
+                .trim_start_matches("node.name =")
+                .trim()
+                .trim_matches('"');
+            if name == node_name {
+                return current_id;
+            }
+        }
+    }
+
+    None
+}
+
+fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) -> Result<EqApplyResult, String> {
+    if !command_available("pw-cli") {
+        return Err("pw-cli not found - EQ not applied".to_string());
+    }
+
+    let resolved_device = if device_id == "@DEFAULT_SINK@" {
+        run_command_capture("pactl", &["get-default-sink"]).unwrap_or_else(|_| device_id.to_string())
+    } else {
+        device_id.to_string()
+    };
+
+    let mut filter_specs = Vec::new();
+    if preamp_db.abs() > 0.01 {
+        filter_specs.push(format!("{{ type = bq_peaking freq = 1000.0 gain = {:.4} q = 0.707 }}", preamp_db));
+    }
+    for band in bands.iter().filter(|b| b.enabled) {
+        filter_specs.push(format!(
+            "{{ type = {} freq = {:.4} gain = {:.4} q = {:.4} }}",
+            map_filter_type_for_pipewire(&band.filter_type),
+            band.frequency_hz,
+            band.gain_db,
+            band.q
+        ));
+    }
+    if filter_specs.is_empty() {
+        filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
+    }
+
+    if let Some(existing_input_id) = find_node_id_by_name("effect_input.stratum_eq") {
+        let _ = run_command_capture("pw-cli", &["destroy", &existing_input_id.to_string()]);
+    }
+    if let Some(existing_output_id) = find_node_id_by_name("effect_output.stratum_eq") {
+        let _ = run_command_capture("pw-cli", &["destroy", &existing_output_id.to_string()]);
+    }
+
+    let module_args = format!(
+        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
+        filter_specs.join(" "),
+        pw_escape_string(&resolved_device)
+    );
+
+    let output = Command::new("pw-cli")
+        .args(["load-module", "libpipewire-module-filter-chain", &module_args])
+        .output()
+        .map_err(|err| format!("failed to run pw-cli load-module: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "failed to load PipeWire filter-chain module (module may be unavailable for dynamic loading)".to_string()
+        } else {
+            format!("failed to load PipeWire filter-chain module: {}", stderr)
+        });
+    }
+
+    // Make the virtual sink active default for new streams.
+    let _ = run_command_capture("wpctl", &["set-default", "effect_input.stratum_eq"]);
+
+    Ok(EqApplyResult {
+        applied: true,
+        dry_run: false,
+        engine: "pipewire-filter-chain".to_string(),
+        resolved_device,
+        status: format!(
+            "applied {} enabled bands via PipeWire filter-chain virtual sink 'effect_input.stratum_eq'",
+            bands.iter().filter(|b| b.enabled).count()
+        ),
+    })
+}
+
 fn apply_eq_bands_wpctl(device_id: &str, bands: &[EqBand], preamp_db: f64) -> Result<EqApplyResult, String> {
     validate_parametric_bands(bands)?;
+
+    if command_available("pw-cli") {
+        return apply_eq_bands_pipewire(device_id, bands, preamp_db);
+    }
 
     if !command_available("wpctl") {
         return Err("wpctl not found - EQ not applied".to_string());
@@ -822,7 +943,7 @@ fn apply_eq_bands_wpctl(device_id: &str, bands: &[EqBand], preamp_db: f64) -> Re
         engine: "pipewire-wireplumber".to_string(),
         resolved_device,
         status: format!(
-            "validated preamp {} dB and {} enabled bands (dry-run): {}",
+            "validated preamp {} dB and {} enabled bands (dry-run; pw-cli/module-filter-chain unavailable): {}",
             preamp_db,
             bands.iter().filter(|b| b.enabled).count(),
             bands_str

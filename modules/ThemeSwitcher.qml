@@ -7,6 +7,7 @@ import Quickshell.Wayland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: switcher
@@ -219,7 +220,7 @@ PanelWindow {
             Repeater {
                 model: switcher.filteredThemes
 
-                delegate: Rectangle {
+                delegate: HoverListRow {
                     required property var modelData
                     required property int index
 
@@ -227,27 +228,14 @@ PanelWindow {
                     readonly property bool isKeyboardSelected: switcher.selectedIndex === index
 
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 42
-                    radius: 8
-                    color: (isCurrentTheme || isKeyboardSelected) ? Theme.palette.bgHover : Theme.palette.bgWidget
-                    border.width: 1
-                    border.color: (isCurrentTheme || isKeyboardSelected) ? Theme.palette.borderActive : Theme.palette.borderInactive
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: String(parent.modelData)
-                        color: Theme.palette.textMain
-                        font.pixelSize: 13
-                        font.bold: parent.isCurrentTheme || parent.isKeyboardSelected
-                        font.family: Theme.palette.font
+                    rowHeight: 42
+                    labelText: String(modelData)
+                    isActive: isCurrentTheme || isKeyboardSelected
+                    onHoveredChanged: hovered => {
+                        if (hovered)
+                            switcher.selectedIndex = index;
                     }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onEntered: switcher.selectedIndex = parent.index
-                        onClicked: switcher.applyTheme(String(parent.modelData))
-                    }
+                    onClicked: mouse => switcher.applyTheme(String(modelData))
                 }
             }
         }

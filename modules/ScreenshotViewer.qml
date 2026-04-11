@@ -10,6 +10,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 Window {
     id: viewer
@@ -975,21 +976,16 @@ Window {
                 }
             }
 
-            Rectangle {
-                visible: viewer.statusMessage.length > 0
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                radius: 6
-                color: viewer.statusError ? Theme.palette.error : Theme.palette.success
-
-                Text {
-                    anchors.centerIn: parent
-                    text: viewer.statusMessage
-                    color: Theme.palette.textMain
-                    font.family: Theme.palette.font
-                    font.pixelSize: 11
-                    font.bold: true
-                }
+            StatusBanner {
+                messageText: viewer.statusMessage
+                isError: viewer.statusError
+                successColor: Theme.palette.success
+                errorColor: Theme.palette.error
+                textColor: Theme.palette.textMain
+                textPixelSize: 11
+                textBold: true
+                bannerHeight: 28
+                bannerRadius: 6
             }
         }
     }

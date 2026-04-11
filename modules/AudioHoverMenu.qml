@@ -8,6 +8,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: hoverMenu
@@ -401,11 +402,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             Text {
                 visible: hoverMenu.loading
@@ -510,10 +507,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
+            Divider {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
             }
 
@@ -582,10 +576,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
+            Divider {
                 visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0
             }
 
@@ -654,11 +645,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             Text {
                 text: "Open full settings →"

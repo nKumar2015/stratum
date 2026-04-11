@@ -96,7 +96,8 @@ Notes:
   - `open-control`: launches `pavucontrol`.
 
 Parametric apply note:
-- `equalizer apply-preset` currently runs in validated dry-run mode for parametric details. It validates target sink/tooling and returns structured apply metadata while full PipeWire graph programming is implemented.
+- `equalizer apply-preset` and `equalizer apply-parametric` now use PipeWire filter-chain module loading when available, creating/updating the virtual sink `effect_input.stratum_eq` and setting it as default for new streams.
+- If `pw-cli`/filter-chain loading is unavailable, commands fall back to validated dry-run metadata with detailed status/error output.
 - Side effects:
   - Changes default audio routes and volume.
   - Launches a GUI app for `open-control`.

@@ -7,6 +7,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 PanelWindow {
     id: hoverMenu
@@ -251,11 +252,7 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             // ── Status line (shown only when non-empty) ─────────────────
             Text {
@@ -292,66 +289,53 @@ PanelWindow {
             Repeater {
                 model: hoverMenu.devices.slice(0, 6)
 
-                delegate: Rectangle {
-                    id: deviceItem
+                delegate: HoverListRow {
+                    id: deviceRow
                     required property var modelData
 
                     Layout.fillWidth: true
-                    height: 36
-                    radius: 6
-                    color: rowHover.containsMouse ? Theme.palette.bgHover : "transparent"
+                    rowHeight: 36
+                    rowRadius: 6
+                    showLabel: false
+                    backgroundColor: "transparent"
+                    activeBackgroundColor: Theme.palette.bgHover
+                    borderColor: "transparent"
+                    activeBorderColor: "transparent"
+                    contentLeftMargin: 8
+                    contentRightMargin: 8
 
                     property bool isConnected: modelData.connected === "yes"
                     property bool isPending: hoverMenu.pendingMac === modelData.mac
+                    isInteractive: !isPending && hoverMenu.pendingMac === ""
 
-                    RowLayout {
+                    StatusRow {
                         anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
                         spacing: 8
-
-                        Text {
-                            text: deviceItem.isConnected ? "󰂱" : "󰂯"
-                            color: deviceItem.isConnected ? Theme.palette.textMain : Theme.palette.textMuted
-                            font.pixelSize: 15
-                            font.family: Theme.palette.font
+                        leadingIconText: deviceRow.isConnected ? "󰂱" : "󰂯"
+                        iconColor: deviceRow.isConnected ? Theme.palette.textMain : Theme.palette.textMuted
+                        iconPixelSize: 15
+                        labelText: deviceRow.modelData.name
+                        labelColor: Theme.palette.textMain
+                        labelPixelSize: 12
+                        valueText: deviceRow.isPending ? "󰔟" : (deviceRow.isConnected ? "●" : "○")
+                        valueColor: {
+                            if (deviceRow.isPending)
+                                return Theme.palette.warning;
+                            if (deviceRow.isConnected)
+                                return Theme.palette.success;
+                            return Theme.palette.textMain;
                         }
-
-                        Text {
-                            text: deviceItem.modelData.name
-                            color: Theme.palette.textMain
-                            font.pixelSize: 12
-                            font.family: Theme.palette.font
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            text: deviceItem.isPending ? "󰔟" : (deviceItem.isConnected ? "●" : "○")
-                            color: {
-                                if (deviceItem.isPending)
-                                    return Theme.palette.warning;
-                                if (deviceItem.isConnected)
-                                    return Theme.palette.success;
-                                return Theme.palette.textMain;
-                            }
-                            font.pixelSize: deviceItem.isPending ? 14 : 10
-                            font.family: Theme.palette.font
-                        }
+                        valuePixelSize: deviceRow.isPending ? 14 : 10
+                        valueBold: false
+                        valueFillWidth: false
+                        valueElideRight: false
                     }
 
-                    MouseArea {
-                        id: rowHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: !deviceItem.isPending && hoverMenu.pendingMac === ""
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (deviceItem.isConnected)
-                                hoverMenu.disconnectDevice(deviceItem.modelData.mac, deviceItem.modelData.name);
+                    onClicked: {
+                        if (deviceRow.isConnected)
+                            hoverMenu.disconnectDevice(deviceRow.modelData.mac, deviceRow.modelData.name);
                             else
-                                hoverMenu.connectDevice(deviceItem.modelData.mac, deviceItem.modelData.name);
-                        }
+                            hoverMenu.connectDevice(deviceRow.modelData.mac, deviceRow.modelData.name);
                     }
                 }
             }
@@ -365,11 +349,7 @@ PanelWindow {
                 font.family: Theme.palette.font
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.palette.secondary
-            }
+            Divider {}
 
             // ── Footer: open full settings ───────────────────────────────
             Text {

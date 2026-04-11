@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
-import Quickshell
 import Quickshell.Io
 
 import "../globals"
@@ -38,6 +37,12 @@ ApplicationWindow {
     property real eqPreampDb: 0
     property var eqPresets: []
     property var eqCapabilities: ({})
+    readonly property int eqMaxParametricBands: {
+        const maxBands = Number(eqCapabilities?.parametric?.max_bands);
+        if (isFinite(maxBands) && maxBands > 0)
+            return Math.round(maxBands);
+        return 24;
+    }
     property bool eqApplyDryRun: false
     property bool eqApplyOk: true
     property string eqStatusMsg: ""
@@ -68,12 +73,52 @@ ApplicationWindow {
 
     readonly property var eqFrequencies: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"]
     readonly property var eqFilterTypes: ["peaking", "low_shelf", "high_shelf", "low_pass", "high_pass", "band_pass"]
-    readonly property int eqMinGain: -12
-    readonly property int eqMaxGain: 12
-    readonly property real eqGraphMinFreqHz: 20
-    readonly property real eqGraphMaxFreqHz: 20000
-    readonly property real eqGraphMinDb: -24
-    readonly property real eqGraphMaxDb: 24
+    readonly property real eqCapabilityMinGainDb: {
+        const range = eqCapabilities?.parametric?.gain_range_db;
+        if (Array.isArray(range) && range.length >= 2) {
+            const minDb = Number(range[0]);
+            const maxDb = Number(range[1]);
+            if (isFinite(minDb) && isFinite(maxDb) && maxDb > minDb)
+                return minDb;
+        }
+        return -12;
+    }
+    readonly property real eqCapabilityMaxGainDb: {
+        const range = eqCapabilities?.parametric?.gain_range_db;
+        if (Array.isArray(range) && range.length >= 2) {
+            const minDb = Number(range[0]);
+            const maxDb = Number(range[1]);
+            if (isFinite(minDb) && isFinite(maxDb) && maxDb > minDb)
+                return maxDb;
+        }
+        return 12;
+    }
+    readonly property int eqMinGain: Math.round(eqCapabilityMinGainDb)
+    readonly property int eqMaxGain: Math.round(eqCapabilityMaxGainDb)
+    readonly property real eqCapabilityMinFreqHz: {
+        const range = eqCapabilities?.parametric?.freq_range_hz;
+        if (Array.isArray(range) && range.length >= 2) {
+            const minHz = Number(range[0]);
+            const maxHz = Number(range[1]);
+            if (isFinite(minHz) && isFinite(maxHz) && maxHz > minHz)
+                return minHz;
+        }
+        return 20;
+    }
+    readonly property real eqCapabilityMaxFreqHz: {
+        const range = eqCapabilities?.parametric?.freq_range_hz;
+        if (Array.isArray(range) && range.length >= 2) {
+            const minHz = Number(range[0]);
+            const maxHz = Number(range[1]);
+            if (isFinite(minHz) && isFinite(maxHz) && maxHz > minHz)
+                return maxHz;
+        }
+        return 20000;
+    }
+    readonly property real eqGraphMinFreqHz: eqCapabilityMinFreqHz
+    readonly property real eqGraphMaxFreqHz: eqCapabilityMaxFreqHz
+    readonly property real eqGraphMinDb: eqCapabilityMinGainDb
+    readonly property real eqGraphMaxDb: eqCapabilityMaxGainDb
 
     function parseCliJson(raw) {
         try {
@@ -273,7 +318,7 @@ ApplicationWindow {
         };
 
         if (field === "frequency_hz")
-            next.frequency_hz = Math.max(20, Math.min(20000, Number(value) || 1000));
+            next.frequency_hz = Math.max(audioMenu.eqGraphMinFreqHz, Math.min(audioMenu.eqGraphMaxFreqHz, Number(value) || 1000));
         else if (field === "gain_db")
             next.gain_db = Math.max(audioMenu.eqMinGain, Math.min(audioMenu.eqMaxGain, Number(value) || 0));
         else if (field === "q")
@@ -292,10 +337,10 @@ ApplicationWindow {
 
     function addEqBand() {
         const bands = Array.isArray(audioMenu.eqParametricBands) ? audioMenu.eqParametricBands.slice() : [];
-        if (bands.length >= 24)
+        if (bands.length >= audioMenu.eqMaxParametricBands)
             return;
 
-        const nextFreq = bands.length > 0 ? Math.min(20000, Math.round((Number(bands[bands.length - 1].frequency_hz) || 1000) * 1.35)) : 1000;
+        const nextFreq = bands.length > 0 ? Math.min(audioMenu.eqGraphMaxFreqHz, Math.round((Number(bands[bands.length - 1].frequency_hz) || 1000) * 1.35)) : Math.max(audioMenu.eqGraphMinFreqHz, Math.min(audioMenu.eqGraphMaxFreqHz, 1000));
         bands.push({
             frequency_hz: nextFreq,
             gain_db: 0,
@@ -338,6 +383,10 @@ ApplicationWindow {
         currentPresetName = cleanName;
         isCustomPreset = false;
         eqStatusMsg = "Saving preset...";
+    }
+
+    function openSavePresetDialog() {
+        savePresetDialog.open();
     }
 
     function applyCurrentEq() {
@@ -786,70 +835,30 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     spacing: 12
 
-                                    Button {
-                                        text: ""
+                                    CompactIconButton {
                                         Layout.fillWidth: true
                                         implicitHeight: 40
-                                        hoverEnabled: true
-                                        background: Rectangle {
-                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                                            border.width: 1
-                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
-                                            radius: 8
-                                        }
-                                        contentItem: Text {
-                                            text: parent.text
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 30
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
+                                        buttonRadius: 8
+                                        iconText: ""
+                                        iconPixelSize: 30
                                         onClicked: MusicProvider.mediaPrevious()
                                     }
 
-                                    Button {
-                                        text: audioMenu.musicStatus === "Playing" ? "" : ""
-
+                                    CompactIconButton {
                                         Layout.fillWidth: true
                                         implicitHeight: 40
-                                        hoverEnabled: true
-                                        background: Rectangle {
-                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                                            border.width: 1
-                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
-                                            radius: 8
-                                        }
-                                        contentItem: Text {
-                                            text: parent.text
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 30
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
+                                        buttonRadius: 8
+                                        iconText: audioMenu.musicStatus === "Playing" ? "" : ""
+                                        iconPixelSize: 30
                                         onClicked: MusicProvider.mediaPlayPause()
                                     }
 
-                                    Button {
-                                        text: ""
+                                    CompactIconButton {
                                         Layout.fillWidth: true
                                         implicitHeight: 40
-                                        hoverEnabled: true
-                                        background: Rectangle {
-                                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                                            border.width: 1
-                                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
-                                            radius: 8
-                                        }
-                                        contentItem: Text {
-                                            text: parent.text
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 30
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
+                                        buttonRadius: 8
+                                        iconText: ""
+                                        iconPixelSize: 30
                                         onClicked: MusicProvider.mediaNext()
                                     }
                                 }
@@ -947,9 +956,9 @@ ApplicationWindow {
         modal: true
 
         background: Rectangle {
-            color: audioMenu.surfacePrimary
+            color: Theme.palette.bgMain
             radius: 12
-            border.color: audioMenu.strokeStrong
+            border.color: Theme.palette.bgInactive
             border.width: 1
         }
 
@@ -969,8 +978,8 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 36
-                color: Qt.rgba(0, 0, 0, 0.2)
-                border.color: audioMenu.strokeStrong
+                color: Theme.palette.bgWidget
+                border.color: Theme.palette.borderInactive
                 border.width: 1
                 radius: 8
 
@@ -1001,12 +1010,14 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     hoverEnabled: true
                     background: Rectangle {
-                        color: parent.hovered ? Qt.lighter(Theme.palette.primary, 1.1) : Theme.palette.primary
+                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
+                        border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                        border.width: 1
                         radius: 8
                     }
                     contentItem: Text {
                         text: parent.text
-                        color: Theme.palette.bgMain
+                        color: Theme.palette.textMain
                         font.family: Theme.palette.font
                         horizontalAlignment: Text.AlignHCenter
                     }
@@ -1021,7 +1032,9 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     hoverEnabled: true
                     background: Rectangle {
-                        color: parent.hovered ? Qt.lighter(Theme.palette.secondary, 1.08) : Theme.palette.secondary
+                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
+                        border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                        border.width: 1
                         radius: 8
                     }
                     contentItem: Text {

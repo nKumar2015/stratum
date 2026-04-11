@@ -5,6 +5,7 @@ import QtQuick.Window
 import Quickshell.Io
 
 import "../globals"
+import "../components"
 
 Window {
     id: bluetoothMenu
@@ -764,224 +765,88 @@ Window {
                     Layout.fillWidth: true
                 }
 
-                Rectangle {
+                CompactToggleButton {
+                    id: btToggleButton
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 98
-                    radius: 6
-                    color: btToggleMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-
-                    RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 6
-
-                        Text {
-                            text: bluetoothMenu.pendingAction === "toggle" ? "󰔟" : (bluetoothMenu.bluetoothEnabled ? "󰂯" : "󰂲")
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 13
-                        }
-
-                        Text {
-                            text: bluetoothMenu.pendingAction === "toggle" ? "Working" : (bluetoothMenu.bluetoothEnabled ? "On" : "Off")
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-                    }
-
-                    MouseArea {
-                        id: btToggleMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: bluetoothMenu.pendingAction !== "toggle"
-                        onClicked: bluetoothMenu.toggleBluetoothPower()
-                    }
+                    iconText: bluetoothMenu.pendingAction === "toggle" ? "󰔟" : (bluetoothMenu.bluetoothEnabled ? "󰂯" : "󰂲")
+                    labelText: bluetoothMenu.pendingAction === "toggle" ? "Working" : (bluetoothMenu.bluetoothEnabled ? "On" : "Off")
+                    enabled: bluetoothMenu.pendingAction !== "toggle"
+                    onClicked: bluetoothMenu.toggleBluetoothPower()
                 }
 
-                Rectangle {
+                CompactIconButton {
                     id: closeButton
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 38
-                    radius: 6
-                    color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰅖"
-                        color: Theme.palette.error
-                        font.family: Theme.palette.font
-                        font.pixelSize: 13
-                    }
-
-                    MouseArea {
-                        id: closeMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: GlobalState.showBluetoothSettings = false
-                    }
+                    buttonRadius: 6
+                    iconText: "󰅖"
+                    iconColor: Theme.palette.error
+                    iconPixelSize: 13
+                    borderColor: "transparent"
+                    hoverBorderColor: "transparent"
+                    onClicked: GlobalState.showBluetoothSettings = false
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 64
-                color: Theme.palette.bgWidget
-                radius: 8
+            ConnectionStatusCard {
+                headlineText: bluetoothMenu.activeName ? "Connected to " + bluetoothMenu.activeName : "No active Bluetooth device"
+                actionEnabled: bluetoothMenu.activeMac.length > 0
+                actionIconText: "󰂲"
+                actionIconPixelSize: 20
+                actionTooltipText: "Disconnect"
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 0
+                firstLabel: "MAC"
+                firstValue: bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A"
+                firstValueColor: bluetoothMenu.activeMac ? Theme.palette.secondary : Theme.palette.tertiary
 
-                    RowLayout {
-                        Layout.fillWidth: true
+                secondLabel: "Trusted"
+                secondValue: bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A"
+                secondValueColor: bluetoothMenu.activeTrusted ? Theme.palette.success : Theme.palette.error
 
-                        Text {
-                            text: bluetoothMenu.activeName ? "Connected to " + bluetoothMenu.activeName : "No active Bluetooth device"
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 13
-                            font.bold: true
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
+                thirdLabel: "Paired"
+                thirdValue: bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A"
+                thirdValueColor: bluetoothMenu.activePaired ? Theme.palette.success : Theme.palette.error
 
-                        Rectangle {
-                            id: disconnectButton
-                            property bool isEnabled: bluetoothMenu.activeMac.length > 0
-                            Layout.preferredHeight: 30
-                            Layout.preferredWidth: 38
-                            radius: 6
-                            color: !isEnabled ? Theme.palette.bgDark : (topDisconnectMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
-
-                            StyledIconToolTip {
-                                visible: topDisconnectMouse.containsMouse
-                                text: "Disconnect"
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "󰂲"
-                                color: Theme.palette.textMain
-                                font.family: Theme.palette.font
-                                font.pixelSize: 20
-                            }
-
-                            MouseArea {
-                                id: topDisconnectMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                enabled: parent.isEnabled
-                                onClicked: bluetoothMenu.disconnectCurrentDevice()
-                            }
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        Text {
-                            text: "MAC: " + (bluetoothMenu.activeMac ? bluetoothMenu.activeMac : "N/A")
-                            color: bluetoothMenu.activeMac ? Theme.palette.secondary : Theme.palette.tertiary
-                            font.family: Theme.palette.font
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: "•"
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 10
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: "Trusted: " + (bluetoothMenu.activeTrusted ? bluetoothMenu.activeTrusted : "N/A")
-                            color: bluetoothMenu.activeTrusted ? Theme.palette.success : Theme.palette.error
-                            font.family: Theme.palette.font
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: "•"
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 10
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: "Paired: " + (bluetoothMenu.activePaired ? bluetoothMenu.activePaired : "N/A")
-                            color: bluetoothMenu.activePaired ? Theme.palette.success : Theme.palette.error
-                            font.family: Theme.palette.font
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
+                onActionClicked: bluetoothMenu.disconnectCurrentDevice()
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Rectangle {
+                CompactIconButton {
                     id: refreshButton
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 38
-                    radius: 6
-                    color: refreshMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
+                    buttonRadius: 6
+                    iconText: "󰑐"
+                    iconPixelSize: 13
+                    borderColor: "transparent"
+                    hoverBorderColor: "transparent"
+                    onClicked: bluetoothMenu.refreshAll()
 
                     StyledIconToolTip {
-                        visible: refreshMouse.containsMouse
+                        visible: refreshButton.hovered
                         text: "Refresh"
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰑐"
-                        color: Theme.palette.textMain
-                        font.family: Theme.palette.font
-                        font.pixelSize: 13
-                    }
-
-                    MouseArea {
-                        id: refreshMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: bluetoothMenu.refreshAll()
                     }
                 }
 
-                Rectangle {
+                CompactIconButton {
                     id: scanButton
                     Layout.preferredHeight: 32
                     Layout.preferredWidth: 38
-                    radius: 6
-                    color: scanMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
+                    buttonRadius: 6
+                    iconText: ""
+                    iconPixelSize: 13
+                    enabled: bluetoothMenu.bluetoothEnabled
+                    borderColor: "transparent"
+                    hoverBorderColor: "transparent"
+                    onClicked: bluetoothMenu.startScan()
 
                     StyledIconToolTip {
-                        visible: scanMouse.containsMouse
+                        visible: scanButton.hovered
                         text: "Scan"
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: ""
-                        color: Theme.palette.textMain
-                        font.family: Theme.palette.font
-                        font.pixelSize: 13
-                    }
-
-                    MouseArea {
-                        id: scanMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: bluetoothMenu.bluetoothEnabled
-                        onClicked: bluetoothMenu.startScan()
                     }
                 }
 
@@ -1060,18 +925,24 @@ Window {
                             Repeater {
                                 model: bluetoothMenu.devices
 
-                                delegate: Rectangle {
+                                delegate: HoverListRow {
                                     id: deviceRow
                                     required property var modelData
                                     required property var index
                                     property bool shouldAnimateOnCreate: bluetoothMenu.animateRowsOnNextLoad
 
                                     width: parent.width
-                                    height: 56
-                                    radius: 6
-                                    color: bluetoothMenu.selectedMac === modelData.mac ? Theme.palette.bgHover : Theme.palette.bgWidget
-                                    border.color: modelData.connected === "yes" ? Theme.palette.borderActive : Theme.palette.borderInactive
-                                    border.width: 1
+                                    rowHeight: 56
+                                    rowRadius: 6
+                                    showLabel: false
+                                    isActive: bluetoothMenu.selectedMac === modelData.mac
+                                    highlightOnHover: false
+                                    backgroundColor: Theme.palette.bgWidget
+                                    activeBackgroundColor: Theme.palette.bgHover
+                                    borderColor: modelData.connected === "yes" ? Theme.palette.borderActive : Theme.palette.borderInactive
+                                    activeBorderColor: modelData.connected === "yes" ? Theme.palette.borderActive : Theme.palette.borderInactive
+                                    contentLeftMargin: 8
+                                    contentRightMargin: 8
                                     opacity: 1
 
                                     SequentialAnimation {
@@ -1119,24 +990,20 @@ Window {
                                         }
                                     }
 
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            if (bluetoothMenu.selectedMac === modelData.mac) {
-                                                bluetoothMenu.clearSelection();
-                                            } else {
-                                                bluetoothMenu.selectedMac = modelData.mac;
-                                                bluetoothMenu.selectedName = modelData.name;
-                                                bluetoothMenu.selectedConnected = modelData.connected == "yes";
-                                                bluetoothMenu.selectedTrusted = modelData.trusted == "yes";
-                                                bluetoothMenu.selectedPaired = modelData.paired == "yes";
-                                            }
+                                    onClicked: {
+                                        if (bluetoothMenu.selectedMac === modelData.mac) {
+                                            bluetoothMenu.clearSelection();
+                                        } else {
+                                            bluetoothMenu.selectedMac = modelData.mac;
+                                            bluetoothMenu.selectedName = modelData.name;
+                                            bluetoothMenu.selectedConnected = modelData.connected == "yes";
+                                            bluetoothMenu.selectedTrusted = modelData.trusted == "yes";
+                                            bluetoothMenu.selectedPaired = modelData.paired == "yes";
                                         }
                                     }
 
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.margins: 8
                                         spacing: 8
 
                                         ColumnLayout {
@@ -1151,48 +1018,27 @@ Window {
                                                 elide: Text.ElideRight
                                             }
 
-                                            RowLayout {
-                                                Layout.fillWidth: true
+                                            TripleStatusStrip {
+                                                firstLabel: "MAC"
+                                                firstValue: modelData.mac
+                                                firstLabelColor: Theme.palette.tertiary
+                                                firstValueColor: bluetoothMenu.selectedMac === modelData.mac ? Theme.palette.secondary : Theme.palette.tertiary
 
-                                                Text {
-                                                    text: modelData.mac
-                                                    color: bluetoothMenu.selectedMac === modelData.mac ? Theme.palette.secondary : Theme.palette.tertiary
-                                                    font.family: Theme.palette.font
-                                                    font.pixelSize: 10
-                                                    elide: Text.ElideRight
-                                                }
+                                                secondLabel: "State"
+                                                secondValue: modelData.connected === "yes" ? "Connected" : "Disconnected"
+                                                secondLabelColor: Theme.palette.tertiary
+                                                secondValueColor: modelData.connected === "yes" ? Theme.palette.success : Theme.palette.error
 
-                                                Text {
-                                                    text: "•"
-                                                    color: Theme.palette.textMain
-                                                    font.family: Theme.palette.font
-                                                    font.pixelSize: 10
-                                                    elide: Text.ElideRight
-                                                }
+                                                thirdLabel: "Trust"
+                                                thirdValue: modelData.trusted === "yes" ? "Trusted" : "Untrusted"
+                                                thirdLabelColor: Theme.palette.tertiary
+                                                thirdValueColor: modelData.trusted === "yes" ? Theme.palette.success : Theme.palette.error
 
-                                                Text {
-                                                    text: modelData.connected === "yes" ? "Connected" : "Disconnected"
-                                                    color: modelData.connected === "yes" ? Theme.palette.success : Theme.palette.error
-                                                    font.family: Theme.palette.font
-                                                    font.pixelSize: 10
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    text: "•"
-                                                    color: Theme.palette.textMain
-                                                    font.family: Theme.palette.font
-                                                    font.pixelSize: 10
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    text: modelData.trusted === "yes" ? "Trusted" : "Untrusted"
-                                                    color: modelData.trusted === "yes" ? Theme.palette.success : Theme.palette.error
-                                                    font.family: Theme.palette.font
-                                                    font.pixelSize: 10
-                                                    elide: Text.ElideRight
-                                                }
+                                                labelPixelSize: 10
+                                                valuePixelSize: 10
+                                                dotPixelSize: 10
+                                                valueBold: false
+                                                thirdValueFillWidth: false
                                             }
                                         }
 
@@ -1232,243 +1078,27 @@ Window {
                         }
                     }
 
-                    ColumnLayout {
+                    SelectedDevicePanel {
                         anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 8
+                        panelTitle: "Selected Device"
+                        selectedName: bluetoothMenu.selectedName
+                        selectedMac: bluetoothMenu.selectedMac
+                        selectedConnected: bluetoothMenu.selectedConnected
+                        selectedTrusted: bluetoothMenu.selectedTrusted
+                        selectedPaired: bluetoothMenu.selectedPaired
+                        hasSelection: bluetoothMenu.selectedMac.length > 0
+                        actionInProgress: bluetoothMenu.pendingAction.length !== 0
 
-                        RowLayout {
-                            Layout.fillWidth: true
-
-                            Text {
-                                text: "Selected Device"
-                                color: Theme.palette.textMuted
-                                font.family: Theme.palette.font
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-
-                            Item {
-                                Layout.fillWidth: true
-                            }
-
-                            Rectangle {
-                                Layout.preferredWidth: 30
-                                Layout.preferredHeight: 28
-                                radius: 5
-                                color: sideCloseMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-
-                                RowLayout {
-                                    anchors.centerIn: parent
-                                    spacing: 4
-
-                                    Text {
-                                        text: "󰅖"
-                                        color: Theme.palette.error
-                                        font.family: Theme.palette.font
-                                        font.pixelSize: 16
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: sideCloseMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: bluetoothMenu.clearSelection()
-                                }
-                            }
-                        }
-
-                        Text {
-                            text: bluetoothMenu.selectedName
-                            color: Theme.palette.textMain
-                            font.family: Theme.palette.font
-                            font.pixelSize: 14
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-
-                        Text {
-                            text: "MAC: " + bluetoothMenu.selectedMac
-                            color: Theme.palette.secondary
-                            font.family: Theme.palette.font
-                            font.pixelSize: 11
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 5
-
-                            Text {
-                                text: bluetoothMenu.selectedConnected ? "Connected" : "Disconnected"
-                                color: bluetoothMenu.selectedConnected ? Theme.palette.success : Theme.palette.error
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                text: "•"
-                                color: Theme.palette.textMain
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                            }
-
-                            Text {
-                                text: bluetoothMenu.selectedTrusted ? "Trusted" : "Untrusted"
-                                color: bluetoothMenu.selectedTrusted ? Theme.palette.success : Theme.palette.error
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                text: "•"
-                                color: Theme.palette.textMain
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: bluetoothMenu.selectedPaired ? "Paired" : "Paired"
-                                color: bluetoothMenu.selectedPaired ? Theme.palette.success : Theme.palette.error
-                                font.family: Theme.palette.font
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 1
-                            color: Theme.palette.secondary
-                        }
-
-                        Rectangle {
-                            Layout.preferredHeight: 36
-                            Layout.fillWidth: true
-                            radius: 6
-                            color: pairMainMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-                            border.color: Theme.palette.borderInactive
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-
-                                Text {
-                                    text: bluetoothMenu.selectedPaired ? "" : "󰌹"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    text: bluetoothMenu.selectedPaired ? "Remove" : "Pair"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-                            }
-
-                            MouseArea {
-                                id: pairMainMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                enabled: parent.enabled
-                                onClicked: bluetoothMenu.selectedPaired ? bluetoothMenu.removeSelectedDevice() : bluetoothMenu.pairSelectedDevice()
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.preferredHeight: 36
-                            Layout.fillWidth: true
-                            radius: 6
-                            color: connectMainMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-                            border.color: Theme.palette.borderInactive
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-
-                                Text {
-                                    text: "󰖩"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    text: bluetoothMenu.selectedConnected ? "Disconnect" : "Connect"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-                            }
-
-                            MouseArea {
-                                id: connectMainMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: bluetoothMenu.selectedConnected ? bluetoothMenu.disconnectCurrentDevice() : bluetoothMenu.connectSelectedDevice()
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.preferredHeight: 36
-                            Layout.fillWidth: true
-                            radius: 6
-                            color: removeMainMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
-                            border.color: Theme.palette.borderInactive
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.centerIn: parent
-                                spacing: 6
-
-                                Text {
-                                    text: bluetoothMenu.selectedTrusted ? "󰦞" : "󰕥"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    text: bluetoothMenu.selectedTrusted ? "Untrust" : "Trust"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                }
-                            }
-
-                            MouseArea {
-                                id: removeMainMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: bluetoothMenu.selectedTrusted ? bluetoothMenu.untrustSelectedDevice() : bluetoothMenu.trustSelectedDevice()
-                            }
-                        }
-
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                        onCloseClicked: bluetoothMenu.clearSelection()
+                        onPairClicked: bluetoothMenu.selectedPaired ? bluetoothMenu.forgetSelectedDevice() : bluetoothMenu.pairSelectedDevice()
+                        onConnectClicked: bluetoothMenu.selectedConnected ? bluetoothMenu.disconnectCurrentDevice() : bluetoothMenu.connectSelectedDevice()
+                        onTrustClicked: bluetoothMenu.selectedTrusted ? bluetoothMenu.untrustSelectedDevice() : bluetoothMenu.trustSelectedDevice()
                     }
                 }
             }
 
-            Text {
-                Layout.fillWidth: true
-                text: bluetoothMenu.statusMessage
-                color: Theme.palette.tertiary
-                font.family: Theme.palette.font
-                font.pixelSize: 11
-                wrapMode: Text.Wrap
-                visible: text.length > 0
+            StatusMessageFooter {
+                messageText: bluetoothMenu.statusMessage
             }
         }
     }
