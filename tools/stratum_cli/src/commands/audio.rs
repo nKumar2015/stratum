@@ -71,6 +71,8 @@ const EQ_MAX_GAIN_DB: f64 = 24.0;
 const EQ_MIN_Q: f64 = 0.1;
 const EQ_MAX_Q: f64 = 10.0;
 const EQ_MAX_BANDS: usize = 24;
+const EQ_VIRTUAL_INPUT_SINK: &str = "effect_input.stratum_eq";
+const EQ_VIRTUAL_OUTPUT_NODE: &str = "effect_output.stratum_eq";
 const EQ_SUPPORTED_FILTER_TYPES: [&str; 6] = [
     "peaking",
     "low_shelf",
@@ -791,6 +793,37 @@ fn pw_escape_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn is_eq_virtual_sink_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    trimmed == EQ_VIRTUAL_INPUT_SINK || trimmed == EQ_VIRTUAL_OUTPUT_NODE
+}
+
+fn parse_pw_info_property(output: &str, key: &str) -> Option<String> {
+    let needle = format!("{} =", key);
+    for line in output.lines() {
+        let trimmed = line.trim_start();
+        if let Some(value) = trimmed.strip_prefix(&needle) {
+            let parsed = value.trim().trim_matches('"').to_string();
+            if !parsed.is_empty() {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn resolve_effective_default_sink(default_sink: &str) -> String {
+    if default_sink.trim() != EQ_VIRTUAL_INPUT_SINK {
+        return default_sink.to_string();
+    }
+
+    let Ok(info) = run_command_capture("pw-cli", &["info", EQ_VIRTUAL_OUTPUT_NODE]) else {
+        return default_sink.to_string();
+    };
+
+    parse_pw_info_property(&info, "target.object").unwrap_or_else(|| default_sink.to_string())
+}
+
 fn find_node_id_by_name(node_name: &str) -> Option<u32> {
     let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
     let mut current_id: Option<u32> = None;
@@ -850,10 +883,10 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
         filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
     }
 
-    if let Some(existing_input_id) = find_node_id_by_name("effect_input.stratum_eq") {
+    if let Some(existing_input_id) = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK) {
         let _ = run_command_capture("pw-cli", &["destroy", &existing_input_id.to_string()]);
     }
-    if let Some(existing_output_id) = find_node_id_by_name("effect_output.stratum_eq") {
+    if let Some(existing_output_id) = find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE) {
         let _ = run_command_capture("pw-cli", &["destroy", &existing_output_id.to_string()]);
     }
 
@@ -880,7 +913,7 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
     // Some PipeWire setups acknowledge load-module but do not instantiate the
     // filter-chain node (policy/security/runtime limitation). Only report
     // success when the virtual sink really exists.
-    if find_node_id_by_name("effect_input.stratum_eq").is_none() {
+    if find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK).is_none() {
         return Err(
             "PipeWire did not create 'effect_input.stratum_eq' after module load; dynamic filter-chain loading is likely unavailable in this runtime"
                 .to_string(),
@@ -888,7 +921,7 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
     }
 
     // Make the virtual sink active default for new streams.
-    let _ = run_command_capture("wpctl", &["set-default", "effect_input.stratum_eq"]);
+    let _ = run_command_capture("wpctl", &["set-default", EQ_VIRTUAL_INPUT_SINK]);
 
     Ok(EqApplyResult {
         applied: true,
@@ -1284,6 +1317,112 @@ fn cmd_equalizer_get_current(device_id: &str) {
     }));
 }
 
+fn resolve_current_eq_preset_for_device(device_id: &str) -> EqPreset {
+    let config_data = load_eq_config();
+    let current_name = config_data
+        .device_last_preset
+        .get(device_id)
+        .cloned()
+        .or_else(|| config_data.device_last_preset.get("@DEFAULT_SINK@").cloned())
+        .unwrap_or_else(|| "Flat".to_string());
+
+    config_data
+        .presets
+        .iter()
+        .find(|p| p.name == current_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
+        .or_else(|| {
+            config_data
+                .presets
+                .iter()
+                .find(|p| p.name == "Flat" && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
+        })
+        .cloned()
+        .unwrap_or_else(|| EqPreset {
+            name: "Flat".to_string(),
+            device_id: device_id.to_string(),
+            bands: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                .iter()
+                .enumerate()
+                .map(|(index, gain)| legacy_band(index, *gain))
+                .collect(),
+            preamp_db: 0.0,
+            is_builtin: true,
+        })
+}
+
+fn cmd_set_output(sink: &str) {
+    let sink = sink.trim();
+    if sink.is_empty() {
+        fail("missing sink");
+    }
+
+    if is_eq_virtual_sink_name(sink) {
+        let result = run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
+        emit_json(json!({
+            "ok": true,
+            "command": "audio",
+            "subcommand": "set-output",
+            "sink": sink,
+            "message": result,
+        }));
+        return;
+    }
+
+    let preset = resolve_current_eq_preset_for_device(sink);
+    match apply_eq_bands_wpctl(sink, &preset.bands, preset.preamp_db) {
+        Ok(result) if result.applied => {
+            emit_json(json!({
+                "ok": true,
+                "command": "audio",
+                "subcommand": "set-output",
+                "sink": sink,
+                "routed_via_eq": true,
+                "apply": {
+                    "applied": result.applied,
+                    "dry_run": result.dry_run,
+                    "engine": result.engine,
+                    "resolved_device": result.resolved_device,
+                    "status": result.status,
+                },
+                "message": "output changed and EQ rerouted to selected sink",
+            }));
+        }
+        Ok(result) => {
+            let fallback =
+                run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
+            emit_json(json!({
+                "ok": true,
+                "command": "audio",
+                "subcommand": "set-output",
+                "sink": sink,
+                "routed_via_eq": false,
+                "apply": {
+                    "applied": result.applied,
+                    "dry_run": result.dry_run,
+                    "engine": result.engine,
+                    "resolved_device": result.resolved_device,
+                    "status": result.status,
+                },
+                "message": fallback,
+                "warning": "EQ backend unavailable; switched sink without EQ reroute",
+            }));
+        }
+        Err(err) => {
+            let fallback =
+                run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
+            emit_json(json!({
+                "ok": true,
+                "command": "audio",
+                "subcommand": "set-output",
+                "sink": sink,
+                "routed_via_eq": false,
+                "message": fallback,
+                "warning": format!("EQ reroute failed: {}", err),
+            }));
+        }
+    }
+}
+
 fn cmd_equalizer_delete_preset(device_id: &str, preset_name: &str) {
     let mut config_data = load_eq_config();
     let mut presets = config_data.presets;
@@ -1330,7 +1469,8 @@ fn cmd_status(hover: bool) {
         .unwrap_or_else(|| "yes".to_string());
 
     if !hover {
-        let default_sink = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+        let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+        let default_sink = resolve_effective_default_sink(&default_sink_raw);
         let headphones = is_headphone_default_sink(&default_sink);
         emit_json(json!({
             "ok": true,
@@ -1344,7 +1484,8 @@ fn cmd_status(hover: bool) {
         return;
     }
 
-    let default_sink = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+    let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+    let default_sink = resolve_effective_default_sink(&default_sink_raw);
     let default_source = run_command_capture("pactl", &["get-default-source"]).unwrap_or_default();
 
     let sink_rows = run_command_capture("pactl", &["list", "sinks"])
@@ -1352,6 +1493,7 @@ fn cmd_status(hover: bool) {
         .unwrap_or_default();
     let sinks = sink_rows
         .iter()
+        .filter(|row| !is_eq_virtual_sink_name(&row.name))
         .map(|row| {
             json!({
                 "name": row.name,
@@ -1409,14 +1551,7 @@ pub fn handle(args: &[String]) {
         }
         "set-output" => {
             let sink = args.get(1).map(String::as_str).unwrap_or("");
-            let result =
-                run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-output",
-                "message": result,
-            }));
+            cmd_set_output(sink);
         }
         "set-input" => {
             let source = args.get(1).map(String::as_str).unwrap_or("");

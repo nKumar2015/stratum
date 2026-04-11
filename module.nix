@@ -13,6 +13,8 @@ in {
 
     enableEqSink = lib.mkEnableOption "Enable Stratum PipeWire EQ virtual sink (user-level)";
 
+    forceEqRouting = lib.mkEnableOption "Best-effort force routing of playback streams through Stratum EQ sink";
+
     prefer = lib.mkOption {
       type = lib.types.enum ["darkness" "light"];
       default = "darkness";
@@ -65,6 +67,26 @@ in {
                     node.passive = true
                     audio.channels = 2
                     audio.position = [ FL FR ]
+                  }
+                }
+              }
+            ]
+          '';
+        };
+
+        ".config/wireplumber/wireplumber.conf.d/95-stratum-force-eq.conf" = lib.mkIf (cfg.enableEqSink && cfg.forceEqRouting) {
+          text = ''
+            stream.rules = [
+              {
+                matches = [
+                  {
+                    media.class = "Stream/Output/Audio"
+                  }
+                ]
+                actions = {
+                  update-props = {
+                    target.object = "effect_input.stratum_eq"
+                    node.dont-fallback = true
                   }
                 }
               }
