@@ -141,8 +141,10 @@ Item {
         command: ["stratum-cli", "audio", "open-control"]
     }
 
-    Component.onCompleted: MusicProvider.acquire()
-    Component.onCompleted: root.bootstrapStatus()
+    Component.onCompleted: { 
+        MusicProvider.acquire()
+        root.bootstrapStatus()
+    }
     Component.onDestruction: MusicProvider.release()
 
     Text {
