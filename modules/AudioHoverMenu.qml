@@ -73,7 +73,7 @@ PanelWindow {
     readonly property int maxExpectedVolumeMisses: 2
     readonly property int statusRetryDelayMs: 120
     readonly property int statusClearDelayMs: 1800
-    readonly property int hoverHideDelayMs: 350
+    readonly property int hoverHideDelayMs: 800
 
     function volumeIconFor(volume, muted) {
         if (muted || volume === 0)
@@ -392,7 +392,11 @@ PanelWindow {
 
         HoverHandler {
             id: menuHover
-            onHoveredChanged: GlobalState.audioHoverIntent = hovered
+            onHoveredChanged: {
+                GlobalState.audioHoverIntent = hovered;
+                if (!hovered)
+                    hideTimer.restart();
+            }
         }
 
         ColumnLayout {

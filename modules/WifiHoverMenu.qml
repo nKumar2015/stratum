@@ -172,7 +172,11 @@ PanelWindow {
         // HoverHandler covers the whole panel without being blocked by child MouseAreas.
         HoverHandler {
             id: menuHover
-            onHoveredChanged: GlobalState.wifiHoverIntent = hovered
+            onHoveredChanged: {
+                GlobalState.wifiHoverIntent = hovered;
+                if (!hovered)
+                    hideTimer.restart();
+            }
         }
 
         ColumnLayout {

@@ -205,7 +205,11 @@ PanelWindow {
         // steal events and cause premature exit detection.
         HoverHandler {
             id: menuHover
-            onHoveredChanged: GlobalState.bluetoothHoverIntent = hovered
+            onHoveredChanged: {
+                GlobalState.bluetoothHoverIntent = hovered;
+                if (!hovered)
+                    hideTimer.restart();
+            }
         }
 
         ColumnLayout {
