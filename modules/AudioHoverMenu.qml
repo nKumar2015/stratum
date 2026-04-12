@@ -6,6 +6,7 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
@@ -95,6 +96,12 @@ PanelWindow {
             showLoading = true;
         loading = showLoading;
         errorMsg = "";
+        
+        if (DaemonRpc.canUse()) {
+            statusProc.command = DaemonRpc.command("audio.devices", {});
+        } else {
+            statusProc.command = ["stratum-cli", "audio", "status", "--hover"];
+        }
         statusProc.running = true;
     }
 
@@ -175,7 +182,12 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching output...";
-        actionProc.command = ["stratum-cli", "audio", "set-output", name];
+        
+        if (DaemonRpc.canUse()) {
+            actionProc.command = DaemonRpc.command("audio.set_output", { target: name });
+        } else {
+            actionProc.command = ["stratum-cli", "audio", "set-output", name];
+        }
         actionProc.running = true;
     }
 
@@ -184,7 +196,12 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching input...";
-        actionProc.command = ["stratum-cli", "audio", "set-input", name];
+        
+        if (DaemonRpc.canUse()) {
+            actionProc.command = DaemonRpc.command("audio.set_input", { target: name });
+        } else {
+            actionProc.command = ["stratum-cli", "audio", "set-input", name];
+        }
         actionProc.running = true;
     }
 

@@ -1,11 +1,8 @@
-use std::fs;
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
-
 use serde_json::{json, Value};
 
-use crate::common::{command_available, config_dir, emit_help, emit_json, fail, is_help_flag, run_command_capture};
+use crate::common::{command_available, emit_help, emit_json, fail, is_help_flag};
+use crate::daemon_client::daemon_call;
 
 fn print_help() {
     emit_help(
@@ -25,1707 +22,209 @@ fn print_help() {
     );
 }
 
-fn extract_first_percent(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i].is_ascii_digit() {
-            let start = i;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
+
+fn cmd_set_output(sink: &str) {
+    match daemon_call("audio.set_output", json!({"target": sink})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to set output via daemon");
             }
-            if i < bytes.len() && bytes[i] == b'%' {
-                return Some(text[start..=i].to_string());
+        }
+        Err(err) => fail(&err),
+    }
+}
+
+fn cmd_equalizer_list_presets(device_id: &str) {
+    match daemon_call("audio.eq_list_presets", json!({"device": device_id})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to list presets via daemon");
             }
-            continue;
         }
-        i += 1;
+        Err(err) => fail(&err),
     }
-    None
 }
 
-fn extract_mute_state(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let _key = parts.next();
-        if let Some(value) = parts.next() {
-            return Some(value.trim().to_lowercase());
+fn cmd_equalizer_apply_preset(device_id: &str, preset_name: &str) {
+    match daemon_call("audio.eq_apply_preset", json!({"device": device_id, "preset_name": preset_name})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to apply preset via daemon");
+            }
         }
+        Err(err) => fail(&err),
     }
-    None
 }
 
-#[derive(Clone, Debug)]
-struct AudioDeviceRow {
-    name: String,
-    description: String,
-    block: String,
-}
-
-const EQ_CONFIG_VERSION: u32 = 2;
-const EQ_DEFAULT_Q: f64 = 0.707;
-const EQ_MIN_FREQ_HZ: f64 = 20.0;
-const EQ_MAX_FREQ_HZ: f64 = 20_000.0;
-const EQ_MIN_GAIN_DB: f64 = -24.0;
-const EQ_MAX_GAIN_DB: f64 = 24.0;
-const EQ_MIN_Q: f64 = 0.1;
-const EQ_MAX_Q: f64 = 10.0;
-const EQ_MAX_BANDS: usize = 24;
-const EQ_VIRTUAL_INPUT_SINK: &str = "effect_input.stratum_eq";
-const EQ_VIRTUAL_OUTPUT_NODE: &str = "effect_output.stratum_eq";
-const EQ_SUPPORTED_FILTER_TYPES: [&str; 6] = [
-    "peaking",
-    "low_shelf",
-    "high_shelf",
-    "low_pass",
-    "high_pass",
-    "band_pass",
-];
-
-const EQ_DEFAULT_FREQUENCIES: [f64; 10] = [31.0, 62.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0];
-
-// EQ band structure (parametric)
-#[derive(Clone, Debug)]
-struct EqBand {
-    frequency_hz: f64,
-    gain_db: f64,
-    q: f64,
-    filter_type: String,
-    enabled: bool,
-}
-
-// EQ Preset structure (per output)
-#[derive(Clone, Debug)]
-struct EqPreset {
-    name: String,
-    device_id: String,
-    bands: Vec<EqBand>,
-    preamp_db: f64,
-    is_builtin: bool,
-}
-
-#[derive(Clone, Debug)]
-struct EqConfig {
-    presets: Vec<EqPreset>,
-    device_last_preset: HashMap<String, String>,
-}
-
-#[derive(Clone, Debug)]
-struct EqApplyResult {
-    applied: bool,
-    dry_run: bool,
-    engine: String,
-    resolved_device: String,
-    status: String,
-}
-
-fn eq_config_file() -> PathBuf {
-    config_dir().join("audio-eq-presets.json")
-}
-
-fn clamp_band(mut band: EqBand) -> EqBand {
-    band.frequency_hz = band.frequency_hz.clamp(EQ_MIN_FREQ_HZ, EQ_MAX_FREQ_HZ);
-    band.gain_db = band.gain_db.clamp(EQ_MIN_GAIN_DB, EQ_MAX_GAIN_DB);
-    band.q = band.q.clamp(EQ_MIN_Q, EQ_MAX_Q);
-    if band.filter_type.trim().is_empty() {
-        band.filter_type = "peaking".to_string();
-    }
-    band
-}
-
-fn legacy_band(index: usize, gain_db: i32) -> EqBand {
-    let frequency_hz = EQ_DEFAULT_FREQUENCIES.get(index).copied().unwrap_or(1000.0);
-    clamp_band(EqBand {
-        frequency_hz,
-        gain_db: gain_db as f64,
-        q: EQ_DEFAULT_Q,
-        filter_type: "peaking".to_string(),
-        enabled: true,
-    })
-}
-
-fn band_to_json(band: &EqBand) -> Value {
-    json!({
-        "frequency_hz": band.frequency_hz,
-        "gain_db": band.gain_db,
-        "q": band.q,
-        "filter_type": band.filter_type,
-        "enabled": band.enabled,
-    })
-}
-
-fn preset_legacy_gains(preset: &EqPreset) -> Vec<i32> {
-    legacy_gains_from_bands(&preset.bands)
-}
-
-fn legacy_gains_from_bands(bands: &[EqBand]) -> Vec<i32> {
-    bands
-        .iter()
-        .map(|band| band.gain_db.round() as i32)
-        .collect()
-}
-
-fn normalized_filter_type(raw: &str) -> String {
-    raw.trim().to_lowercase().replace('-', "_")
-}
-
-fn is_supported_filter_type(raw: &str) -> bool {
-    let normalized = normalized_filter_type(raw);
-    EQ_SUPPORTED_FILTER_TYPES
-        .iter()
-        .any(|supported| *supported == normalized)
-}
-
-fn validate_parametric_bands(bands: &[EqBand]) -> Result<(), String> {
-    if bands.is_empty() {
-        return Err("parametric preset requires at least one band".to_string());
-    }
-    if bands.len() > EQ_MAX_BANDS {
-        return Err(format!("too many bands: {} (max {})", bands.len(), EQ_MAX_BANDS));
-    }
-
-    for (index, band) in bands.iter().enumerate() {
-        if !(EQ_MIN_FREQ_HZ..=EQ_MAX_FREQ_HZ).contains(&band.frequency_hz) {
-            return Err(format!(
-                "band {} frequency out of range: {} Hz ({}..={} expected)",
-                index,
-                band.frequency_hz,
-                EQ_MIN_FREQ_HZ,
-                EQ_MAX_FREQ_HZ
-            ));
-        }
-        if !(EQ_MIN_GAIN_DB..=EQ_MAX_GAIN_DB).contains(&band.gain_db) {
-            return Err(format!(
-                "band {} gain out of range: {} dB ({}..={} expected)",
-                index,
-                band.gain_db,
-                EQ_MIN_GAIN_DB,
-                EQ_MAX_GAIN_DB
-            ));
-        }
-        if !(EQ_MIN_Q..=EQ_MAX_Q).contains(&band.q) {
-            return Err(format!(
-                "band {} Q out of range: {} ({}..={} expected)",
-                index,
-                band.q,
-                EQ_MIN_Q,
-                EQ_MAX_Q
-            ));
-        }
-        if !is_supported_filter_type(&band.filter_type) {
-            return Err(format!(
-                "band {} uses unsupported filter_type '{}'",
-                index,
-                band.filter_type
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn eq_capabilities_json() -> Value {
-    let wpctl_available = command_available("wpctl");
-    let pw_cli_available = command_available("pw-cli");
-    let pactl_available = command_available("pactl");
-
-    let wpctl_status_ok = if wpctl_available {
-        run_command_capture("wpctl", &["status"]).is_ok()
-    } else {
-        false
-    };
-
-    json!({
-        "engine": "pipewire-wireplumber",
-        "tools": {
-            "pactl": pactl_available,
-            "wpctl": wpctl_available,
-            "pw_cli": pw_cli_available,
-            "wpctl_status_ok": wpctl_status_ok,
-        },
-        "parametric": {
-            "supported": wpctl_available && pw_cli_available,
-            "apply_mode": if wpctl_available && pw_cli_available { "pipewire-filter-chain" } else { "dry-run" },
-            "max_bands": EQ_MAX_BANDS,
-            "gain_range_db": [EQ_MIN_GAIN_DB, EQ_MAX_GAIN_DB],
-            "freq_range_hz": [EQ_MIN_FREQ_HZ, EQ_MAX_FREQ_HZ],
-            "q_range": [EQ_MIN_Q, EQ_MAX_Q],
-            "supported_filter_types": EQ_SUPPORTED_FILTER_TYPES,
-        }
-    })
+fn cmd_equalizer_get_current(_device_id: &str) {
+    fail("get-current is deprecated; use list-presets or status");
 }
 
 fn cmd_equalizer_capabilities() {
-    emit_json(json!({
-        "ok": true,
-        "capabilities": eq_capabilities_json(),
-    }));
-}
-
-fn parse_eq_bands(value: &Value) -> Option<(Vec<EqBand>, bool)> {
-    let bands_arr = value.as_array()?;
-    if bands_arr.is_empty() {
-        return Some((Vec::new(), false));
-    }
-
-    // Legacy format: array of numbers.
-    if bands_arr.iter().all(Value::is_number) {
-        let bands = bands_arr
-            .iter()
-            .enumerate()
-            .filter_map(|(index, raw_gain)| raw_gain.as_i64().map(|g| legacy_band(index, g as i32)))
-            .collect::<Vec<_>>();
-        return Some((bands, true));
-    }
-
-    // Parametric format: array of objects.
-    let mut bands = Vec::new();
-    for (index, raw_band) in bands_arr.iter().enumerate() {
-        let Some(band_obj) = raw_band.as_object() else {
-            continue;
-        };
-
-        let fallback_freq = EQ_DEFAULT_FREQUENCIES.get(index).copied().unwrap_or(1000.0);
-        let frequency_hz = band_obj
-            .get("frequency_hz")
-            .and_then(Value::as_f64)
-            .or_else(|| band_obj.get("frequency").and_then(Value::as_f64))
-            .unwrap_or(fallback_freq);
-        let gain_db = band_obj
-            .get("gain_db")
-            .and_then(Value::as_f64)
-            .or_else(|| band_obj.get("gain").and_then(Value::as_f64))
-            .unwrap_or(0.0);
-        let q = band_obj
-            .get("q")
-            .and_then(Value::as_f64)
-            .unwrap_or(EQ_DEFAULT_Q);
-        let filter_type = band_obj
-            .get("filter_type")
-            .and_then(Value::as_str)
-            .unwrap_or("peaking")
-            .to_string();
-        let enabled = band_obj
-            .get("enabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-
-        bands.push(clamp_band(EqBand {
-            frequency_hz,
-            gain_db,
-            q,
-            filter_type,
-            enabled,
-        }));
-    }
-
-    Some((bands, false))
-}
-
-fn load_eq_config() -> EqConfig {
-    let file_path = eq_config_file();
-    if !file_path.exists() {
-        return EqConfig {
-            presets: default_eq_presets(),
-            device_last_preset: HashMap::new(),
-        };
-    }
-
-    match fs::read_to_string(&file_path) {
-        Ok(content) => match serde_json::from_str::<Value>(&content) {
-            Ok(data) => {
-                let mut migrated = data
-                    .get("version")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1) < EQ_CONFIG_VERSION as u64;
-                let mut presets = Vec::new();
-                if let Some(presets_arr) = data.get("presets").and_then(|v| v.as_array()) {
-                    for preset_val in presets_arr {
-                        if let (Some(name), Some(device_id), Some(bands_arr)) = (
-                            preset_val.get("name").and_then(|v| v.as_str()),
-                            preset_val.get("device_id").and_then(|v| v.as_str()),
-                            preset_val.get("bands"),
-                        ) {
-                            if let Some((bands, used_legacy)) = parse_eq_bands(bands_arr) {
-                                if used_legacy {
-                                    migrated = true;
-                                }
-                                presets.push(EqPreset {
-                                    name: name.to_string(),
-                                    device_id: device_id.to_string(),
-                                    bands,
-                                    preamp_db: preset_val
-                                        .get("preamp_db")
-                                        .and_then(Value::as_f64)
-                                        .unwrap_or(0.0),
-                                    is_builtin: preset_val.get("is_builtin").and_then(|v| v.as_bool()).unwrap_or(false),
-                                });
-                            }
-                        }
-                    }
+    match daemon_call("audio.eq_list_presets", json!({"device": "@DEFAULT_SINK@"})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                if let Some(caps) = result.get("capabilities") {
+                    emit_json(caps.clone());
+                } else {
+                    fail("missing capabilities in daemon response");
                 }
-
-                let mut device_last_preset = HashMap::new();
-                if let Some(last_map) = data.get("device_last_preset").and_then(Value::as_object) {
-                    for (device, preset_name) in last_map {
-                        if let Some(name) = preset_name.as_str() {
-                            device_last_preset.insert(device.to_string(), name.to_string());
-                        }
-                    }
-                }
-
-                let mut config = EqConfig {
-                    presets,
-                    device_last_preset,
-                };
-
-                if config.presets.is_empty() {
-                    config.presets = default_eq_presets();
-                    migrated = true;
-                }
-
-                if migrated {
-                    let _ = save_eq_config(&config);
-                }
-
-                config
+            } else {
+                fail("failed to get capabilities via daemon");
             }
-            Err(_) => EqConfig {
-                presets: default_eq_presets(),
-                device_last_preset: HashMap::new(),
-            },
-        },
-        Err(_) => EqConfig {
-            presets: default_eq_presets(),
-            device_last_preset: HashMap::new(),
-        },
+        }
+        Err(err) => fail(&err),
     }
 }
 
-fn load_eq_presets() -> Vec<EqPreset> {
-    load_eq_config().presets
-}
-
-fn default_eq_presets() -> Vec<EqPreset> {
-    vec![
-        EqPreset {
-            name: "Flat".to_string(),
-            device_id: "@DEFAULT_SINK@".to_string(),
-            bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        },
-        EqPreset {
-            name: "Bass Boost".to_string(),
-            device_id: "@DEFAULT_SINK@".to_string(),
-            bands: [6, 4, 2, 0, -2, -1, 0, 1, 2, 3]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        },
-        EqPreset {
-            name: "Bright".to_string(),
-            device_id: "@DEFAULT_SINK@".to_string(),
-            bands: [0, -2, -1, 0, 1, 2, 3, 4, 3, 2]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        },
-        EqPreset {
-            name: "Treble Boost".to_string(),
-            device_id: "@DEFAULT_SINK@".to_string(),
-            bands: [-2, -1, 0, 0, 0, 0, 2, 4, 6, 5]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        },
-    ]
-}
-
-fn save_eq_config(config_data: &EqConfig) -> Result<(), String> {
-    let file_path = eq_config_file();
-    if let Err(err) = fs::create_dir_all(file_path.parent().unwrap_or_else(|| std::path::Path::new("."))) {
-        return Err(format!("failed to create config dir: {}", err));
+fn cmd_equalizer_apply_parametric(device_id: &str, payload_str: &str) {
+    let bands = serde_json::from_str::<Value>(payload_str).unwrap_or(Value::Null);
+    match daemon_call("audio.eq_apply_parametric", json!({"device": device_id, "bands": bands})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to apply parametric EQ via daemon");
+            }
+        }
+        Err(err) => fail(&err),
     }
+}
 
-    let presets_json: Vec<Value> = config_data
-        .presets
-        .iter()
-        .map(|p| {
-            json!({
-                "name": p.name,
-                "device_id": p.device_id,
-                "bands": p.bands.iter().map(band_to_json).collect::<Vec<_>>(),
-                "preamp_db": p.preamp_db,
-                "is_builtin": p.is_builtin,
-            })
-        })
+fn cmd_equalizer_save_preset(device_id: &str, preset_name: &str, bands_str: &str) {
+    let bands: Vec<i32> = bands_str
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i32>().ok())
         .collect();
 
-    let config = json!({
-        "version": EQ_CONFIG_VERSION,
-        "presets": presets_json,
-        "device_last_preset": config_data.device_last_preset,
-    });
-
-    fs::write(&file_path, config.to_string())
-        .map_err(|err| format!("failed to write EQ config: {}", err))
-}
-
-fn parse_pactl_device_rows(output: &str, block_prefix: &str, skip_monitor_sources: bool) -> Vec<AudioDeviceRow> {
-    let mut rows: Vec<AudioDeviceRow> = Vec::new();
-    let mut name = String::new();
-    let mut description = String::new();
-    let mut block = String::new();
-    let mut in_block = false;
-
-    for line in output.lines() {
-        if line.starts_with(block_prefix) {
-            if !name.is_empty() && (!skip_monitor_sources || !name.ends_with(".monitor")) {
-                rows.push(AudioDeviceRow {
-                    name: name.clone(),
-                    description: description.clone(),
-                    block: block.clone(),
-                });
+    match daemon_call("audio.eq_save_preset_parametric", json!({"device": device_id, "preset_name": preset_name, "bands": bands})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to save preset via daemon");
             }
-
-            name.clear();
-            description.clear();
-            block.clear();
-            in_block = true;
         }
-
-        if !in_block {
-            continue;
-        }
-
-        if !block.is_empty() {
-            block.push('\n');
-        }
-        block.push_str(line);
-
-        let trimmed = line.trim_start();
-        if let Some(value) = trimmed.strip_prefix("Name: ") {
-            name = value.trim().to_string();
-        } else if let Some(value) = trimmed.strip_prefix("Description: ") {
-            description = value.trim().to_string();
-        }
+        Err(err) => fail(&err),
     }
-
-    if !name.is_empty() && (!skip_monitor_sources || !name.ends_with(".monitor")) {
-        rows.push(AudioDeviceRow {
-            name,
-            description,
-            block,
-        });
-    }
-
-    rows
 }
 
-fn is_headphone_default_sink(default_sink: &str) -> String {
-    if default_sink.trim().is_empty() {
-        return "no".to_string();
+fn cmd_equalizer_save_preset_parametric(device_id: &str, preset_name: &str, payload_str: &str) {
+    let payload = serde_json::from_str::<Value>(payload_str).unwrap_or(Value::Null);
+    let bands = payload.get("bands").cloned().unwrap_or(Value::Null);
+    let preamp_db = payload.get("preamp_db").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+    match daemon_call("audio.eq_save_preset_parametric", json!({"device": device_id, "preset_name": preset_name, "bands": bands, "preamp_db": preamp_db})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to save parametric preset via daemon");
+            }
+        }
+        Err(err) => fail(&err),
     }
+}
 
-    let sink_output = match run_command_capture("pactl", &["list", "sinks"]) {
-        Ok(output) => output,
-        Err(_) => return "no".to_string(),
-    };
-
-    let sinks = parse_pactl_device_rows(&sink_output, "Sink #", false);
-    let Some(default_row) = sinks.iter().find(|row| row.name == default_sink) else {
-        return "no".to_string();
-    };
-
-    let block = default_row.block.to_lowercase();
-    if block.contains("device.form_factor = \"headset\"")
-        || block.contains("device.form_factor = \"headphone\"")
-        || block.contains("device.icon_name = \"audio-headset")
-        || block.contains("active port: headset")
-        || block.contains("active port: headphone")
-        || block.contains("api.bluez5.icon = \"audio-headset\"")
-    {
-        return "yes".to_string();
+fn cmd_equalizer_delete_preset(device_id: &str, preset_name: &str) {
+    match daemon_call("audio.eq_delete_preset", json!({"device": device_id, "preset_name": preset_name})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to delete preset via daemon");
+            }
+        }
+        Err(err) => fail(&err),
     }
+}
 
-    let probe = format!("{} {}", default_sink, default_row.description).to_lowercase();
-    if probe.contains("bluez_output.")
-        || probe.contains("headphone")
-        || probe.contains("headset")
-        || probe.contains("earbud")
-        || probe.contains("earphone")
-        || probe.contains("airpods")
-        || probe.contains("buds")
-    {
-        "yes".to_string()
-    } else {
-        "no".to_string()
+fn cmd_media_info() {
+    match daemon_call("audio.media_info", json!({})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to get media info via daemon");
+            }
+        }
+        Err(err) => fail(&err),
+    }
+}
+
+fn cmd_media_seek(seconds_str: &str) {
+    let seconds = seconds_str.parse::<i64>().unwrap_or(0);
+    match daemon_call("audio.media_seek", json!({"position_sec": seconds})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to seek via daemon");
+            }
+        }
+        Err(err) => fail(&err),
+    }
+}
+
+fn cmd_media_seek_relative(offset_str: &str) {
+    let offset = offset_str.parse::<i64>().unwrap_or(0);
+    match daemon_call("audio.media_seek", json!({"offset_sec": offset})) {
+        Ok(res) => {
+            if let Some(result) = res.get("result") {
+                emit_json(result.clone());
+            } else {
+                fail("failed to seek relative via daemon");
+            }
+        }
+        Err(err) => fail(&err),
     }
 }
 
 fn has_hover_flag(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--hover")
 }
-
-fn run_capture_optional(program: &str, args: &[&str]) -> String {
-    let output = match Command::new(program).args(args).output() {
-        Ok(output) => output,
-        Err(_) => return String::new(),
-    };
-
-    if !output.status.success() {
-        return String::new();
-    }
-
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-fn parse_int_from_text(text: &str) -> i64 {
-    text.trim()
-        .parse::<i64>()
-        .ok()
-        .or_else(|| {
-            text.trim()
-                .parse::<f64>()
-                .ok()
-                .map(|value| value.floor() as i64)
-        })
-        .unwrap_or(0)
-}
-
-fn format_mmss(total_seconds: i64) -> String {
-    if total_seconds < 0 {
-        return "00:00".to_string();
-    }
-
-    let mm = total_seconds / 60;
-    let ss = total_seconds % 60;
-    format!("{mm:02}:{ss:02}")
-}
-
-fn get_active_player() -> String {
-    if !command_available("playerctl") {
-        return String::new();
-    }
-
-    let players_raw = run_capture_optional("playerctl", &["-l"]);
-    let mut seen = std::collections::HashSet::new();
-    let players = players_raw
-        .lines()
-        .filter_map(|line| {
-            let name = line.trim();
-            if name.is_empty() {
-                return None;
-            }
-            if seen.insert(name.to_string()) {
-                Some(name.to_string())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
-    for player in &players {
-        let status = run_capture_optional("playerctl", &["-p", player, "status"]);
-        if status == "Playing" {
-            return player.clone();
-        }
-    }
-
-    if let Some(player) = players.first() {
-        return player.clone();
-    }
-
-    String::new()
-}
-
-fn cmd_media_info() {
-    let player = get_active_player();
-    if player.is_empty() {
-        emit_json(json!({
-            "ok": false,
-            "error": "no active media player",
-        }));
-        return;
-    }
-
-    let status = run_capture_optional("playerctl", &["-p", &player, "status"]);
-    let pos_raw = run_capture_optional("playerctl", &["-p", &player, "position"]);
-    let pos_seconds = parse_int_from_text(&pos_raw);
-
-    let len_raw = run_capture_optional(
-        "playerctl",
-        &["-p", &player, "metadata", "mpris:length"],
-    );
-    let len_micro = parse_int_from_text(&len_raw);
-    let len_seconds = if len_micro > 0 { len_micro / 1_000_000 } else { 0 };
-
-    emit_json(json!({
-        "ok": true,
-        "player": player,
-        "status": status,
-        "position_sec": pos_seconds,
-        "length_sec": len_seconds,
-        "position": format_mmss(pos_seconds),
-        "length": format_mmss(len_seconds),
-    }));
-}
-
-fn cmd_media_seek(seconds: &str) {
-    let player = get_active_player();
-    if player.is_empty() {
-        emit_json(json!({
-            "ok": false,
-            "error": "no active media player",
-        }));
-        return;
-    }
-
-    let seek_sec = parse_int_from_text(seconds);
-    if seek_sec < 0 {
-        emit_json(json!({
-            "ok": false,
-            "error": "seek position cannot be negative",
-        }));
-        return;
-    }
-
-    let seek_micro = seek_sec * 1_000_000;
-    let result = run_command_capture("playerctl", &["-p", &player, "position", &seek_micro.to_string()])
-        .unwrap_or_else(|e| fail(&e));
-
-    emit_json(json!({
-        "ok": true,
-        "player": player,
-        "message": result,
-    }));
-}
-
-fn cmd_media_seek_relative(offset: &str) {
-    let player = get_active_player();
-    if player.is_empty() {
-        emit_json(json!({
-            "ok": false,
-            "error": "no active media player",
-        }));
-        return;
-    }
-
-    let offset_sec = parse_int_from_text(offset);
-    let pos_raw = run_capture_optional("playerctl", &["-p", &player, "position"]);
-    let current_sec = parse_int_from_text(&pos_raw);
-    let new_sec = (current_sec + offset_sec).max(0);
-    let seek_micro = new_sec * 1_000_000;
-
-    let result = run_command_capture("playerctl", &["-p", &player, "position", &seek_micro.to_string()])
-        .unwrap_or_else(|e| fail(&e));
-
-    emit_json(json!({
-        "ok": true,
-        "player": player,
-        "position_sec": new_sec,
-        "message": result,
-    }));
-}
-
-fn cmd_equalizer_list_presets(device_id: &str) {
-    let presets = load_eq_presets();
-    let device_presets: Vec<_> = presets
-        .iter()
-        .filter(|p| p.device_id == device_id || p.device_id == "@DEFAULT_SINK@")
-        .map(|p| {
-            json!({
-                "name": p.name,
-                "is_builtin": p.is_builtin,
-                // Keep legacy field for compatibility with existing fixed-band UI.
-                "bands": preset_legacy_gains(p),
-                "parametric_bands": p.bands.iter().map(band_to_json).collect::<Vec<_>>(),
-                "preamp_db": p.preamp_db,
-            })
-        })
-        .collect();
-
-    let config_data = load_eq_config();
-    let active_preset = config_data
-        .device_last_preset
-        .get(device_id)
-        .cloned()
-        .or_else(|| config_data.device_last_preset.get("@DEFAULT_SINK@").cloned())
-        .unwrap_or_else(|| "Flat".to_string());
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "active_preset": active_preset,
-        "capabilities": eq_capabilities_json(),
-        "presets": device_presets,
-        "count": device_presets.len(),
-    }));
-}
-
-fn map_filter_type_for_pipewire(filter_type: &str) -> &'static str {
-    match normalized_filter_type(filter_type).as_str() {
-        "peaking" => "bq_peaking",
-        "low_shelf" => "bq_lowshelf",
-        "high_shelf" => "bq_highshelf",
-        "low_pass" => "bq_lowpass",
-        "high_pass" => "bq_highpass",
-        "band_pass" => "bq_bandpass",
-        _ => "bq_peaking",
-    }
-}
-
-fn pw_escape_string(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn is_eq_virtual_sink_name(name: &str) -> bool {
-    let trimmed = name.trim();
-    trimmed == EQ_VIRTUAL_INPUT_SINK || trimmed == EQ_VIRTUAL_OUTPUT_NODE
-}
-
-fn parse_pw_info_property(output: &str, key: &str) -> Option<String> {
-    let needle = format!("{} =", key);
-    for line in output.lines() {
-        let trimmed = line.trim_start();
-        if let Some(value) = trimmed.strip_prefix(&needle) {
-            let parsed = value.trim().trim_matches('"').to_string();
-            if !parsed.is_empty() {
-                return Some(parsed);
-            }
-        }
-    }
-    None
-}
-
-fn resolve_effective_default_sink(default_sink: &str) -> String {
-    if default_sink.trim() != EQ_VIRTUAL_INPUT_SINK {
-        return default_sink.to_string();
-    }
-
-    if let Some(id) = find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE) {
-        if let Ok(info) = run_command_capture("pw-cli", &["info", &id.to_string()]) {
-            if let Some(target) = parse_pw_info_property(&info, "target.object") {
-                return target;
-            }
-        }
-    }
-
-    // Since target.object is often not set (e.g. from static config), resolving the true target 
-    // by reading the actual link graph is significantly more robust.
-    if let Ok(links) = run_command_capture("pw-link", &["-l"]) {
-        let lines: Vec<&str> = links.lines().collect();
-        for i in 0..lines.len() {
-            if lines[i].contains(EQ_VIRTUAL_OUTPUT_NODE) && lines[i].ends_with("output_FL") {
-                if i + 1 < lines.len() && lines[i + 1].contains("|->") {
-                    let parts: Vec<&str> = lines[i + 1].split("|->").collect();
-                    if parts.len() > 1 {
-                        let dest_full = parts[1].trim();
-                        // Format is typically: `alsa_output.pci-0000_01_00.1.hdmi-stereo:playback_FL`
-                        // We want just the node name part
-                        if let Some(colon_idx) = dest_full.find(':') {
-                            return dest_full[..colon_idx].to_string();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: try to find a real hardware sink that isn't us
-    if let Ok(output) = run_command_capture("pactl", &["get-default-sink"]) {
-        let trimmed = output.trim();
-        if trimmed != EQ_VIRTUAL_INPUT_SINK && !trimmed.is_empty() {
-             return trimmed.to_string();
-        }
-    }
-
-    // Last resort: find any alsa or bluez sink
-    let sinks = list_sink_names();
-    for sink in sinks {
-        if sink != EQ_VIRTUAL_INPUT_SINK && (sink.contains("alsa_output") || sink.contains("bluez_output")) {
-            return sink;
-        }
-    }
-
-    default_sink.to_string()
-}
-
-fn list_sink_names() -> Vec<String> {
-    let sink_output = match run_command_capture("pactl", &["list", "sinks"]) {
-        Ok(output) => output,
-        Err(_) => return Vec::new(),
-    };
-
-    parse_pactl_device_rows(&sink_output, "Sink #", false)
-        .into_iter()
-        .map(|row| row.name)
-        .collect()
-}
-
-fn try_disconnect_link(output_port: &str, input_port: &str) {
-    let _ = Command::new("pw-link")
-        .args(["-d", output_port, input_port])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-fn relink_static_eq_output_to_sink(sink: &str) -> Result<(), String> {
-    if find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK).is_none()
-        || find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE).is_none()
-    {
-        return Err("static EQ sink is not available".to_string());
-    }
-
-    let sink_names = list_sink_names();
-    if !sink_names.iter().any(|name| name == sink) {
-        return Err(format!("sink '{}' not found", sink));
-    }
-
-    for candidate in &sink_names {
-        for channel in ["FL", "FR"] {
-            let output_port = format!("{}:output_{}", EQ_VIRTUAL_OUTPUT_NODE, channel);
-            let input_port = format!("{}:playback_{}", candidate, channel);
-            try_disconnect_link(&output_port, &input_port);
-        }
-    }
-
-    for channel in ["FL", "FR"] {
-        let output_port = format!("{}:output_{}", EQ_VIRTUAL_OUTPUT_NODE, channel);
-        let input_port = format!("{}:playback_{}", sink, channel);
-        run_command_capture("pw-link", &[&output_port, &input_port])?;
-    }
-
-    run_command_capture("wpctl", &["set-default", EQ_VIRTUAL_INPUT_SINK])?;
-    Ok(())
-}
-
-fn find_node_id_by_name(node_name: &str) -> Option<u32> {
-    let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
-    let mut current_id: Option<u32> = None;
-
-    for line in output.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("id ") {
-            let id_part = trimmed
-                .trim_start_matches("id ")
-                .split(',')
-                .next()
-                .unwrap_or("")
-                .trim();
-            current_id = id_part.parse::<u32>().ok();
-            continue;
-        }
-
-        if trimmed.starts_with("node.name =") {
-            let name = trimmed
-                .trim_start_matches("node.name =")
-                .trim()
-                .trim_matches('"');
-            if name == node_name {
-                return current_id;
-            }
-        }
-    }
-
-    None
-}
-
-fn destroy_eq_module() {
-    if let Ok(output) = run_command_capture("pw-cli", &["ls", "Module"]) {
-        let mut current_id: Option<u32> = None;
-        for line in output.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("id ") {
-                let id_part = trimmed.trim_start_matches("id ").split(',').next().unwrap_or("").trim();
-                current_id = id_part.parse::<u32>().ok();
-                continue;
-            }
-            if trimmed.contains("libpipewire-module-filter-chain") {
-                if let Some(id) = current_id {
-                    // Check if this module instance is ours
-                    if let Ok(info) = run_command_capture("pw-cli", &["info", &id.to_string()]) {
-                        if info.contains(EQ_VIRTUAL_INPUT_SINK) || info.contains("stratum_eq") {
-                            let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn move_active_streams_to_eq(target_sink: &str) {
-    let Ok(output) = run_command_capture("pactl", &["list", "short", "sink-inputs"]) else {
-        return;
-    };
-
-    for line in output.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 1 {
-            let id = parts[0];
-            // Don't move the EQ's own output stream if it shows up here
-            // (Typically sink-inputs are apps)
-            let _ = Command::new("pactl")
-                .args(["move-sink-input", id, target_sink])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
-}
-
-/// Build the PipeWire filter-graph string for `audioconvert.filter-graph` set-param.
-fn build_filter_graph_string(filter_specs: &[String]) -> String {
-    format!(
-        "{{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }}",
-        filter_specs.join(" ")
-    )
-}
-
-/// Try to update EQ bands on an existing static node via `pw-cli set-param`.
-/// Returns Ok(true) if the update succeeded, Ok(false) if it should fall back to load-module.
-fn try_set_param_eq(node_id: u32, filter_specs: &[String]) -> Result<bool, String> {
-    let graph = build_filter_graph_string(filter_specs);
-    let props_json = format!(
-        "{{ params = [ audioconvert.filter-graph \"{}\" ] }}",
-        graph.replace('\\', "\\\\").replace('"', "\\\"")
-    );
-
-    let output = Command::new("pw-cli")
-        .args(["set-param", &node_id.to_string(), "Props", &props_json])
-        .output()
-        .map_err(|err| format!("failed to run pw-cli set-param: {}", err))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    // set-param exits 0 even on errors; check output for actual error
-    if stderr.contains("error") || stderr.contains("not permitted") {
-        return Ok(false);
-    }
-
-    // If we see the Props object echoed back, it worked
-    if stdout.contains("Param:Props") || stdout.contains("audioconvert.filter-graph") {
-        return Ok(true);
-    }
-
-    // If output is empty but exit 0, likely worked on older pw-cli
-    if output.status.success() {
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
-fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) -> Result<EqApplyResult, String> {
-    if !command_available("pw-cli") {
-        return Err("pw-cli not found - EQ not applied".to_string());
-    }
-
-    let resolved_device = if device_id == "@DEFAULT_SINK@" {
-        let def = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_else(|_| device_id.to_string());
-        resolve_effective_default_sink(def.trim())
-    } else {
-        device_id.to_string()
-    };
-
-    let mut filter_specs = Vec::new();
-    if preamp_db.abs() > 0.01 {
-        filter_specs.push(format!("{{ type = bq_peaking freq = 1000.0 gain = {:.4} q = 0.707 }}", preamp_db));
-    }
-    for band in bands.iter().filter(|b| b.enabled) {
-        filter_specs.push(format!(
-            "{{ type = {} freq = {:.4} gain = {:.4} q = {:.4} }}",
-            map_filter_type_for_pipewire(&band.filter_type),
-            band.frequency_hz,
-            band.gain_db,
-            band.q
-        ));
-    }
-    if filter_specs.is_empty() {
-        filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
-    }
-
-    // --- Primary path: update filter graph on existing static node via set-param ---
-    if let Some(node_id) = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK) {
-        match try_set_param_eq(node_id, &filter_specs) {
-            Ok(true) => {
-                // Ensure the EQ sink is the default so apps route through it
-                let _ = run_command_capture("wpctl", &["set-default", &node_id.to_string()]);
-                let _ = run_command_capture("pactl", &["set-default-sink", EQ_VIRTUAL_INPUT_SINK]);
-                move_active_streams_to_eq(EQ_VIRTUAL_INPUT_SINK);
-
-                // Relink EQ output to the resolved device if needed
-                let _ = relink_static_eq_output_to_sink(&resolved_device);
-
-                return Ok(EqApplyResult {
-                    applied: true,
-                    dry_run: false,
-                    engine: "pipewire-filter-chain-set-param".to_string(),
-                    resolved_device,
-                    status: format!(
-                        "applied {} enabled bands via in-place filter-graph update on node {}",
-                        bands.iter().filter(|b| b.enabled).count(),
-                        node_id
-                    ),
-                });
-            }
-            Ok(false) => {
-                // set-param not supported or failed; fall through to load-module
-            }
-            Err(err) => {
-                eprintln!("set-param attempt failed: {}", err);
-                // fall through to load-module
-            }
-        }
-    }
-
-    // --- Fallback path: destroy/recreate (for when no static node exists) ---
-
-    destroy_eq_module();
-    std::thread::sleep(std::time::Duration::from_millis(150));
-
-    let flat_graph = "{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }";
-    let module_args = format!(
-        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ], inputs = [ \"eq:In 1\", \"eq:In 2\" ], outputs = [ \"eq:Out 1\", \"eq:Out 2\" ] }} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
-        flat_graph,
-        pw_escape_string(&resolved_device)
-    );
-
-    let output = Command::new("pw-cli")
-        .args(["load-module", "libpipewire-module-filter-chain", &module_args])
-        .output()
-        .map_err(|err| format!("failed to run pw-cli load-module: {}", err))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "failed to load PipeWire filter-chain module (module may be unavailable for dynamic loading)".to_string()
-        } else {
-            format!("failed to load PipeWire filter-chain module: {}", stderr)
-        });
-    }
-
-    let mut created_id = None;
-    for _ in 0..30 {
-        created_id = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK);
-        if created_id.is_some() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    if created_id.is_none() {
-        return Err(
-            "PipeWire did not create 'effect_input.stratum_eq' after module load; dynamic filter-chain loading is likely unavailable in this runtime"
-                .to_string(),
-        );
-    }
-
-    let node_id = created_id.unwrap();
-    let _ = try_set_param_eq(node_id, &filter_specs);
-
-    // Make the virtual sink active default for new streams.
-    let _ = run_command_capture("wpctl", &["set-default", &node_id.to_string()]);
-    let _ = run_command_capture("pactl", &["set-default-sink", EQ_VIRTUAL_INPUT_SINK]);
-
-    // Force move existing streams to the EQ sink
-    move_active_streams_to_eq(EQ_VIRTUAL_INPUT_SINK);
-
-    Ok(EqApplyResult {
-        applied: true,
-        dry_run: false,
-        engine: "pipewire-filter-chain".to_string(),
-        resolved_device,
-        status: format!(
-            "applied {} enabled bands via PipeWire filter-chain virtual sink 'effect_input.stratum_eq'",
-            bands.iter().filter(|b| b.enabled).count()
-        ),
-    })
-}
-
-fn apply_eq_bands_wpctl(device_id: &str, bands: &[EqBand], preamp_db: f64) -> Result<EqApplyResult, String> {
-    validate_parametric_bands(bands)?;
-
-    if command_available("pw-cli") {
-        return apply_eq_bands_pipewire(device_id, bands, preamp_db);
-    }
-
-    if !command_available("wpctl") {
-        return Err("wpctl not found - EQ not applied".to_string());
-    }
-
-    // Resolve @DEFAULT_SINK@ to actual device name
-    let resolved_device = if device_id == "@DEFAULT_SINK@" {
-        run_command_capture("pactl", &["get-default-sink"]).unwrap_or_else(|_| device_id.to_string())
-    } else {
-        device_id.to_string()
-    };
-
-    // Query wpctl status to find the sink
-    let wp_status = run_command_capture("wpctl", &["status"])
-        .unwrap_or_default();
-
-    if !resolved_device.trim().is_empty() && !wp_status.contains(&resolved_device) {
-        return Err(format!(
-            "target sink '{}' was not found in wpctl status output",
-            resolved_device
-        ));
-    }
-
-    // Log the bands being applied for user feedback
-    let bands_str = bands
-        .iter()
-        .filter(|band| band.enabled)
-        .map(|band| {
-            format!(
-                "{}Hz:{}dB@Q{}({})",
-                band.frequency_hz.round() as i32,
-                band.gain_db,
-                band.q,
-                band.filter_type
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    Ok(EqApplyResult {
-        applied: false,
-        dry_run: true,
-        engine: "pipewire-wireplumber".to_string(),
-        resolved_device,
-        status: format!(
-            "validated preamp {} dB and {} enabled bands (dry-run; pw-cli/module-filter-chain unavailable): {}",
-            preamp_db,
-            bands.iter().filter(|b| b.enabled).count(),
-            bands_str
-        ),
-    })
-}
-
-fn cmd_equalizer_apply_preset(device_id: &str, preset_name: &str) {
-    let presets = load_eq_presets();
-    let preset = presets
-        .iter()
-        .find(|p| p.name == preset_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"));
-
-    if let Some(preset) = preset {
-        // Apply EQ bands via wpctl
-        let apply_result = apply_eq_bands_wpctl(device_id, &preset.bands, preset.preamp_db);
-
-        let mut config_data = load_eq_config();
-        config_data
-            .device_last_preset
-            .insert(device_id.to_string(), preset_name.to_string());
-        let _ = save_eq_config(&config_data);
-        
-        let (apply_ok, apply_payload, status_message) = match apply_result {
-            Ok(result) => (true, json!({
-                "applied": result.applied,
-                "dry_run": result.dry_run,
-                "engine": result.engine,
-                "resolved_device": result.resolved_device,
-                "status": result.status,
-            }), result.status),
-            Err(err) => (false, json!({
-                "applied": false,
-                "dry_run": true,
-                "engine": "pipewire-wireplumber",
-                "error": err,
-            }), format!("warning: {}", err)),
-        };
-
-        emit_json(json!({
-            "ok": true,
-            "device_id": device_id,
-            "preset": preset_name,
-            "bands": preset_legacy_gains(preset),
-            "parametric_bands": preset.bands.iter().map(band_to_json).collect::<Vec<_>>(),
-            "preamp_db": preset.preamp_db,
-            "bands_applied": preset.bands.len(),
-            "apply_ok": apply_ok,
-            "apply": apply_payload,
-            "status": status_message,
-        }));
-    } else {
-        emit_json(json!({
-            "ok": false,
-            "error": format!("preset '{}' not found", preset_name),
-        }));
-    }
-}
-
-fn cmd_equalizer_apply_parametric(device_id: &str, payload_str: &str) {
-    let payload = match serde_json::from_str::<Value>(payload_str) {
-        Ok(value) => value,
-        Err(err) => {
-            emit_json(json!({
-                "ok": false,
-                "error": format!("invalid parametric payload JSON: {}", err),
-            }));
-            return;
-        }
-    };
-
-    let Some(payload_obj) = payload.as_object() else {
-        emit_json(json!({
-            "ok": false,
-            "error": "parametric payload must be a JSON object",
-        }));
-        return;
-    };
-
-    let Some(raw_bands) = payload_obj.get("bands") else {
-        emit_json(json!({
-            "ok": false,
-            "error": "parametric payload must include a 'bands' array",
-        }));
-        return;
-    };
-
-    let Some((bands, _used_legacy)) = parse_eq_bands(raw_bands) else {
-        emit_json(json!({
-            "ok": false,
-            "error": "failed to parse parametric bands array",
-        }));
-        return;
-    };
-
-    if let Err(err) = validate_parametric_bands(&bands) {
-        emit_json(json!({
-            "ok": false,
-            "error": err,
-        }));
-        return;
-    }
-
-    let preamp_db = payload_obj
-        .get("preamp_db")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0)
-        .clamp(EQ_MIN_GAIN_DB, EQ_MAX_GAIN_DB);
-
-    let apply_result = apply_eq_bands_wpctl(device_id, &bands, preamp_db);
-    let (apply_ok, apply_payload, status_message) = match apply_result {
-        Ok(result) => (
-            true,
-            json!({
-                "applied": result.applied,
-                "dry_run": result.dry_run,
-                "engine": result.engine,
-                "resolved_device": result.resolved_device,
-                "status": result.status,
-            }),
-            result.status,
-        ),
-        Err(err) => (
-            false,
-            json!({
-                "applied": false,
-                "dry_run": true,
-                "engine": "pipewire-wireplumber",
-                "error": err,
-            }),
-            format!("warning: {}", err),
-        ),
-    };
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "preset": "Custom",
-        "bands": legacy_gains_from_bands(&bands),
-        "parametric_bands": bands.iter().map(band_to_json).collect::<Vec<_>>(),
-        "preamp_db": preamp_db,
-        "bands_applied": bands.len(),
-        "apply_ok": apply_ok,
-        "apply": apply_payload,
-        "status": status_message,
-        "mode": "parametric-apply",
-    }));
-}
-
-fn cmd_equalizer_save_preset(device_id: &str, preset_name: &str, bands_str: &str) {
-    // Parse bands from comma-separated string (e.g., "0,2,4,-1,0,0,1,2,3,1")
-    let bands: Vec<i32> = bands_str
-        .split(',')
-        .filter_map(|s| s.trim().parse::<i32>().ok())
-        .take(10)
-        .collect();
-
-    if bands.len() != 10 {
-        emit_json(json!({
-            "ok": false,
-            "error": "expected 10 EQ bands, comma-separated",
-        }));
-        return;
-    }
-
-    // Clamp legacy gains and convert to parametric bands.
-    let bands: Vec<EqBand> = bands
-        .iter()
-        .enumerate()
-        .map(|(index, b)| legacy_band(index, (*b).clamp(-12, 12)))
-        .collect();
-
-    let mut config_data = load_eq_config();
-    let mut presets = config_data.presets;
-
-    // Remove existing preset with same name for this device
-    presets.retain(|p| !(p.name == preset_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@") && !p.is_builtin));
-
-    // Add new preset
-    presets.push(EqPreset {
-        name: preset_name.to_string(),
-        device_id: device_id.to_string(),
-        bands,
-        preamp_db: 0.0,
-        is_builtin: false,
-    });
-
-    config_data.presets = presets;
-    config_data
-        .device_last_preset
-        .insert(device_id.to_string(), preset_name.to_string());
-    let _ = save_eq_config(&config_data);
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "preset": preset_name,
-        "saved": true,
-    }));
-}
-
-fn cmd_equalizer_save_preset_parametric(device_id: &str, preset_name: &str, payload_str: &str) {
-    let payload = match serde_json::from_str::<Value>(payload_str) {
-        Ok(value) => value,
-        Err(err) => {
-            emit_json(json!({
-                "ok": false,
-                "error": format!("invalid parametric payload JSON: {}", err),
-            }));
-            return;
-        }
-    };
-
-    let Some(payload_obj) = payload.as_object() else {
-        emit_json(json!({
-            "ok": false,
-            "error": "parametric payload must be a JSON object",
-        }));
-        return;
-    };
-
-    let Some(raw_bands) = payload_obj.get("bands") else {
-        emit_json(json!({
-            "ok": false,
-            "error": "parametric payload must include a 'bands' array",
-        }));
-        return;
-    };
-
-    let Some((bands, _used_legacy)) = parse_eq_bands(raw_bands) else {
-        emit_json(json!({
-            "ok": false,
-            "error": "failed to parse parametric bands array",
-        }));
-        return;
-    };
-
-    if bands.is_empty() {
-        emit_json(json!({
-            "ok": false,
-            "error": "parametric preset requires at least one band",
-        }));
-        return;
-    }
-
-    if let Err(err) = validate_parametric_bands(&bands) {
-        emit_json(json!({
-            "ok": false,
-            "error": err,
-        }));
-        return;
-    }
-
-    let preamp_db = payload_obj
-        .get("preamp_db")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0)
-        .clamp(EQ_MIN_GAIN_DB, EQ_MAX_GAIN_DB);
-
-    let mut config_data = load_eq_config();
-    let mut presets = config_data.presets;
-
-    presets.retain(|p| !(p.name == preset_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@") && !p.is_builtin));
-
-    presets.push(EqPreset {
-        name: preset_name.to_string(),
-        device_id: device_id.to_string(),
-        bands,
-        preamp_db,
-        is_builtin: false,
-    });
-
-    config_data.presets = presets;
-    config_data
-        .device_last_preset
-        .insert(device_id.to_string(), preset_name.to_string());
-    let _ = save_eq_config(&config_data);
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "preset": preset_name,
-        "saved": true,
-        "mode": "parametric",
-    }));
-}
-
-fn cmd_equalizer_get_current(device_id: &str) {
-    let config_data = load_eq_config();
-    let current_name = config_data
-        .device_last_preset
-        .get(device_id)
-        .cloned()
-        .or_else(|| config_data.device_last_preset.get("@DEFAULT_SINK@").cloned())
-        .unwrap_or_else(|| "Flat".to_string());
-
-    let default_preset = config_data
-        .presets
-        .iter()
-        .find(|p| p.name == current_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
-        .or_else(|| {
-            config_data
-                .presets
-                .iter()
-                .find(|p| p.name == "Flat" && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
-        })
-        .cloned()
-        .unwrap_or_else(|| EqPreset {
-            name: "Flat".to_string(),
-            device_id: device_id.to_string(),
-            bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        });
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "current_preset": default_preset.name,
-        "bands": preset_legacy_gains(&default_preset),
-        "parametric_bands": default_preset.bands.iter().map(band_to_json).collect::<Vec<_>>(),
-        "preamp_db": default_preset.preamp_db,
-        "capabilities": eq_capabilities_json(),
-    }));
-}
-
-fn cmd_set_output(sink: &str) {
-    let sink = sink.trim();
-    if sink.is_empty() {
-        fail("missing sink");
-    }
-
-    if is_eq_virtual_sink_name(sink) {
-        let result = run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
-        emit_json(json!({
-            "ok": true,
-            "command": "audio",
-            "subcommand": "set-output",
-            "sink": sink,
-            "message": result,
-        }));
-        return;
-    }
-
-    match relink_static_eq_output_to_sink(sink) {
-        Ok(()) => {
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-output",
-                "sink": sink,
-                "routed_via_eq": true,
-                "message": "output changed by relinking static EQ output to selected sink",
-            }));
-        }
-        Err(err) => {
-            let fallback =
-                run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-output",
-                "sink": sink,
-                "routed_via_eq": false,
-                "message": fallback,
-                "warning": format!("EQ reroute failed: {}", err),
-            }));
-        }
-    }
-}
-
-fn cmd_equalizer_delete_preset(device_id: &str, preset_name: &str) {
-    let mut config_data = load_eq_config();
-    let mut presets = config_data.presets;
-
-    // Find and remove the preset
-    let original_len = presets.len();
-    presets.retain(|p| !(p.name == preset_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@") && !p.is_builtin));
-
-    if presets.len() == original_len {
-        emit_json(json!({
-            "ok": false,
-            "error": "preset not found or cannot delete builtin presets",
-        }));
-        return;
-    }
-
-    config_data.presets = presets;
-    if config_data
-        .device_last_preset
-        .get(device_id)
-        .map(String::as_str)
-        == Some(preset_name)
-    {
-        config_data.device_last_preset.remove(device_id);
-    }
-    let _ = save_eq_config(&config_data);
-
-    emit_json(json!({
-        "ok": true,
-        "device_id": device_id,
-        "preset": preset_name,
-        "deleted": true,
-    }));
-}
-
 fn cmd_status(hover: bool) {
-    // Try daemon first for instant cached response
     if !hover {
-        if let Ok(response) = crate::daemon_client::daemon_call("audio.status", serde_json::json!({})) {
-            if let Some(result) = response.get("result") {
-                if let Some(audio) = result.get("audio") {
-                    emit_json(json!({
-                        "ok": true,
-                        "command": "audio",
-                        "subcommand": "status",
-                        "hover": false,
-                        "volume": audio.get("volume").and_then(|v| v.as_str()).unwrap_or("0%"),
-                        "mute": audio.get("mute").and_then(|v| v.as_str()).unwrap_or("yes"),
-                        "headphones": audio.get("headphones").and_then(|v| v.as_str()).unwrap_or("no"),
-                    }));
-                    return;
+        match daemon_call("audio.status", json!({})) {
+            Ok(response) => {
+                if let Some(result) = response.get("result") {
+                    if let Some(audio) = result.get("audio") {
+                        emit_json(json!({
+                            "ok": true,
+                            "command": "audio",
+                            "subcommand": "status",
+                            "hover": false,
+                            "volume": audio.get("volume").and_then(|v| v.as_str()).unwrap_or("0%"),
+                            "mute": audio.get("mute").and_then(|v| v.as_str()).unwrap_or("yes"),
+                            "headphones": audio.get("headphones").and_then(|v| v.as_str()).unwrap_or("no"),
+                        }));
+                        return;
+                    }
                 }
             }
+            Err(_) => {}
         }
     } else {
-        if let Ok(response) = crate::daemon_client::daemon_call("audio.devices", serde_json::json!({})) {
-            if let Some(result) = response.get("result") {
-                if let Some(audio) = result.get("audio") {
-                    emit_json(audio.clone());
-                    return;
+        match daemon_call("audio.devices", json!({})) {
+            Ok(response) => {
+                if let Some(result) = response.get("result") {
+                    if let Some(audio) = result.get("audio") {
+                        emit_json(audio.clone());
+                        return;
+                    }
                 }
             }
+            Err(_) => {}
         }
     }
 
-    // Fallback to direct pactl if daemon is unavailable
-    let volume = run_command_capture("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
-        .ok()
-        .and_then(|out| extract_first_percent(&out))
-        .unwrap_or_else(|| "0%".to_string());
-    let mute = run_command_capture("pactl", &["get-sink-mute", "@DEFAULT_SINK@"])
-        .ok()
-        .and_then(|out| extract_mute_state(&out))
-        .unwrap_or_else(|| "yes".to_string());
-
-    if !hover {
-        let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
-        let default_sink = resolve_effective_default_sink(&default_sink_raw);
-        let headphones = is_headphone_default_sink(&default_sink);
-        emit_json(json!({
-            "ok": true,
-            "command": "audio",
-            "subcommand": "status",
-            "hover": false,
-            "volume": volume,
-            "mute": mute,
-            "headphones": headphones,
-        }));
-        return;
-    }
-
-    let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
-    let default_sink = resolve_effective_default_sink(&default_sink_raw);
-    let default_source = run_command_capture("pactl", &["get-default-source"]).unwrap_or_default();
-
-    let sink_rows = run_command_capture("pactl", &["list", "sinks"])
-        .map(|out| parse_pactl_device_rows(&out, "Sink #", false))
-        .unwrap_or_default();
-    let sinks = sink_rows
-        .iter()
-        .filter(|row| !is_eq_virtual_sink_name(&row.name))
-        .map(|row| {
-            json!({
-                "name": row.name,
-                "description": row.description,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let source_rows = run_command_capture("pactl", &["list", "sources"])
-        .map(|out| parse_pactl_device_rows(&out, "Source #", true))
-        .unwrap_or_default();
-    let sources = source_rows
-        .iter()
-        .filter(|row| !is_eq_virtual_sink_name(&row.name))
-        .map(|row| {
-            json!({
-                "name": row.name,
-                "description": row.description,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    emit_json(json!({
-        "ok": true,
-        "command": "audio",
-        "subcommand": "status",
-        "hover": true,
-        "status": {
-            "volume": volume,
-            "mute": mute,
-        },
-        "default": {
-            "sink": default_sink,
-            "source": default_source,
-        },
-        "sinks": sinks,
-        "sources": sources,
-    }));
+    fail("failed to get audio status from daemon");
 }
 
 pub fn handle(args: &[String]) {
@@ -1750,33 +249,30 @@ pub fn handle(args: &[String]) {
         }
         "set-input" => {
             let source = args.get(1).map(String::as_str).unwrap_or("");
-            let result =
-                run_command_capture("pactl", &["set-default-source", source]).unwrap_or_else(|e| fail(&e));
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-input",
-                "message": result,
-            }));
+            match daemon_call("audio.set_input", json!({"target": source})) {
+                Ok(res) => {
+                    if let Some(result) = res.get("result") {
+                        emit_json(result.clone());
+                    } else {
+                        fail("failed to set input via daemon");
+                    }
+                }
+                Err(err) => fail(&err),
+            }
         }
         "set-volume" => {
             let volume_arg = args.get(1).map(String::as_str).unwrap_or("");
-            if volume_arg.is_empty() || !volume_arg.bytes().all(|byte| byte.is_ascii_digit()) {
-                fail("invalid volume");
+            let volume = volume_arg.parse::<i64>().unwrap_or(0);
+            match daemon_call("audio.set_volume", json!({"percent": volume})) {
+                Ok(res) => {
+                    if let Some(result) = res.get("result") {
+                        emit_json(result.clone());
+                    } else {
+                        fail("failed to set volume via daemon");
+                    }
+                }
+                Err(err) => fail(&err),
             }
-
-            let mut volume = volume_arg.parse::<i32>().unwrap_or(0);
-            volume = volume.clamp(0, 150);
-            let volume_text = format!("{}%", volume);
-            let result = run_command_capture("pactl", &["set-sink-volume", "@DEFAULT_SINK@", &volume_text])
-                .unwrap_or_else(|e| fail(&e));
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-volume",
-                "volume": volume,
-                "message": result,
-            }));
         }
         "open-control" => {
             if !command_available("pavucontrol") {

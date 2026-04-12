@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 chrono = { version = "0.4", default-features = true }
 serde_json = "1.0"
+lazy_static = "1.4"

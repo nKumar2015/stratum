@@ -258,6 +258,12 @@ fn maybe_launch_quickshell() {
 fn spawn_audio_monitor(state: Arc<AppState>) {
     thread::spawn(move || loop {
         let snapshot = managers::audio::status();
+        
+        // Auto-restore EQ when the hardware output shifts
+        if let Some(sink) = snapshot.get("default_sink").and_then(Value::as_str) {
+            managers::audio::notify_default_sink_changed(sink);
+        }
+
         state.audio.update(snapshot);
         thread::sleep(Duration::from_secs(2));
     });
@@ -725,6 +731,9 @@ fn main() {
         dashboard: DashboardState::new(),
         qs_pid_cache: Mutex::new(None),
     });
+
+    // Initialize managers (restore state, etc)
+    managers::audio::initialize();
 
     // Spawn per-domain monitor threads (poll system tools, update in-memory state)
     spawn_audio_monitor(Arc::clone(&state));
