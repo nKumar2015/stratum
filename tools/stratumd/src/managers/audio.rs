@@ -646,6 +646,7 @@ lazy_static! {
     static ref EQ_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
     static ref LAST_SYNCED_STATE: Mutex<(String, Instant)> = Mutex::new((String::new(), Instant::now()));
     static ref IS_RESTORING: Mutex<bool> = Mutex::new(false);
+    static ref GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
 }
 
 fn spawn_eq_module(module_args: &str) -> std::io::Result<()> {
@@ -758,6 +759,7 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
 
     // Since we are in the daemon and owning the dynamic instance, 
     // we use the reliable "destroy and recreate" method to ensure changes are applied.
+    let _lifecycle_guard = GLOBAL_EQ_LOCK.lock().unwrap();
     destroy_eq_module();
     std::thread::sleep(std::time::Duration::from_millis(150));
 
@@ -1087,6 +1089,7 @@ pub fn eq_apply_parametric(device_id: &str, bands: &Value, preamp_db: f64) -> Va
             "applied": res.applied,
             "engine": res.engine,
             "status": res.status,
+            "parametric_bands": parsed_bands,
         }),
         Err(err) => json!({
             "ok": false,
@@ -1214,6 +1217,7 @@ pub fn auto_apply_preset_for_device(device_id: &str) -> Value {
 }
 
 pub fn initialize() {
+    cleanup_orphans();
     let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
     let effective = resolve_effective_default_sink(default_sink_raw.trim());
     
@@ -1226,4 +1230,9 @@ pub fn initialize() {
     if !is_eq_virtual_sink_name(&effective) && !effective.is_empty() {
         let _ = auto_apply_preset_for_device(&effective);
     }
+}
+
+pub fn cleanup_orphans() {
+    println!("[audio] [info] cleaning up orphaned EQ processes");
+    let _ = Command::new("pkill").args(&["-f", "pw-cli.*stratum_eq"]).status();
 }
