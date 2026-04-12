@@ -223,6 +223,7 @@ pub fn devices() -> Value {
         .unwrap_or_default();
     let sources = source_rows
         .iter()
+        .filter(|row| !is_eq_virtual_sink_name(&row.name))
         .map(|row| {
             json!({
                 "name": row.name,
