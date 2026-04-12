@@ -178,7 +178,7 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.bluetoothHoverIntent)
+            if (!GlobalState.bluetoothHoverIntent && !menuHover.hovered)
                 GlobalState.showBluetoothHoverMenu = false;
         }
     }
@@ -204,6 +204,7 @@ PanelWindow {
         // HoverHandler is used instead of MouseArea so child MouseAreas don't
         // steal events and cause premature exit detection.
         HoverHandler {
+            id: menuHover
             onHoveredChanged: GlobalState.bluetoothHoverIntent = hovered
         }
 

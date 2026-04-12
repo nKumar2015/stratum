@@ -19,7 +19,7 @@ QtObject {
     property bool audioMuted: true
     property bool audioHeadphonesOutput: false
     property bool audioUserAdjusting: false
-    property bool daemonAvailable: false
+    property bool daemonAvailable: true
     property bool showAudioMenu: false
     property string musicTitle: ""
     property string musicArtist: ""
@@ -77,7 +77,6 @@ QtObject {
         audioVolumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
         audioMuted = String(audio.mute || "yes").trim().toLowerCase() === "yes";
         audioHeadphonesOutput = String(audio.headphones || "no").trim().toLowerCase() === "yes";
-        daemonAvailable = true;
     }
 
     function applyDaemonWifiSnapshot(payloadText) {
@@ -93,7 +92,6 @@ QtObject {
 
         const signal = parseInt(String(wifi.signal_pct || "0"));
         wifiSignalPercent = isNaN(signal) ? 0 : Math.max(0, Math.min(100, signal));
-        daemonAvailable = true;
     }
 
     function applyDaemonBluetoothSnapshot(payloadText) {
@@ -106,7 +104,6 @@ QtObject {
         bluetoothPowered = raw === "connected" || raw === "on";
         bluetoothConnected = raw === "connected";
         bluetoothScanning = String(bluetooth.scanning || "no").trim().toLowerCase() === "yes";
-        daemonAvailable = true;
     }
 
     function normalizeProgress(value) {

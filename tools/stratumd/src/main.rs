@@ -21,14 +21,87 @@ mod managers {
     pub mod wifi;
 }
 
+mod state;
+
+use state::{AudioState, BluetoothState, DashboardState, MusicState, NetState};
+
 struct AppState {
     started_at: Instant,
     dashboard_watch: Mutex<Option<(i32, u32)>>,
+    audio: AudioState,
+    net: NetState,
+    bluetooth: BluetoothState,
+    music: MusicState,
+    dashboard: DashboardState,
+    qs_pid_cache: Mutex<Option<i64>>,
 }
 
 fn socket_path() -> PathBuf {
     let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("stratumd.sock")
+}
+
+fn unique_push(list: &mut Vec<PathBuf>, path: PathBuf) {
+    if !list.iter().any(|p| p == &path) {
+        list.push(path);
+    }
+}
+
+fn binary_in_path(binary: &str) -> Option<PathBuf> {
+    let path_var = env::var("PATH").ok()?;
+    for segment in path_var.split(':') {
+        if segment.trim().is_empty() {
+            continue;
+        }
+        let candidate = Path::new(segment).join(binary);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn binary_candidates(binary: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = binary_in_path(binary) {
+        unique_push(&mut candidates, path);
+    }
+
+    if let Ok(home) = env::var("HOME") {
+        unique_push(
+            &mut candidates,
+            Path::new(&home)
+                .join(".nix-profile")
+                .join("bin")
+                .join(binary),
+        );
+        unique_push(
+            &mut candidates,
+            Path::new(&home)
+                .join(".local")
+                .join("state")
+                .join("nix")
+                .join("profile")
+                .join("bin")
+                .join(binary),
+        );
+    }
+
+    candidates
+}
+
+fn resolve_qs_binary() -> Option<PathBuf> {
+    binary_candidates("qs").into_iter().find(|p| p.is_file())
+}
+
+fn resolve_shell_binary() -> Option<PathBuf> {
+    for bin in ["qs", "quickshell"] {
+        if let Some(path) = binary_candidates(bin).into_iter().find(|p| p.is_file()) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn newest_quickshell_pid() -> Result<i64, String> {
@@ -94,8 +167,12 @@ fn newest_quickshell_pid() -> Result<i64, String> {
         .ok_or_else(|| "no running quickshell instances found".to_string())
 }
 
-fn send_shell_ipc(target: &str, function: &str, args: &[String]) -> Result<(), String> {
-    let pid = newest_quickshell_pid()?;
+fn send_shell_ipc_with_pid(
+    pid: i64,
+    target: &str,
+    function: &str,
+    args: &[String],
+) -> Result<(), String> {
     let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
 
     let mut command_args = vec![
@@ -129,34 +206,184 @@ fn send_shell_ipc(target: &str, function: &str, args: &[String]) -> Result<(), S
     Ok(())
 }
 
-fn spawn_snapshot_broadcaster<F>(kind: &'static str, interval: Duration, fetch: F)
-where
-    F: Fn() -> Option<Value> + Send + 'static,
-{
+fn quickshell_already_running() -> bool {
+    let Some(qs_bin) = resolve_qs_binary() else {
+        return false;
+    };
+
+    let output = Command::new(qs_bin)
+        .args(["list", "--all", "--json"])
+        .output();
+
+    let Ok(output) = output else {
+        return false;
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    match serde_json::from_str::<Value>(&raw) {
+        Ok(Value::Array(entries)) => !entries.is_empty(),
+        _ => false,
+    }
+}
+
+fn maybe_launch_quickshell() {
+    if quickshell_already_running() {
+        return;
+    }
+
+    let Some(shell_bin) = resolve_shell_binary() else {
+        eprintln!("failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
+        return;
+    };
+
+    if let Err(err) = Command::new("setsid")
+        .arg(shell_bin)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        eprintln!("failed to launch quickshell (detached): {}", err);
+    }
+}
+
+// --- Monitor threads ---
+
+fn spawn_audio_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let snapshot = managers::audio::status();
+        state.audio.update(snapshot);
+        thread::sleep(Duration::from_secs(2));
+    });
+}
+
+fn spawn_net_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let snapshot = managers::net::status();
+        state.net.update(snapshot);
+        thread::sleep(Duration::from_secs(3));
+    });
+}
+
+fn spawn_bluetooth_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let snapshot = managers::bluetooth::status();
+        state.bluetooth.update(snapshot);
+        thread::sleep(Duration::from_secs(3));
+    });
+}
+
+fn spawn_music_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let snapshot = managers::music::status();
+        state.music.update(snapshot);
+        thread::sleep(Duration::from_secs(2));
+    });
+}
+
+fn spawn_dashboard_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let watched = state
+            .dashboard_watch
+            .lock()
+            .ok()
+            .and_then(|guard| *guard);
+
+        if let Some((year, month)) = watched {
+            let snapshot = managers::dashboard::status(year, month as i32);
+            state.dashboard.update(snapshot);
+        }
+
+        thread::sleep(Duration::from_secs(2));
+    });
+}
+
+// --- Single broadcaster thread ---
+
+fn spawn_broadcaster(state: Arc<AppState>) {
     thread::spawn(move || {
-        let mut last_payload = String::new();
+        // Wait for Quickshell to become available before first push
+        for _ in 0..20 {
+            if newest_quickshell_pid().is_ok() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
 
         loop {
-            if let Some(payload) = fetch() {
-                let payload_text = payload.to_string();
-                if payload_text != last_payload {
-                    match send_shell_ipc("daemon", kind, &[payload_text.clone()]) {
-                        Ok(()) => {
-                            last_payload = payload_text;
+            let pid = {
+                let cached = state.qs_pid_cache.lock().ok().and_then(|g| *g);
+                match cached {
+                    Some(pid) => pid,
+                    None => match newest_quickshell_pid() {
+                        Ok(pid) => {
+                            if let Ok(mut cache) = state.qs_pid_cache.lock() {
+                                *cache = Some(pid);
+                            }
+                            pid
                         }
-                        Err(err) => {
-                            eprintln!("failed to publish {} snapshot: {}", kind, err);
+                        Err(_) => {
+                            thread::sleep(Duration::from_millis(500));
+                            continue;
                         }
-                    }
+                    },
                 }
-            } else {
-                last_payload.clear();
+            };
+
+            let mut any_failed = false;
+
+            if let Some(payload) = state.audio.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "audio", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
             }
 
-            thread::sleep(interval);
+            if let Some(payload) = state.net.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "wifi", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            if let Some(payload) = state.bluetooth.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "bluetooth", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            if let Some(payload) = state.music.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "music", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            if let Some(payload) = state.dashboard.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            // Invalidate PID cache on any IPC failure so we re-resolve next tick
+            if any_failed {
+                if let Ok(mut cache) = state.qs_pid_cache.lock() {
+                    *cache = None;
+                }
+            }
+
+            thread::sleep(Duration::from_millis(200));
         }
     });
 }
+
+// --- JSON-RPC ---
 
 fn jsonrpc_success(id: Value, result: Value) -> Value {
     json!({
@@ -212,6 +439,12 @@ fn param_value_or_default(params: Option<&Value>, key: &str, default: Value) -> 
         .unwrap_or(default)
 }
 
+fn chrono_like_now() -> (i32, i32) {
+    let now = std::time::SystemTime::now();
+    let datetime: chrono::DateTime<chrono::Local> = now.into();
+    (datetime.year(), datetime.month() as i32)
+}
+
 fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Result<Value, String> {
     match method {
         "health.ping" => Ok(json!({
@@ -225,9 +458,11 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             "uptime_seconds": state.started_at.elapsed().as_secs(),
             "socket": socket_path(),
         })),
+
+        // Read from in-memory state for status queries
         "audio.status" => Ok(json!({
             "ok": true,
-            "audio": managers::audio::status(),
+            "audio": state.audio.snapshot(),
         })),
         "audio.devices" => Ok(json!({
             "ok": true,
@@ -265,7 +500,12 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             let preset_name = param_string(_params, "preset_name")?;
             let bands = param_value_or_default(_params, "bands", Value::Array(Vec::new()));
             let preamp_db = param_f64(_params, "preamp_db", 0.0);
-            Ok(managers::audio::eq_save_preset_parametric(&device, &preset_name, &bands, preamp_db))
+            Ok(managers::audio::eq_save_preset_parametric(
+                &device,
+                &preset_name,
+                &bands,
+                preamp_db,
+            ))
         }
         "audio.eq_delete_preset" => {
             let device = param_string(_params, "device")?;
@@ -276,9 +516,11 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             let position_sec = param_i64(_params, "position_sec", 0);
             Ok(managers::audio::media_seek(position_sec))
         }
+
+        // Read from in-memory state
         "net.status" => Ok(json!({
             "ok": true,
-            "net": managers::net::status(),
+            "net": state.net.snapshot(),
         })),
         "wifi.state" => Ok(managers::wifi::state()),
         "wifi.device_status" => Ok(managers::wifi::device_status()),
@@ -308,9 +550,11 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             let target = param_string(_params, "target")?;
             Ok(managers::wifi::toggle(&target))
         }
+
+        // Read from in-memory state
         "bluetooth.status" => Ok(json!({
             "ok": true,
-            "bluetooth": managers::bluetooth::status(),
+            "bluetooth": state.bluetooth.snapshot(),
         })),
         "bluetooth.state" => Ok(managers::bluetooth::state()),
         "bluetooth.list" => Ok(managers::bluetooth::list()),
@@ -343,10 +587,13 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             Ok(managers::bluetooth::power(&target))
         }
         "bluetooth.scan" => Ok(managers::bluetooth::scan()),
+
+        // Read from in-memory state
         "music.status" => Ok(json!({
             "ok": true,
-            "music": managers::music::status(),
+            "music": state.music.snapshot(),
         })),
+
         "dashboard.status" => {
             let now = chrono_like_now();
             let year = param_i64(_params, "year", now.0 as i64) as i32;
@@ -388,143 +635,6 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
     }
 }
 
-fn chrono_like_now() -> (i32, i32) {
-    let now = std::time::SystemTime::now();
-    let datetime: chrono::DateTime<chrono::Local> = now.into();
-    (datetime.year(), datetime.month() as i32)
-}
-
-fn unique_push(list: &mut Vec<PathBuf>, path: PathBuf) {
-    if !list.iter().any(|p| p == &path) {
-        list.push(path);
-    }
-}
-
-fn binary_in_path(binary: &str) -> Option<PathBuf> {
-    let path_var = env::var("PATH").ok()?;
-    for segment in path_var.split(':') {
-        if segment.trim().is_empty() {
-            continue;
-        }
-        let candidate = Path::new(segment).join(binary);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn binary_candidates(binary: &str) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Some(path) = binary_in_path(binary) {
-        unique_push(&mut candidates, path);
-    }
-
-    if let Ok(home) = env::var("HOME") {
-        unique_push(
-            &mut candidates,
-            Path::new(&home).join(".nix-profile").join("bin").join(binary),
-        );
-        unique_push(
-            &mut candidates,
-            Path::new(&home)
-                .join(".local")
-                .join("state")
-                .join("nix")
-                .join("profile")
-                .join("bin")
-                .join(binary),
-        );
-    }
-
-    candidates
-}
-
-fn resolve_qs_binary() -> Option<PathBuf> {
-    binary_candidates("qs").into_iter().find(|p| p.is_file())
-}
-
-fn resolve_shell_binary() -> Option<PathBuf> {
-    for bin in ["qs", "quickshell"] {
-        if let Some(path) = binary_candidates(bin).into_iter().find(|p| p.is_file()) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-fn quickshell_already_running() -> bool {
-    let Some(qs_bin) = resolve_qs_binary() else {
-        return false;
-    };
-
-    let output = Command::new(qs_bin)
-        .args(["list", "--all", "--json"])
-        .output();
-
-    let Ok(output) = output else {
-        return false;
-    };
-
-    if !output.status.success() {
-        return false;
-    }
-
-    let raw = String::from_utf8_lossy(&output.stdout);
-    match serde_json::from_str::<Value>(&raw) {
-        Ok(Value::Array(entries)) => !entries.is_empty(),
-        _ => false,
-    }
-}
-
-fn maybe_launch_quickshell() {
-    if quickshell_already_running() {
-        return;
-    }
-
-    let Some(shell_bin) = resolve_shell_binary() else {
-        eprintln!("failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
-        return;
-    };
-
-    // Launch quickshell fully detached to avoid zombie processes
-    if let Err(err) = Command::new("setsid")
-        .arg(shell_bin)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        eprintln!("failed to launch quickshell (detached): {}", err);
-    }
-}
-
-fn start_snapshot_broadcasters(state: Arc<AppState>) {
-    spawn_snapshot_broadcaster("audio", Duration::from_secs(2), || {
-        Some(json!({"audio": managers::audio::status()}))
-    });
-    spawn_snapshot_broadcaster("wifi", Duration::from_secs(3), || {
-        Some(json!({"net": managers::net::status()}))
-    });
-    spawn_snapshot_broadcaster("bluetooth", Duration::from_secs(3), || {
-        Some(json!({"bluetooth": managers::bluetooth::status()}))
-    });
-    spawn_snapshot_broadcaster("music", Duration::from_secs(2), || {
-        Some(json!({"music": managers::music::status()}))
-    });
-    spawn_snapshot_broadcaster("dashboard", Duration::from_secs(2), move || {
-        let watched = state.dashboard_watch.lock().ok().and_then(|guard| *guard);
-        let Some((year, month)) = watched else {
-            return None;
-        };
-
-        Some(json!({
-            "dashboard": managers::dashboard::status(year, month as i32),
-        }))
-    });
-}
-
 fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), String> {
     let reader_stream = stream
         .try_clone()
@@ -549,7 +659,8 @@ fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), Str
         let request: Value = match serde_json::from_str(trimmed) {
             Ok(value) => value,
             Err(err) => {
-                let response = jsonrpc_error(Value::Null, -32700, &format!("parse error: {}", err));
+                let response =
+                    jsonrpc_error(Value::Null, -32700, &format!("parse error: {}", err));
                 let payload = format!("{}\n", response);
                 let _ = stream.write_all(payload.as_bytes());
                 continue;
@@ -585,9 +696,23 @@ fn main() {
     let state = Arc::new(AppState {
         started_at: Instant::now(),
         dashboard_watch: Mutex::new(None),
+        audio: AudioState::new(),
+        net: NetState::new(),
+        bluetooth: BluetoothState::new(),
+        music: MusicState::new(),
+        dashboard: DashboardState::new(),
+        qs_pid_cache: Mutex::new(None),
     });
 
-    start_snapshot_broadcasters(Arc::clone(&state));
+    // Spawn per-domain monitor threads (poll system tools, update in-memory state)
+    spawn_audio_monitor(Arc::clone(&state));
+    spawn_net_monitor(Arc::clone(&state));
+    spawn_bluetooth_monitor(Arc::clone(&state));
+    spawn_music_monitor(Arc::clone(&state));
+    spawn_dashboard_monitor(Arc::clone(&state));
+
+    // Single broadcaster: checks dirty flags and pushes to Quickshell via IPC
+    spawn_broadcaster(Arc::clone(&state));
 
     let path = socket_path();
     if path.exists() {

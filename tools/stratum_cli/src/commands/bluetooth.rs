@@ -316,6 +316,23 @@ fn rfkill_bluetooth_power() -> Option<String> {
 }
 
 fn cmd_check() {
+    // Try daemon first for instant cached response
+    if let Ok(response) = crate::daemon_client::daemon_call("bluetooth.status", serde_json::json!({})) {
+        if let Some(result) = response.get("result") {
+            if let Some(bt) = result.get("bluetooth") {
+                let state = bt.get("state").and_then(|v| v.as_str()).unwrap_or("off");
+                emit_json(json!({
+                    "ok": true,
+                    "command": "bluetooth",
+                    "subcommand": "check",
+                    "state": state,
+                }));
+                return;
+            }
+        }
+    }
+
+    // Fallback to direct bluetoothctl
     if command_available("bluetoothctl") {
         let (_ok, show_output) = run_program_combined("bluetoothctl", &["show"], None);
         let powered = parse_bool_field(&show_output, "Powered:", "no");

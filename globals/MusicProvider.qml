@@ -3,12 +3,10 @@ pragma Singleton
 import QtQuick
 import Quickshell.Io
 import "."
-import "DaemonRpc.js" as DaemonRpc
 
 Item {
     id: musicProvider
 
-    readonly property bool preferDaemonBootstrap: true
     property int consumerCount: 0
 
     property string musicStatus: "Stopped"
@@ -74,25 +72,10 @@ Item {
             return;
 
         applyMusicPayload(music);
-        DaemonRpc.recordSuccess();
-        GlobalState.daemonAvailable = true;
-    }
-
-    function bootstrapSnapshot() {
-        if (preferDaemonBootstrap && DaemonRpc.canUse()) {
-            if (!daemonMusicProc.running)
-                daemonMusicProc.running = true;
-            return;
-        }
-
-        if (!musicProc.running)
-            musicProc.running = true;
     }
 
     function acquire() {
         consumerCount = consumerCount + 1;
-        if (consumerCount === 1)
-            bootstrapSnapshot();
     }
 
     function release() {
@@ -122,45 +105,6 @@ Item {
     function mediaNext() {
         mediaProc.command = ["playerctl", "next"];
         mediaProc.running = true;
-    }
-
-    Process {
-        id: daemonMusicProc
-        command: DaemonRpc.command("music.status", {})
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = musicProvider.parseCliJson(this.text.trim());
-                if (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.music) {
-                    DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
-                    const musicResult = payload.result.music;
-                    const music = (musicResult.music && typeof musicResult.music === "object") ? musicResult.music : musicResult;
-                    if (musicResult.ok === true || typeof music === "object")
-                        musicProvider.applyMusicPayload(music);
-                } else {
-                    DaemonRpc.recordFailure();
-                    GlobalState.daemonAvailable = false;
-                    if (!musicProc.running)
-                        musicProc.running = true;
-                    return;
-                }
-
-            }
-        }
-    }
-
-    Process {
-        id: musicProc
-        command: ["stratum-cli", "dashboard", "music"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = musicProvider.parseCliJson(this.text.trim());
-                if (payload && payload.ok === true) {
-                    const music = (payload.music && typeof payload.music === "object") ? payload.music : payload;
-                    musicProvider.applyMusicPayload(music);
-                }
-            }
-        }
     }
 
     Process {

@@ -411,7 +411,7 @@ fn default_eq_presets() -> Vec<EqPreset> {
         EqPreset {
             name: "Flat".to_string(),
             device_id: "@DEFAULT_SINK@".to_string(),
-            bands: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                 .iter()
                 .enumerate()
                 .map(|(index, gain)| legacy_band(index, *gain))
@@ -422,7 +422,7 @@ fn default_eq_presets() -> Vec<EqPreset> {
         EqPreset {
             name: "Bass Boost".to_string(),
             device_id: "@DEFAULT_SINK@".to_string(),
-            bands: vec![6, 4, 2, 0, -2, -1, 0, 1, 2, 3]
+            bands: [6, 4, 2, 0, -2, -1, 0, 1, 2, 3]
                 .iter()
                 .enumerate()
                 .map(|(index, gain)| legacy_band(index, *gain))
@@ -433,7 +433,7 @@ fn default_eq_presets() -> Vec<EqPreset> {
         EqPreset {
             name: "Bright".to_string(),
             device_id: "@DEFAULT_SINK@".to_string(),
-            bands: vec![0, -2, -1, 0, 1, 2, 3, 4, 3, 2]
+            bands: [0, -2, -1, 0, 1, 2, 3, 4, 3, 2]
                 .iter()
                 .enumerate()
                 .map(|(index, gain)| legacy_band(index, *gain))
@@ -444,7 +444,7 @@ fn default_eq_presets() -> Vec<EqPreset> {
         EqPreset {
             name: "Treble Boost".to_string(),
             device_id: "@DEFAULT_SINK@".to_string(),
-            bands: vec![-2, -1, 0, 0, 0, 0, 2, 4, 6, 5]
+            bands: [-2, -1, 0, 0, 0, 0, 2, 4, 6, 5]
                 .iter()
                 .enumerate()
                 .map(|(index, gain)| legacy_band(index, *gain))
@@ -1353,7 +1353,7 @@ fn cmd_equalizer_get_current(device_id: &str) {
         .unwrap_or_else(|| EqPreset {
             name: "Flat".to_string(),
             device_id: device_id.to_string(),
-            bands: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                 .iter()
                 .enumerate()
                 .map(|(index, gain)| legacy_band(index, *gain))
@@ -1454,6 +1454,36 @@ fn cmd_equalizer_delete_preset(device_id: &str, preset_name: &str) {
 }
 
 fn cmd_status(hover: bool) {
+    // Try daemon first for instant cached response
+    if !hover {
+        if let Ok(response) = crate::daemon_client::daemon_call("audio.status", serde_json::json!({})) {
+            if let Some(result) = response.get("result") {
+                if let Some(audio) = result.get("audio") {
+                    emit_json(json!({
+                        "ok": true,
+                        "command": "audio",
+                        "subcommand": "status",
+                        "hover": false,
+                        "volume": audio.get("volume").and_then(|v| v.as_str()).unwrap_or("0%"),
+                        "mute": audio.get("mute").and_then(|v| v.as_str()).unwrap_or("yes"),
+                        "headphones": audio.get("headphones").and_then(|v| v.as_str()).unwrap_or("no"),
+                    }));
+                    return;
+                }
+            }
+        }
+    } else {
+        if let Ok(response) = crate::daemon_client::daemon_call("audio.devices", serde_json::json!({})) {
+            if let Some(result) = response.get("result") {
+                if let Some(audio) = result.get("audio") {
+                    emit_json(audio.clone());
+                    return;
+                }
+            }
+        }
+    }
+
+    // Fallback to direct pactl if daemon is unavailable
     let volume = run_command_capture("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
         .ok()
         .and_then(|out| extract_first_percent(&out))

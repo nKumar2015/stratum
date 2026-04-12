@@ -579,6 +579,22 @@ pub fn handle(args: &[String]) {
             }));
         }
         "music" => {
+            // Try daemon first for instant cached response
+            if let Ok(response) = crate::daemon_client::daemon_call("music.status", serde_json::json!({})) {
+                if let Some(result) = response.get("result") {
+                    if let Some(music) = result.get("music") {
+                        emit_json(json!({
+                            "ok": true,
+                            "command": "dashboard",
+                            "subcommand": "music",
+                            "music": music,
+                        }));
+                        return;
+                    }
+                }
+            }
+
+            // Fallback to direct playerctl
             emit_json(json!({
                 "ok": true,
                 "command": "dashboard",

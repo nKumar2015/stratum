@@ -1,7 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import Quickshell.Io
-import "../globals/DaemonRpc.js" as DaemonRpc
 import "../globals"
 
 Item {
@@ -20,29 +18,9 @@ Item {
     readonly property int iconFadeMs: 150
     readonly property int hoverOpenDelayMs: 350
     readonly property int hoverExitGraceMs: 420
-    readonly property bool preferDaemonBootstrap: true
 
     // disconnected=\udb82\udd2e, ethernet=\udb80\ude00, Wi-Fi weak->strong=\udb82\udd2f..\udb82\udd28
     property string icon: "\udb82\udd2e"
-
-    function parseCliJson(raw) {
-        const text = String(raw || "").trim();
-        if (!text.length)
-            return null;
-
-        try {
-            return JSON.parse(text);
-        } catch (_error) {
-            return null;
-        }
-    }
-
-    function bootstrapStatus() {
-        if (preferDaemonBootstrap && DaemonRpc.canUse())
-            daemonNetProc.running = true;
-        else
-            netProc.running = true;
-    }
 
     function syncIconFromGlobalState() {
         const state = String(GlobalState.wifiState || "disconnected").trim().toLowerCase();
@@ -69,42 +47,6 @@ Item {
         icon = "\udb82\udd2e";
     }
 
-    function updateStatus(output) {
-        const payload = parseCliJson(output);
-        if (!payload)
-            return;
-
-        let source = null;
-        if (payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.net)
-            source = payload.result.net;
-        else if (payload.ok === true)
-            source = payload;
-
-        if (!source)
-            return;
-
-        const state = String(source.state || "").trim().toLowerCase();
-        if (state === "ethernet") {
-            icon = "\udb80\ude00";
-        } else if (state === "wifi") {
-            let strength = parseInt(String(source.signal_pct || "0"));
-            if (isNaN(strength))
-                strength = 0;
-            if (strength >= signalHighThreshold)
-                icon = "\udb82\udd28";
-            else if (strength >= signalMediumHighThreshold)
-                icon = "\udb82\udd25";
-            else if (strength >= signalMediumThreshold)
-                icon = "\udb82\udd22";
-            else if (strength >= signalLowThreshold)
-                icon = "\udb82\udd1f";
-            else
-                icon = "\udb82\udd2f";
-        } else {
-            icon = "\udb82\udd2e";
-        }
-    }
-
     Connections {
         target: GlobalState
         function onWifiStateChanged() {
@@ -115,43 +57,7 @@ Item {
         }
     }
 
-    Process {
-        id: daemonNetProc
-        command: DaemonRpc.command("net.status", {})
-        running: false
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const result = this.text.trim();
-                const payload = root.parseCliJson(result);
-                if (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true) {
-                    DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
-                    root.updateStatus(result);
-                } else {
-                    DaemonRpc.recordFailure();
-                    GlobalState.daemonAvailable = false;
-                    netProc.running = true;
-                    return;
-                }
-            }
-        }
-    }
-
-    Process {
-        id: netProc
-        command: ["stratum-cli", "net", "check"]
-        running: false
-        stdout: StdioCollector {
-            onStreamFinished: {
-                let result = this.text.trim();
-                if (result) {
-                    root.updateStatus(result);
-                }
-            }
-        }
-    }
-
-    Component.onCompleted: root.bootstrapStatus()
+    Component.onCompleted: root.syncIconFromGlobalState()
 
     Text {
         anchors.centerIn: parent

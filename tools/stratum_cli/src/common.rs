@@ -88,10 +88,3 @@ pub fn config_dir() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/stratum")
 }
-
-pub fn ensure_config_dir() -> PathBuf {
-    let dir = config_dir();
-    std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(&format!("failed to create config dir: {}", e)));
-    dir
-}
-

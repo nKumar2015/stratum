@@ -147,7 +147,7 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.wifiHoverIntent)
+            if (!GlobalState.wifiHoverIntent && !menuHover.hovered)
                 GlobalState.showWifiHoverMenu = false;
         }
     }
@@ -171,6 +171,7 @@ PanelWindow {
 
         // HoverHandler covers the whole panel without being blocked by child MouseAreas.
         HoverHandler {
+            id: menuHover
             onHoveredChanged: GlobalState.wifiHoverIntent = hovered
         }
 

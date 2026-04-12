@@ -1,5 +1,6 @@
 mod commands;
 mod common;
+mod daemon_client;
 
 use std::env;
 use std::process::Command;

@@ -27,7 +27,7 @@ fn print_help() {
 }
 
 fn list_themes() {
-    let themes = vec!["Carbon", "Gruvbox", "RosePine", "TokyoNight"];
+    let themes = ["Carbon", "Gruvbox", "RosePine", "TokyoNight"];
     println!("Available themes:");
     for (i, theme) in themes.iter().enumerate() {
         println!("  {}. {}", i + 1, theme);

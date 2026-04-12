@@ -64,6 +64,35 @@ pub fn handle(args: &[String]) {
         return;
     }
 
+    // Try daemon first for instant cached response
+    if let Ok(response) = crate::daemon_client::daemon_call("net.status", serde_json::json!({})) {
+        if let Some(result) = response.get("result") {
+            if let Some(net) = result.get("net") {
+                let state = net.get("state").and_then(|v| v.as_str()).unwrap_or("none");
+                if state == "wifi" {
+                    let signal_pct = net.get("signal_pct").and_then(|v| v.as_i64()).unwrap_or(0);
+                    emit_json(json!({
+                        "ok": true,
+                        "command": "net",
+                        "subcommand": "check",
+                        "state": "wifi",
+                        "signal_pct": signal_pct,
+                    }));
+                } else {
+                    emit_json(json!({
+                        "ok": true,
+                        "command": "net",
+                        "subcommand": "check",
+                        "state": state,
+                    }));
+                }
+                return;
+            }
+        }
+    }
+
+    // Fallback to direct sysfs reads
+
     let interfaces = list_interfaces();
 
     for interface in &interfaces {
