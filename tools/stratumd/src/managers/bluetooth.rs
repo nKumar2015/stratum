@@ -14,6 +14,21 @@ fn parse_bool_field(info: &str, key: &str, default: &str) -> String {
     default.to_string()
 }
 
+fn parse_device_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("Device ") {
+        return None;
+    }
+    let rest = trimmed.trim_start_matches("Device ").trim();
+    let mut parts = rest.splitn(2, ' ');
+    let mac = parts.next()?.trim();
+    if mac.len() != 17 {
+        return None;
+    }
+    let name = parts.next().unwrap_or("").trim().to_string();
+    Some((mac.to_uppercase(), name))
+}
+
 pub fn status() -> Value {
     let (_ok, show_output) = run_program_combined("bluetoothctl", &["show"], None, BT_TIMEOUT);
     let powered = parse_bool_field(&show_output, "Powered:", "no");
@@ -30,12 +45,33 @@ pub fn status() -> Value {
         .lines()
         .any(|line| !line.trim().is_empty());
 
+    let mut devices = Vec::new();
+    if powered == "yes" {
+        let (_ok, paired_output) =
+            run_program_combined("bluetoothctl", &["devices", "Paired"], None, BT_TIMEOUT);
+        
+        for line in paired_output.lines() {
+            if let Some((mac, name)) = parse_device_line(line) {
+                let (_ok_info, info) =
+                    run_program_combined("bluetoothctl", &["info", &mac], None, BT_TIMEOUT);
+                let connected = parse_bool_field(&info, "Connected:", "no");
+                
+                devices.push(json!({
+                    "mac": mac,
+                    "name": if name.is_empty() { mac.clone() } else { name },
+                    "connected": connected,
+                }));
+            }
+        }
+    }
+
     let scanning = parse_bool_field(&show_output, "Discovering:", "no");
 
     json!({
         "ok": true,
         "state": if has_connected { "connected" } else { "on" },
         "scanning": scanning,
+        "devices": devices,
     })
 }
 

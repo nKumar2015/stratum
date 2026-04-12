@@ -19,16 +19,18 @@ mod managers {
     pub mod music;
     pub mod net;
     pub mod wifi;
+    pub mod battery;
 }
 
 mod state;
 
-use state::{AudioState, BluetoothState, DashboardState, MusicState, NetState};
+use state::{AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState};
 
 struct AppState {
     started_at: Instant,
     dashboard_watch: Mutex<Option<(i32, u32)>>,
     audio: AudioState,
+    battery: BatteryState,
     net: NetState,
     bluetooth: BluetoothState,
     music: MusicState,
@@ -302,6 +304,14 @@ fn spawn_dashboard_monitor(state: Arc<AppState>) {
     });
 }
 
+fn spawn_battery_monitor(state: Arc<AppState>) {
+    thread::spawn(move || loop {
+        let snapshot = managers::battery::status();
+        state.battery.update(snapshot);
+        thread::sleep(Duration::from_secs(5));
+    });
+}
+
 // --- Single broadcaster thread ---
 
 fn spawn_broadcaster(state: Arc<AppState>) {
@@ -367,6 +377,13 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.dashboard.take_if_dirty() {
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            if let Some(payload) = state.battery.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -460,6 +477,10 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
         })),
 
         // Read from in-memory state for status queries
+        "battery.status" => Ok(json!({
+            "ok": true,
+            "battery": state.battery.snapshot(),
+        })),
         "audio.status" => Ok(json!({
             "ok": true,
             "audio": state.audio.snapshot(),
@@ -699,6 +720,7 @@ fn main() {
         audio: AudioState::new(),
         net: NetState::new(),
         bluetooth: BluetoothState::new(),
+        battery: BatteryState::new(),
         music: MusicState::new(),
         dashboard: DashboardState::new(),
         qs_pid_cache: Mutex::new(None),
@@ -708,6 +730,7 @@ fn main() {
     spawn_audio_monitor(Arc::clone(&state));
     spawn_net_monitor(Arc::clone(&state));
     spawn_bluetooth_monitor(Arc::clone(&state));
+    spawn_battery_monitor(Arc::clone(&state));
     spawn_music_monitor(Arc::clone(&state));
     spawn_dashboard_monitor(Arc::clone(&state));
 

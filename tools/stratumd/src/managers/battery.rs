@@ -1,17 +1,7 @@
+use crate::managers::common::run_command_capture;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-
-use serde_json::json;
-
-use crate::common::{emit_help, emit_json, fail, is_help_flag, run_command_capture};
-
-fn print_help() {
-    emit_help(
-        "battery",
-        "stratum-cli battery <status|set-profile> [args]",
-        &["status", "set-profile <low-power|balanced|balanced-performance>"],
-    );
-}
 
 fn run_capture_optional(program: &str, args: &[&str]) -> String {
     run_command_capture(program, args).unwrap_or_default()
@@ -40,7 +30,6 @@ fn read_battery_device() -> String {
             return trimmed.to_string();
         }
     }
-
     String::new()
 }
 
@@ -50,30 +39,25 @@ fn parse_upower_field(upower_info: &str, field: &str) -> String {
         if !trimmed.starts_with(field) {
             continue;
         }
-
         if let Some((_, value)) = trimmed.split_once(':') {
             return value.trim().to_string();
         }
     }
-
     String::new()
 }
 
 fn power_supply_bat_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
     let base = Path::new("/sys/class/power_supply");
-    let Ok(entries) = fs::read_dir(base) else {
-        return dirs;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
-        if name.starts_with("BAT") {
-            dirs.push(path);
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
+            if name.starts_with("BAT") {
+                dirs.push(path);
+            }
         }
     }
-
     dirs.sort();
     dirs
 }
@@ -96,7 +80,6 @@ fn read_battery_percentage(device: &str) -> i64 {
             }
         }
     }
-
     0
 }
 
@@ -134,10 +117,7 @@ fn read_battery_state(device: &str) -> String {
 
 fn parse_duration_seconds(duration: &str) -> i64 {
     let mut parts = duration.split_whitespace();
-    let value = parts
-        .next()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    let value = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
     let unit = parts.next().unwrap_or("").to_lowercase();
 
     if value <= 0.0 {
@@ -180,7 +160,6 @@ fn read_screen_on_time() -> String {
             }
         }
     }
-
     "Unknown".to_string()
 }
 
@@ -192,7 +171,6 @@ fn read_active_profile() -> String {
             return trimmed.to_string();
         }
     }
-
     "unknown".to_string()
 }
 
@@ -214,23 +192,7 @@ fn read_charging_info(device: &str, state: &str) -> String {
     "Connected to charger".to_string()
 }
 
-fn cmd_status() {
-    if let Ok(response) = crate::daemon_client::daemon_call("battery.status", serde_json::json!({})) {
-        if let Some(result) = response.get("result") {
-            if let Some(battery_json) = result.get("battery") {
-                emit_json(json!({
-                    "ok": true,
-                    "command": "battery",
-                    "subcommand": "status",
-                    "battery": battery_json.get("battery"),
-                    "charging_info": battery_json.get("charging_info"),
-                    "profile": battery_json.get("profile"),
-                }));
-                return;
-            }
-        }
-    }
-
+pub fn status() -> Value {
     let device = read_battery_device();
     let pct = read_battery_percentage(&device).clamp(0, 100);
     let state = read_battery_state(&device);
@@ -240,10 +202,7 @@ fn cmd_status() {
     let profile = read_active_profile();
     let charging_info = read_charging_info(&device, &state);
 
-    emit_json(json!({
-        "ok": true,
-        "command": "battery",
-        "subcommand": "status",
+    json!({
         "battery": {
             "pct": pct,
             "state": state,
@@ -252,44 +211,5 @@ fn cmd_status() {
         },
         "charging_info": charging_info,
         "profile": profile,
-    }));
-}
-
-fn cmd_set_profile(args: &[String]) {
-    let profile = args.get(1).map(String::as_str).unwrap_or("");
-    match profile {
-        "low-power" | "balanced" | "balanced-performance" => {}
-        _ => fail("invalid profile"),
-    }
-
-    let path = Path::new("/sys/firmware/acpi/platform_profile");
-    if !path.is_file() {
-        fail("platform_profile not available");
-    }
-
-    if fs::write(path, profile).is_err() {
-        fail("failed to set profile");
-    }
-
-    emit_json(json!({
-        "ok": true,
-        "command": "battery",
-        "subcommand": "set-profile",
-        "profile": profile,
-        "result": "ok",
-    }));
-}
-
-pub fn handle(args: &[String]) {
-    let subcommand = args.first().map(String::as_str).unwrap_or("");
-    if is_help_flag(subcommand) {
-        print_help();
-        return;
-    }
-
-    match subcommand {
-        "status" => cmd_status(),
-        "set-profile" => cmd_set_profile(args),
-        _ => fail("unknown battery command"),
-    }
+    })
 }

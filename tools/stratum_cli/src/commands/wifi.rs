@@ -118,6 +118,23 @@ fn cmd_state(hover: bool) {
         return;
     }
 
+    if let Ok(response) = crate::daemon_client::daemon_call("net.status", serde_json::json!({})) {
+        if let Some(result) = response.get("result") {
+            if let Some(net_json) = result.get("net") {
+                if let Some(connections) = net_json.get("connections") {
+                    emit_json(json!({
+                        "ok": true,
+                        "command": "wifi",
+                        "subcommand": "state",
+                        "hover": true,
+                        "connections": connections,
+                    }));
+                    return;
+                }
+            }
+        }
+    }
+
     let device_rows = nmcli_capture(&["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev"]);
     let mut connections = Vec::new();
 

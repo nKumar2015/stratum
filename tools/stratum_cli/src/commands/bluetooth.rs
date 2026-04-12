@@ -146,6 +146,25 @@ fn device_rows(include_paired: bool) -> Vec<(String, String)> {
 }
 
 fn cmd_list(hover: bool) {
+    if hover {
+        if let Ok(response) = crate::daemon_client::daemon_call("bluetooth.status", serde_json::json!({})) {
+            if let Some(result) = response.get("result") {
+                if let Some(bluetooth_json) = result.get("bluetooth") {
+                    if let Some(devices) = bluetooth_json.get("devices") {
+                        emit_json(json!({
+                            "ok": true,
+                            "command": "bluetooth",
+                            "subcommand": "list",
+                            "hover": true,
+                            "devices": devices,
+                        }));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     let rows = if hover {
         let (_ok, paired_output) = run_program_combined("bluetoothctl", &["devices", "Paired"], None);
         let mut parsed = Vec::new();

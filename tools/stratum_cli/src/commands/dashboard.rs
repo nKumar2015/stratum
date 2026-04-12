@@ -571,6 +571,26 @@ pub fn handle(args: &[String]) {
         "calendar" => {
             let year_month_args = args.get(1..).unwrap_or(&[]);
             let (year, month) = parse_requested_year_month(year_month_args);
+            
+            if let Ok(response) = crate::daemon_client::daemon_call("dashboard.status", serde_json::json!({
+                "year": year,
+                "month": month,
+            })) {
+                if let Some(result) = response.get("result") {
+                    if let Some(dashboard) = result.get("dashboard") {
+                        if !dashboard.is_null() && dashboard.get("calendar").is_some() {
+                            emit_json(json!({
+                                "ok": true,
+                                "command": "dashboard",
+                                "subcommand": "calendar",
+                                "calendar": dashboard.get("calendar"),
+                            }));
+                            return;
+                        }
+                    }
+                }
+            }
+
             emit_json(json!({
                 "ok": true,
                 "command": "dashboard",
@@ -603,6 +623,22 @@ pub fn handle(args: &[String]) {
             }));
         }
         "performance" => {
+            if let Ok(response) = crate::daemon_client::daemon_call("dashboard.status", serde_json::json!({})) {
+                if let Some(result) = response.get("result") {
+                    if let Some(dashboard) = result.get("dashboard") {
+                        if !dashboard.is_null() && dashboard.get("performance").is_some() {
+                            emit_json(json!({
+                                "ok": true,
+                                "command": "dashboard",
+                                "subcommand": "performance",
+                                "performance": dashboard.get("performance"),
+                            }));
+                            return;
+                        }
+                    }
+                }
+            }
+
             emit_json(json!({
                 "ok": true,
                 "command": "dashboard",
@@ -613,6 +649,28 @@ pub fn handle(args: &[String]) {
         "all" => {
             let year_month_args = args.get(1..).unwrap_or(&[]);
             let (year, month) = parse_requested_year_month(year_month_args);
+            
+            if let Ok(response) = crate::daemon_client::daemon_call("dashboard.status", serde_json::json!({
+                "year": year,
+                "month": month,
+            })) {
+                if let Some(result) = response.get("result") {
+                    if let Some(dashboard) = result.get("dashboard") {
+                        if !dashboard.is_null() && dashboard.get("calendar").is_some() {
+                            emit_json(json!({
+                                "ok": true,
+                                "command": "dashboard",
+                                "subcommand": "all",
+                                "calendar": dashboard.get("calendar"),
+                                "music": dashboard.get("music"),
+                                "performance": dashboard.get("performance"),
+                            }));
+                            return;
+                        }
+                    }
+                }
+            }
+
             emit_json(json!({
                 "ok": true,
                 "command": "dashboard",
