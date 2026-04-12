@@ -476,10 +476,10 @@ ApplicationWindow {
         eqParametricBands = makeParametricBandsFromLegacy(eqBands);
         eqPreampDb = 0;
 
-        currentPresetName = "Flat";
-        isCustomPreset = false;
-        eqStatusMsg = "Reset to Flat.";
-        applyPreset("Flat");
+        currentPresetName = "Custom";
+        isCustomPreset = true;
+        eqStatusMsg = "Resetting eq on graph...";
+        applyCurrentEq();
     }
 
     function loadPresetsForDevice() {
@@ -589,12 +589,16 @@ ApplicationWindow {
                 audioMenu.defaultInputName = String(defaults.source || "");
 
                 const defaultSink = audioMenu.outputDevices.find(d => d.name === audioMenu.defaultOutputName);
+                let deviceChanged = false;
                 if (defaultSink) {
+                    if (audioMenu.currentDevice !== defaultSink.name) {
+                        deviceChanged = true;
+                    }
                     audioMenu.currentDevice = defaultSink.name;
                     audioMenu.currentDeviceLabel = defaultSink.description || defaultSink.name;
                 }
 
-                if (audioMenu.currentDevice)
+                if (deviceChanged && audioMenu.currentDevice)
                     audioMenu.loadPresetsForDevice();
             }
         }

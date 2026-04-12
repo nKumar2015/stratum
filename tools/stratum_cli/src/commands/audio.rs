@@ -993,7 +993,7 @@ fn move_active_streams_to_eq(target_sink: &str) {
 /// Build the PipeWire filter-graph string for `audioconvert.filter-graph` set-param.
 fn build_filter_graph_string(filter_specs: &[String]) -> String {
     format!(
-        "{{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ eq:In 1 eq:In 2 ] outputs = [ eq:Out 1 eq:Out 2 ] }}",
+        "{{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }}",
         filter_specs.join(" ")
     )
 }
@@ -1101,9 +1101,10 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
     destroy_eq_module();
     std::thread::sleep(std::time::Duration::from_millis(150));
 
+    let flat_graph = "{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }";
     let module_args = format!(
         "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ], inputs = [ \"eq:In 1\", \"eq:In 2\" ], outputs = [ \"eq:Out 1\", \"eq:Out 2\" ] }} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
-        filter_specs.join(", "),
+        flat_graph,
         pw_escape_string(&resolved_device)
     );
 
@@ -1137,8 +1138,11 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
         );
     }
 
+    let node_id = created_id.unwrap();
+    let _ = try_set_param_eq(node_id, &filter_specs);
+
     // Make the virtual sink active default for new streams.
-    let _ = run_command_capture("wpctl", &["set-default", &created_id.unwrap().to_string()]);
+    let _ = run_command_capture("wpctl", &["set-default", &node_id.to_string()]);
     let _ = run_command_capture("pactl", &["set-default-sink", EQ_VIRTUAL_INPUT_SINK]);
 
     // Force move existing streams to the EQ sink
