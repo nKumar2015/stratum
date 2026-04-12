@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio, Child};
 use std::sync::Mutex;
 use std::io::Write;
+use std::time::{Duration, Instant};
 use lazy_static::lazy_static;
-
+use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 
 use crate::managers::common::{run_command_capture, run_capture_optional, command_available};
@@ -77,7 +78,7 @@ const EQ_DEFAULT_FREQUENCIES: [f64; 10] = [
 ];
 
 // EQ band structure (parametric)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct EqBand {
     frequency_hz: f64,
     gain_db: f64,
@@ -87,7 +88,7 @@ struct EqBand {
 }
 
 // EQ Preset structure (per output)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct EqPreset {
     name: String,
     device_id: String,
@@ -96,7 +97,7 @@ struct EqPreset {
     is_builtin: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct EqConfig {
     presets: Vec<EqPreset>,
     device_last_preset: HashMap<String, String>,
@@ -515,15 +516,28 @@ fn parse_pw_info_property(info: &str, property: &str) -> Option<String> {
 }
 
 fn resolve_effective_default_sink(default_sink: &str) -> String {
-    if default_sink.trim() != EQ_VIRTUAL_INPUT_SINK {
-        return default_sink.to_string();
+    let raw = default_sink.trim();
+    if raw.is_empty() {
+        return String::new();
     }
 
+    if raw != EQ_VIRTUAL_INPUT_SINK {
+        return raw.to_string();
+    }
+
+    // If we are currently on the EQ sink, find out where its output is pointing
     let Ok(info) = run_command_capture("pw-cli", &["info", EQ_VIRTUAL_OUTPUT_NODE]) else {
-        return default_sink.to_string();
+        return raw.to_string();
     };
 
-    parse_pw_info_property(&info, "target.object").unwrap_or_else(|| default_sink.to_string())
+    let resolved = parse_pw_info_property(&info, "target.object").unwrap_or_else(|| raw.to_string());
+    
+    // Safety check: if it resolved back to the virtual sink (rare/buggy state), don't return it
+    if resolved == EQ_VIRTUAL_INPUT_SINK || resolved == EQ_VIRTUAL_OUTPUT_NODE {
+        return String::new(); // Caller should handle empty as "unknown/lost"
+    }
+
+    resolved
 }
 
 fn find_node_id_by_name(node_name: &str) -> Option<u32> {
@@ -555,6 +569,27 @@ fn find_node_id_by_name(node_name: &str) -> Option<u32> {
     }
 
     None
+}
+
+fn purge_eq_output_links() {
+    let output = match Command::new("pw-link").arg("-l").output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => return,
+    };
+
+    let mut current_source = String::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if (line.starts_with(' ') || line.starts_with('\t')) && !trimmed.is_empty() {
+             if (current_source == "effect_output.stratum_eq:output_FL" || current_source == "effect_output.stratum_eq:output_FR") && trimmed.starts_with("|->") {
+                 let target_port = trimmed.replacen("|->", "", 1).trim().to_string();
+                 println!("[audio] [info] purging incorrect EQ link: {} -> {}", current_source, target_port);
+                 let _ = Command::new("pw-link").args(&["-d", &current_source, &target_port]).status();
+             }
+        } else if !trimmed.is_empty() {
+            current_source = trimmed.trim_end_matches(':').to_string();
+        }
+    }
 }
 
 fn list_sink_names() -> Vec<String> {
@@ -609,7 +644,8 @@ fn relink_static_eq_output_to_sink(sink: &str) -> Result<(), String> {
 
 lazy_static! {
     static ref EQ_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
-    static ref LAST_SYNCED_SINK: Mutex<String> = Mutex::new(String::new());
+    static ref LAST_SYNCED_STATE: Mutex<(String, Instant)> = Mutex::new((String::new(), Instant::now()));
+    static ref IS_RESTORING: Mutex<bool> = Mutex::new(false);
 }
 
 fn spawn_eq_module(module_args: &str) -> std::io::Result<()> {
@@ -726,9 +762,19 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
     std::thread::sleep(std::time::Duration::from_millis(150));
 
     let graph = builds_filter_graph_string(&filter_specs);
+    
+    // Ensure we are NOT linking to the virtual sink itself (recursion/silence risk)
+    if is_eq_virtual_sink_name(&resolved_device) || resolved_device.is_empty() {
+        println!("[audio] [warn] resolved_device for EQ is invalid ('{}'), aborting load", resolved_device);
+        return Err("invalid hardware target for EQ".to_string());
+    }
+
+    println!("[audio] [info] loading EQ module targeting device: {}", resolved_device);
+
     let module_args = format!(
-        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
+        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
         graph,
+        resolved_device.replace('\\', "\\\\").replace('"', "\\\""),
         resolved_device.replace('\\', "\\\\").replace('"', "\\\"")
     );
 
@@ -743,11 +789,22 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    if let Some(node_id) = created_id {
-        let _ = run_command_capture("wpctl", &["set-default", &node_id.to_string()]);
+    // Only set default sink if it's not already the EQ sink (prevents notification loops)
+    let current_default = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+    if current_default.trim() != EQ_VIRTUAL_INPUT_SINK {
+        let _ = run_command_capture("pactl", &["set-default-sink", EQ_VIRTUAL_INPUT_SINK]);
     }
-    let _ = run_command_capture("pactl", &["set-default-sink", EQ_VIRTUAL_INPUT_SINK]);
     move_active_streams_to_eq(EQ_VIRTUAL_INPUT_SINK);
+
+    // Manual link fallback: disconnect garbage and explicitly connect to hardware
+    let target = resolved_device.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        purge_eq_output_links();
+        println!("[audio] [info] ensuring manual link: EQ -> {}", target);
+        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FL", &format!("{}:playback_FL", target)]);
+        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FR", &format!("{}:playback_FR", target)]);
+    });
 
     Ok(EqApplyResult {
         applied: true,
@@ -885,11 +942,13 @@ pub fn devices() -> Value {
             "mute": mute,
         },
         "default": {
-            "sink": default_sink,
+            "sink": default_sink.clone(),
             "source": default_source,
+            "resolved_hardware_sink": resolve_effective_default_sink(&default_sink),
         },
         "sinks": sinks,
         "sources": sources,
+        "active_preset": load_eq_config().device_last_preset.get(&resolve_effective_default_sink(&default_sink)),
     })
 }
 
@@ -906,11 +965,12 @@ pub fn set_output(target: &str) -> Value {
 
     // Per-device restoration:
     // When manually switching outputs, we restore the specific profile for that hardware.
+    println!("[audio] [info] set_output: restored device EQ profile for target: {}", target);
     let res = auto_apply_preset_for_device(target);
     
     // Update internal state so the monitor doesn't try to re-apply it immediately.
-    if let Ok(mut lock) = LAST_SYNCED_SINK.lock() {
-        *lock = target.to_string();
+    if let Ok(mut lock) = LAST_SYNCED_STATE.lock() {
+        *lock = (target.to_string(), Instant::now());
     }
 
     if res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
@@ -999,6 +1059,8 @@ pub fn eq_apply_preset(device_id: &str, preset_name: &str) -> Value {
                 "applied": res.applied,
                 "engine": res.engine,
                 "status": res.status,
+                "parametric_bands": preset.bands,
+                "preamp_db": preset.preamp_db,
             }),
             Err(err) => json!({
                 "ok": false,
@@ -1094,20 +1156,45 @@ pub fn media_seek(position_sec: i64) -> Value {
 }
 
 pub fn notify_default_sink_changed(new_sink_raw: &str) {
-    let effective = resolve_effective_default_sink(new_sink_raw);
-    if is_eq_virtual_sink_name(&effective) {
+    if *IS_RESTORING.lock().unwrap() {
         return;
     }
 
-    let mut lock = LAST_SYNCED_SINK.lock().unwrap();
-    if *lock != effective {
-        println!("Hardware output changed to {}, restoring device EQ profile", effective);
-        *lock = effective.clone();
+    let effective = resolve_effective_default_sink(new_sink_raw);
+    if is_eq_virtual_sink_name(&effective) || effective.is_empty() {
+        return;
+    }
+
+    let mut lock = LAST_SYNCED_STATE.lock().unwrap();
+    let (last_sink, last_time) = &*lock;
+    
+    // Throttle: don't auto-restore more than once every 3 seconds to avoid loops/flapping
+    if last_time.elapsed() < Duration::from_secs(3) {
+        return;
+    }
+
+    if *last_sink != effective {
+        println!("[audio] [info] hardware output changed to {}, restoring device EQ profile", effective);
+        *lock = (effective.clone(), Instant::now());
         
         // Asynchronously restore preset to avoid blocking the monitor loop
         let target = effective.clone();
         std::thread::spawn(move || {
-            let _ = auto_apply_preset_for_device(&target);
+            {
+                let mut guard = IS_RESTORING.lock().unwrap();
+                *guard = true;
+            }
+            
+            let res = auto_apply_preset_for_device(&target);
+            
+            if !res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                 println!("[audio] [error] auto-restore failed for {}: {:?}", target, res.get("error"));
+            }
+            
+            {
+                let mut guard = IS_RESTORING.lock().unwrap();
+                *guard = false;
+            }
         });
     }
 }
@@ -1130,13 +1217,13 @@ pub fn initialize() {
     let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
     let effective = resolve_effective_default_sink(default_sink_raw.trim());
     
-    println!("Initializing audio manager with effective sink: {}", effective);
+    println!("[audio] [info] initializing audio manager with effective sink: {}", effective);
     
-    if let Ok(mut lock) = LAST_SYNCED_SINK.lock() {
-        *lock = effective.clone();
+    if let Ok(mut lock) = LAST_SYNCED_STATE.lock() {
+        *lock = (effective.clone(), Instant::now());
     }
 
-    if !is_eq_virtual_sink_name(&effective) {
+    if !is_eq_virtual_sink_name(&effective) && !effective.is_empty() {
         let _ = auto_apply_preset_for_device(&effective);
     }
 }

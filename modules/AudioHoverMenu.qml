@@ -218,7 +218,11 @@ PanelWindow {
                     return;
                 }
 
-                const payload = hoverMenu.parseCliJson(raw);
+                let payload = hoverMenu.parseCliJson(raw);
+                if (payload && payload.result !== undefined) {
+                    payload = payload.result;
+                }
+
                 if (!payload || payload.ok !== true) {
                     hoverMenu.errorMsg = payload && payload.error ? String(payload.error) : "Audio status unavailable";
                     hoverMenu.outputDevices = [];
@@ -226,8 +230,10 @@ PanelWindow {
                     return;
                 }
 
-                const status = payload.status || {};
-                const defaults = payload.default || {};
+                // If the payload contains an 'audio' object (from the newer daemon logic), unwrap it
+                const data = payload.audio || payload;
+                const status = data.status || {};
+                const defaults = data.default || {};
 
                 hoverMenu.sliderSyncing = true;
                 hoverMenu.parseVolumeStatus(String(status.volume || "0%"), String(status.mute || "yes"));
@@ -236,8 +242,8 @@ PanelWindow {
                 hoverMenu.defaultOutput = String(defaults.sink || "");
                 hoverMenu.defaultInput = String(defaults.source || "");
 
-                const sinks = Array.isArray(payload.sinks) ? payload.sinks : [];
-                const sources = Array.isArray(payload.sources) ? payload.sources : [];
+                const sinks = Array.isArray(data.sinks) ? data.sinks : [];
+                const sources = Array.isArray(data.sources) ? data.sources : [];
 
                 hoverMenu.outputDevices = sinks.filter(function (row) {
                     return !!String(row.name || "").trim();
@@ -266,7 +272,11 @@ PanelWindow {
             onStreamFinished: {
                 const result = this.text.trim();
                 hoverMenu.switching = false;
-                const payload = hoverMenu.parseCliJson(result);
+                let payload = hoverMenu.parseCliJson(result);
+                if (payload && payload.result !== undefined) {
+                    payload = payload.result;
+                }
+
                 if (!payload || payload.ok !== true) {
                     hoverMenu.statusMsg = "Switch failed";
                     statusClearTimer.restart();
@@ -284,7 +294,11 @@ PanelWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                const payload = hoverMenu.parseCliJson(result);
+                let payload = hoverMenu.parseCliJson(result);
+                if (payload && payload.result !== undefined) {
+                    payload = payload.result;
+                }
+
                 if (!payload || payload.ok !== true) {
                     hoverMenu.statusMsg = "Volume change failed";
                     hoverMenu.expectedVolume = -1;
