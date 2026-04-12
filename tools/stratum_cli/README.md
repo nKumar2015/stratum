@@ -96,6 +96,7 @@ Notes:
   - `open-control`: launches `pavucontrol`.
 
 Parametric apply note:
+
 - `equalizer apply-preset` and `equalizer apply-parametric` now use PipeWire filter-chain module loading when available, creating/updating the virtual sink `effect_input.stratum_eq` and setting it as default for new streams.
 - If `pw-cli`/filter-chain loading is unavailable, commands fall back to validated dry-run metadata with detailed status/error output.
 - Side effects:
@@ -248,6 +249,17 @@ Parametric apply note:
 ## Runtime Invocation
 
 Quickshell components invoke `stratum-cli` directly.
+
+## Runtime Architecture
+
+Stratum now runs daemon-first:
+
+- `stratumd` is the long-running runtime entrypoint.
+- UI modules use daemon JSON-RPC and daemon-pushed snapshots as the primary state path.
+- The shell receives pushed updates over Quickshell IPC from `stratumd`.
+- Dashboard updates are watch-based (`dashboard.watch` / `dashboard.unwatch`) rather than periodic UI polling.
+
+`stratum-cli` remains the compatibility command surface for actions and fallback reads. Existing shell IPC targets (`notifications`, `powermenu`, `lockscreen`, `screenshot`, `theme`, `dashboard`) are unchanged.
 
 Examples:
 

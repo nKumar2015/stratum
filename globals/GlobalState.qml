@@ -8,11 +8,16 @@ QtObject {
     property bool showWifiHoverMenu: false
     property real wifiIconY: 0
     property bool wifiHoverIntent: false
+    property string wifiState: "disconnected"
+    property int wifiSignalPercent: 0
+    property bool wifiEthernet: false
+    property bool wifiEnabled: false
     property bool showAudioHoverMenu: false
     property real audioIconY: 0
     property bool audioHoverIntent: false
     property int audioVolumePercent: 0
     property bool audioMuted: true
+    property bool audioHeadphonesOutput: false
     property bool audioUserAdjusting: false
     property bool daemonAvailable: false
     property bool showAudioMenu: false
@@ -48,6 +53,60 @@ QtObject {
 
     function setPopupMonitorName(name) {
         popupMonitorName = String(name || "");
+    }
+
+    function parseDaemonPayload(payloadText) {
+        const text = String(payloadText || "").trim();
+        if (!text.length)
+            return null;
+
+        try {
+            return JSON.parse(text);
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function applyDaemonAudioSnapshot(payloadText) {
+        const payload = parseDaemonPayload(payloadText);
+        const audio = (payload && payload.audio && typeof payload.audio === "object") ? payload.audio : payload;
+        if (!audio || typeof audio !== "object")
+            return;
+
+        const parsedVolume = parseInt(String(audio.volume || "0").replace("%", ""));
+        audioVolumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
+        audioMuted = String(audio.mute || "yes").trim().toLowerCase() === "yes";
+        audioHeadphonesOutput = String(audio.headphones || "no").trim().toLowerCase() === "yes";
+        daemonAvailable = true;
+    }
+
+    function applyDaemonWifiSnapshot(payloadText) {
+        const payload = parseDaemonPayload(payloadText);
+        const wifi = (payload && payload.net && typeof payload.net === "object") ? payload.net : payload;
+        if (!wifi || typeof wifi !== "object")
+            return;
+
+        const state = String(wifi.state || "disconnected").trim().toLowerCase();
+        wifiState = state;
+        wifiEthernet = state === "ethernet";
+        wifiEnabled = state === "ethernet" || state === "wifi";
+
+        const signal = parseInt(String(wifi.signal_pct || "0"));
+        wifiSignalPercent = isNaN(signal) ? 0 : Math.max(0, Math.min(100, signal));
+        daemonAvailable = true;
+    }
+
+    function applyDaemonBluetoothSnapshot(payloadText) {
+        const payload = parseDaemonPayload(payloadText);
+        const bluetooth = (payload && payload.bluetooth && typeof payload.bluetooth === "object") ? payload.bluetooth : payload;
+        if (!bluetooth || typeof bluetooth !== "object")
+            return;
+
+        const raw = String(bluetooth.state || "off").trim().toLowerCase();
+        bluetoothPowered = raw === "connected" || raw === "on";
+        bluetoothConnected = raw === "connected";
+        bluetoothScanning = String(bluetooth.scanning || "no").trim().toLowerCase() === "yes";
+        daemonAvailable = true;
     }
 
     function normalizeProgress(value) {

@@ -23,7 +23,9 @@ ShellRoot {
     AudioHoverMenu {}
     AudioMenu {}
     BatteryHoverMenu {}
-    DashboardMenu {}
+    DashboardMenu {
+        id: dashboardMenu
+    }
     ThemeSwitcher {}
     Variants {
         model: Quickshell.screens
@@ -41,6 +43,30 @@ ShellRoot {
         function start(): void {
             if (!GlobalState.screenshotOverlayOpen)
                 GlobalState.screenshotOverlayOpen = true;
+        }
+    }
+
+    IpcHandler {
+        target: "daemon"
+
+        function audio(payloadText: string): void {
+            GlobalState.applyDaemonAudioSnapshot(payloadText);
+        }
+
+        function wifi(payloadText: string): void {
+            GlobalState.applyDaemonWifiSnapshot(payloadText);
+        }
+
+        function bluetooth(payloadText: string): void {
+            GlobalState.applyDaemonBluetoothSnapshot(payloadText);
+        }
+
+        function music(payloadText: string): void {
+            MusicProvider.applyDaemonMusicSnapshot(payloadText);
+        }
+
+        function dashboard(payloadText: string): void {
+            dashboardMenu.applyDaemonDashboardSnapshot(payloadText);
         }
     }
 

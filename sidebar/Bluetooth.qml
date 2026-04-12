@@ -13,11 +13,10 @@ Item {
     Layout.preferredWidth: 16
     Layout.preferredHeight: 16
 
-    readonly property int statusPollMs: 5000
     readonly property int iconFadeMs: 150
     readonly property int hoverOpenDelayMs: 350
     readonly property int hoverExitGraceMs: 420
-    readonly property bool daemonPreferred: true
+    readonly property bool preferDaemonBootstrap: true
 
     // scanning=󰂰, connected=󰂱, powered=󰂯, off=󰂲
     property string icon: GlobalState.bluetoothScanning ? "󰂰" : (GlobalState.bluetoothConnected ? "󰂱" : (GlobalState.bluetoothPowered ? "󰂯" : "󰂲"))
@@ -34,8 +33,8 @@ Item {
         }
     }
 
-    function pollStatus() {
-        if (daemonPreferred && DaemonRpc.canUse())
+    function bootstrapStatus() {
+        if (preferDaemonBootstrap && DaemonRpc.canUse())
             daemonBluetoothProc.running = true;
         else
             bluetoothProc.running = true;
@@ -94,7 +93,6 @@ Item {
                     bluetoothProc.running = true;
                     return;
                 }
-                refreshTimer.start();
             }
         }
     }
@@ -108,19 +106,11 @@ Item {
                 const result = this.text.trim();
                 if (result)
                     root.updateStatus(result);
-                refreshTimer.start();
             }
         }
     }
 
-    Timer {
-        id: refreshTimer
-        interval: root.statusPollMs
-        repeat: false
-        onTriggered: root.pollStatus()
-    }
-
-    Component.onCompleted: root.pollStatus()
+    Component.onCompleted: root.bootstrapStatus()
 
     Text {
         anchors.centerIn: parent

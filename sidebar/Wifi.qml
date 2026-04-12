@@ -17,11 +17,10 @@ Item {
     readonly property int signalMediumHighThreshold: 60
     readonly property int signalMediumThreshold: 40
     readonly property int signalLowThreshold: 20
-    readonly property int statusPollMs: 3000
     readonly property int iconFadeMs: 150
     readonly property int hoverOpenDelayMs: 350
     readonly property int hoverExitGraceMs: 420
-    readonly property bool daemonPreferred: true
+    readonly property bool preferDaemonBootstrap: true
 
     // disconnected=\udb82\udd2e, ethernet=\udb80\ude00, Wi-Fi weak->strong=\udb82\udd2f..\udb82\udd28
     property string icon: "\udb82\udd2e"
@@ -38,11 +37,36 @@ Item {
         }
     }
 
-    function pollStatus() {
-        if (daemonPreferred && DaemonRpc.canUse())
+    function bootstrapStatus() {
+        if (preferDaemonBootstrap && DaemonRpc.canUse())
             daemonNetProc.running = true;
         else
             netProc.running = true;
+    }
+
+    function syncIconFromGlobalState() {
+        const state = String(GlobalState.wifiState || "disconnected").trim().toLowerCase();
+        if (state === "ethernet") {
+            icon = "\udb80\ude00";
+            return;
+        }
+
+        if (state === "wifi") {
+            const strength = Math.max(0, Math.min(100, Number(GlobalState.wifiSignalPercent) || 0));
+            if (strength >= signalStrongThreshold)
+                icon = "\udb82\udd28";
+            else if (strength >= signalGoodThreshold)
+                icon = "\udb82\udd25";
+            else if (strength >= signalFairThreshold)
+                icon = "\udb82\udd22";
+            else if (strength > 0)
+                icon = "\udb82\udd1f";
+            else
+                icon = "\udb82\udd2f";
+            return;
+        }
+
+        icon = "\udb82\udd2e";
     }
 
     function updateStatus(output) {
@@ -81,6 +105,16 @@ Item {
         }
     }
 
+    Connections {
+        target: GlobalState
+        function onWifiStateChanged() {
+            root.syncIconFromGlobalState();
+        }
+        function onWifiSignalPercentChanged() {
+            root.syncIconFromGlobalState();
+        }
+    }
+
     Process {
         id: daemonNetProc
         command: DaemonRpc.command("net.status", {})
@@ -99,7 +133,6 @@ Item {
                     netProc.running = true;
                     return;
                 }
-                refreshTimer.start();
             }
         }
     }
@@ -114,19 +147,11 @@ Item {
                 if (result) {
                     root.updateStatus(result);
                 }
-                refreshTimer.start();
             }
         }
     }
 
-    Timer {
-        id: refreshTimer
-        interval: root.statusPollMs
-        repeat: false
-        onTriggered: root.pollStatus()
-    }
-
-    Component.onCompleted: root.pollStatus()
+    Component.onCompleted: root.bootstrapStatus()
 
     Text {
         anchors.centerIn: parent

@@ -16,9 +16,8 @@ Item {
     readonly property int volumeMaxPercent: 150
     readonly property int volumeLowThreshold: 34
     readonly property int volumeMidThreshold: 67
-    readonly property int statusPollMs: 2500
     readonly property int iconFadeMs: 150
-    readonly property bool daemonPreferred: true
+    readonly property bool preferDaemonBootstrap: true
 
     property string icon: "󰖀"
     property int volumePercent: 0
@@ -49,8 +48,8 @@ Item {
         }
     }
 
-    function pollStatus() {
-        if (daemonPreferred && DaemonRpc.canUse())
+    function bootstrapStatus() {
+        if (preferDaemonBootstrap && DaemonRpc.canUse())
             daemonAudioProc.running = true;
         else
             audioProc.running = true;
@@ -96,6 +95,10 @@ Item {
             muted = GlobalState.audioMuted;
             applyIconState();
         }
+        function onAudioHeadphonesOutputChanged() {
+            headphonesOutput = GlobalState.audioHeadphonesOutput;
+            applyIconState();
+        }
     }
 
     Process {
@@ -116,7 +119,6 @@ Item {
                     audioProc.running = true;
                     return;
                 }
-                refreshTimer.start();
             }
         }
     }
@@ -130,16 +132,8 @@ Item {
                 const result = this.text.trim();
                 if (result)
                     root.updateStatus(result);
-                refreshTimer.start();
             }
         }
-    }
-
-    Timer {
-        id: refreshTimer
-        interval: root.statusPollMs
-        repeat: false
-        onTriggered: root.pollStatus()
     }
 
     Process {
@@ -148,7 +142,7 @@ Item {
     }
 
     Component.onCompleted: MusicProvider.acquire()
-    Component.onCompleted: root.pollStatus()
+    Component.onCompleted: root.bootstrapStatus()
     Component.onDestruction: MusicProvider.release()
 
     Text {

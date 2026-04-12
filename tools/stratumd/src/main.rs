@@ -4,8 +4,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use chrono::Datelike;
 use serde_json::{json, Value};
@@ -22,11 +23,139 @@ mod managers {
 
 struct AppState {
     started_at: Instant,
+    dashboard_watch: Mutex<Option<(i32, u32)>>,
 }
 
 fn socket_path() -> PathBuf {
     let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(runtime_dir).join("stratumd.sock")
+}
+
+fn newest_quickshell_pid() -> Result<i64, String> {
+    let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
+    let list_raw = Command::new(qs_bin)
+        .args(["list", "--all", "--json"])
+        .output()
+        .map_err(|err| format!("failed to run qs list: {}", err))?;
+
+    if !list_raw.status.success() {
+        let stderr = String::from_utf8_lossy(&list_raw.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&list_raw.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit code {}", list_raw.status)
+        };
+        return Err(format!("qs list failed: {}", detail));
+    }
+
+    let parsed: Value = serde_json::from_slice(&list_raw.stdout)
+        .map_err(|err| format!("failed to parse qs list output: {}", err))?;
+    let list = parsed
+        .as_array()
+        .ok_or_else(|| "qs list returned non-array json".to_string())?;
+
+    let mut selected: Option<(String, i64)> = None;
+
+    for entry in list {
+        let Some(obj) = entry.as_object() else {
+            continue;
+        };
+
+        let pid = obj
+            .get("pid")
+            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok())))
+            .unwrap_or(-1);
+
+        if pid <= 0 {
+            continue;
+        }
+
+        let launch_time = obj
+            .get("launch_time")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        match &selected {
+            None => selected = Some((launch_time, pid)),
+            Some((best_launch, best_pid)) => {
+                if launch_time > *best_launch || (launch_time == *best_launch && pid > *best_pid) {
+                    selected = Some((launch_time, pid));
+                }
+            }
+        }
+    }
+
+    selected
+        .map(|(_, pid)| pid)
+        .ok_or_else(|| "no running quickshell instances found".to_string())
+}
+
+fn send_shell_ipc(target: &str, function: &str, args: &[String]) -> Result<(), String> {
+    let pid = newest_quickshell_pid()?;
+    let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
+
+    let mut command_args = vec![
+        "ipc".to_string(),
+        "--pid".to_string(),
+        pid.to_string(),
+        "call".to_string(),
+        target.to_string(),
+        function.to_string(),
+    ];
+    command_args.extend(args.iter().cloned());
+
+    let output = Command::new(qs_bin)
+        .args(&command_args)
+        .output()
+        .map_err(|err| format!("failed to run qs ipc: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit code {}", output.status)
+        };
+        return Err(format!("qs ipc failed: {}", detail));
+    }
+
+    Ok(())
+}
+
+fn spawn_snapshot_broadcaster<F>(kind: &'static str, interval: Duration, fetch: F)
+where
+    F: Fn() -> Option<Value> + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut last_payload = String::new();
+
+        loop {
+            if let Some(payload) = fetch() {
+                let payload_text = payload.to_string();
+                if payload_text != last_payload {
+                    match send_shell_ipc("daemon", kind, &[payload_text.clone()]) {
+                        Ok(()) => {
+                            last_payload = payload_text;
+                        }
+                        Err(err) => {
+                            eprintln!("failed to publish {} snapshot: {}", kind, err);
+                        }
+                    }
+                }
+            } else {
+                last_payload.clear();
+            }
+
+            thread::sleep(interval);
+        }
+    });
 }
 
 fn jsonrpc_success(id: Value, result: Value) -> Value {
@@ -227,6 +356,34 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
                 "dashboard": managers::dashboard::status(year, month),
             }))
         }
+        "dashboard.watch" => {
+            let now = chrono_like_now();
+            let year = param_i64(_params, "year", now.0 as i64) as i32;
+            let month = param_i64(_params, "month", now.1 as i64).clamp(1, 12) as u32;
+            let mut watch = state
+                .dashboard_watch
+                .lock()
+                .map_err(|err| format!("failed to lock dashboard watch state: {}", err))?;
+            *watch = Some((year, month));
+            Ok(json!({
+                "ok": true,
+                "watched": {
+                    "year": year,
+                    "month": month,
+                }
+            }))
+        }
+        "dashboard.unwatch" => {
+            let mut watch = state
+                .dashboard_watch
+                .lock()
+                .map_err(|err| format!("failed to lock dashboard watch state: {}", err))?;
+            *watch = None;
+            Ok(json!({
+                "ok": true,
+                "watched": false,
+            }))
+        }
         _ => Err(format!("unknown method '{}'", method)),
     }
 }
@@ -341,6 +498,31 @@ fn maybe_launch_quickshell() {
     }
 }
 
+fn start_snapshot_broadcasters(state: Arc<AppState>) {
+    spawn_snapshot_broadcaster("audio", Duration::from_secs(2), || {
+        Some(json!({"audio": managers::audio::status()}))
+    });
+    spawn_snapshot_broadcaster("wifi", Duration::from_secs(3), || {
+        Some(json!({"net": managers::net::status()}))
+    });
+    spawn_snapshot_broadcaster("bluetooth", Duration::from_secs(3), || {
+        Some(json!({"bluetooth": managers::bluetooth::status()}))
+    });
+    spawn_snapshot_broadcaster("music", Duration::from_secs(2), || {
+        Some(json!({"music": managers::music::status()}))
+    });
+    spawn_snapshot_broadcaster("dashboard", Duration::from_secs(2), move || {
+        let watched = state.dashboard_watch.lock().ok().and_then(|guard| *guard);
+        let Some((year, month)) = watched else {
+            return None;
+        };
+
+        Some(json!({
+            "dashboard": managers::dashboard::status(year, month as i32),
+        }))
+    });
+}
+
 fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), String> {
     let reader_stream = stream
         .try_clone()
@@ -398,6 +580,13 @@ fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), Str
 fn main() {
     maybe_launch_quickshell();
 
+    let state = Arc::new(AppState {
+        started_at: Instant::now(),
+        dashboard_watch: Mutex::new(None),
+    });
+
+    start_snapshot_broadcasters(Arc::clone(&state));
+
     let path = socket_path();
     if path.exists() {
         let _ = fs::remove_file(&path);
@@ -406,10 +595,6 @@ fn main() {
     let listener = UnixListener::bind(&path).unwrap_or_else(|err| {
         eprintln!("failed to bind socket at {}: {}", path.display(), err);
         std::process::exit(1);
-    });
-
-    let state = Arc::new(AppState {
-        started_at: Instant::now(),
     });
 
     for stream in listener.incoming() {

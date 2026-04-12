@@ -8,8 +8,7 @@ import "DaemonRpc.js" as DaemonRpc
 Item {
     id: musicProvider
 
-    readonly property int pollMs: 1000
-    readonly property bool daemonPreferred: true
+    readonly property bool preferDaemonBootstrap: true
     property int consumerCount: 0
 
     property string musicStatus: "Stopped"
@@ -68,8 +67,19 @@ Item {
         syncGlobalState();
     }
 
-    function refreshNow() {
-        if (daemonPreferred && DaemonRpc.canUse()) {
+    function applyDaemonMusicSnapshot(payloadText) {
+        const payload = parseCliJson(payloadText);
+        const music = (payload && payload.music && typeof payload.music === "object") ? payload.music : payload;
+        if (!music || typeof music !== "object")
+            return;
+
+        applyMusicPayload(music);
+        DaemonRpc.recordSuccess();
+        GlobalState.daemonAvailable = true;
+    }
+
+    function bootstrapSnapshot() {
+        if (preferDaemonBootstrap && DaemonRpc.canUse()) {
             if (!daemonMusicProc.running)
                 daemonMusicProc.running = true;
             return;
@@ -82,13 +92,11 @@ Item {
     function acquire() {
         consumerCount = consumerCount + 1;
         if (consumerCount === 1)
-            refreshNow();
+            bootstrapSnapshot();
     }
 
     function release() {
         consumerCount = Math.max(0, consumerCount - 1);
-        if (consumerCount === 0)
-            refreshTimer.stop();
     }
 
     function mediaPlay() {
@@ -137,8 +145,6 @@ Item {
                     return;
                 }
 
-                if (musicProvider.consumerCount > 0)
-                    refreshTimer.start();
             }
         }
     }
@@ -153,20 +159,7 @@ Item {
                     const music = (payload.music && typeof payload.music === "object") ? payload.music : payload;
                     musicProvider.applyMusicPayload(music);
                 }
-
-                if (musicProvider.consumerCount > 0)
-                    refreshTimer.start();
             }
-        }
-    }
-
-    Timer {
-        id: refreshTimer
-        interval: musicProvider.pollMs
-        repeat: false
-        onTriggered: {
-            if (musicProvider.consumerCount > 0)
-                musicProvider.refreshNow();
         }
     }
 

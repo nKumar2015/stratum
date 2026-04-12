@@ -35,8 +35,9 @@ PanelWindow {
     property bool calendarPrefetchRunning: false
     property int calendarPrefetchYear: 0
     property int calendarPrefetchMonth: 0
-    readonly property int dashboardRefreshMs: 2000
     readonly property bool daemonPreferred: true
+    property bool dashboardWatchActive: false
+    property bool dashboardWatchPending: false
 
     readonly property string musicStatus: MusicProvider.musicStatus
     readonly property string musicPlayer: MusicProvider.musicPlayer
@@ -85,6 +86,22 @@ PanelWindow {
         storageUsedGiB = parseNumber(performance.storage_used_gib, 0);
         storageTotalGiB = parseNumber(performance.storage_total_gib, 0);
         storagePercent = clampPercent(String(performance.storage_percent || "0"));
+    }
+
+    function applyDaemonDashboardSnapshot(payloadText) {
+        const payload = parseCliJson(payloadText);
+        const dashboardPayload = (payload && payload.dashboard && typeof payload.dashboard === "object") ? payload.dashboard : payload;
+        if (!dashboardPayload || typeof dashboardPayload !== "object")
+            return;
+
+        if (dashboardPayload.ok !== true)
+            return;
+
+        DaemonRpc.recordSuccess();
+        GlobalState.daemonAvailable = true;
+        dashboardWatchActive = true;
+        dashboardWatchPending = false;
+        applyDashboardResponse(dashboardPayload, JSON.stringify(dashboardPayload));
     }
 
     function applyDashboardResponse(response, raw) {
@@ -430,6 +447,12 @@ PanelWindow {
         loading = true;
         lastError = "";
         if (daemonPreferred && DaemonRpc.canUse()) {
+            dashboardWatchPending = true;
+            dashboardWatchProc.command = DaemonRpc.command("dashboard.watch", {
+                                                         year: selectedCalendarYear,
+                                                         month: selectedCalendarMonth
+                                                     }, 4);
+            dashboardWatchProc.running = true;
             daemonDataProc.command = DaemonRpc.command("dashboard.status", {
                                                          year: selectedCalendarYear,
                                                          month: selectedCalendarMonth
@@ -481,9 +504,13 @@ PanelWindow {
             applyCachedCalendar(selectedCalendarYear, selectedCalendarMonth);
             preloadNearbyCalendars(selectedCalendarYear, selectedCalendarMonth);
             refreshDashboard();
-            refreshTimer.restart();
         } else {
-            refreshTimer.stop();
+            if ((dashboardWatchActive || dashboardWatchPending) && DaemonRpc.canUse()) {
+                dashboardWatchProc.command = DaemonRpc.command("dashboard.unwatch", {}, 4);
+                dashboardWatchProc.running = true;
+            }
+            dashboardWatchActive = false;
+            dashboardWatchPending = false;
             MusicProvider.release();
             resetCalendarSelection();
         }
@@ -523,14 +550,25 @@ PanelWindow {
         }
     }
 
-    Timer {
-        id: refreshTimer
-        interval: dashboard.dashboardRefreshMs
-        repeat: true
+    Process {
+        id: dashboardWatchProc
         running: false
-        onTriggered: {
-            if (GlobalState.showDashboardMenu)
-                dashboard.refreshDashboard();
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const raw = this.text.trim();
+                const response = dashboard.parseCliJson(raw);
+                if (response && response.ok === true) {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                    dashboardWatchActive = true;
+                    dashboardWatchPending = false;
+                } else {
+                    DaemonRpc.recordFailure();
+                    GlobalState.daemonAvailable = false;
+                    dashboardWatchActive = false;
+                    dashboardWatchPending = false;
+                }
+            }
         }
     }
 
@@ -555,6 +593,8 @@ PanelWindow {
                 if (!response || response.ok !== true) {
                     DaemonRpc.recordFailure();
                     GlobalState.daemonAvailable = false;
+                    dashboardWatchActive = false;
+                    dashboardWatchPending = false;
                     dataProc.command = ["stratum-cli", "dashboard", "all", String(dashboard.selectedCalendarYear), String(dashboard.selectedCalendarMonth)];
                     dataProc.running = true;
                     return;
