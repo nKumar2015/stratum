@@ -45,6 +45,16 @@
         buildInputs = with pkgs; [dbus openssl];
       };
 
+      stratumd = pkgs.rustPlatform.buildRustPackage {
+        pname = "stratumd";
+        version = "0.1.0";
+
+        src = ./tools/stratumd;
+        cargoLock.lockFile = ./tools/stratumd/Cargo.lock;
+
+        nativeBuildInputs = with pkgs; [pkg-config];
+      };
+
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
     });
 
@@ -61,8 +71,11 @@
       # This passes the inputs (like stratum) down into the module
       _module.args.inputs = inputs;
 
-      # Ensure the CLI is present on PATH when using the exported HM module.
-      home.packages = [self.packages.${hostSystem}.stratum-cli];
+      # Ensure CLI and daemon are present on PATH when using the exported HM module.
+      home.packages = [
+        self.packages.${hostSystem}.stratum-cli
+        self.packages.${hostSystem}.stratumd
+      ];
     };
 
     # Optional NixOS module that installs the CLI system-wide.
@@ -72,7 +85,10 @@
     }: let
       hostSystem = pkgs.stdenv.hostPlatform.system;
     in {
-      environment.systemPackages = [self.packages.${hostSystem}.stratum-cli];
+      environment.systemPackages = [
+        self.packages.${hostSystem}.stratum-cli
+        self.packages.${hostSystem}.stratumd
+      ];
     };
 
     devShells = forAllSystems (pkgs: {

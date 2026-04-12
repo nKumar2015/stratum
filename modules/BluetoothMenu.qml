@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
@@ -46,6 +47,12 @@ Window {
     // pendingAction fields model transient operation state for UI feedback and recovery timers.
     property string pendingAction: ""
     property string pendingActionTarget: ""
+    property var actionFallbackCommand: []
+    property bool actionFallbackTried: false
+    property var scanFallbackCommand: []
+    property bool scanFallbackTried: false
+    property bool btStateFallbackTried: false
+    property bool btListFallbackTried: false
     property string pendingPowerSyncTarget: ""
     property int powerSyncRetryCount: 0
     readonly property string missingBluetoothctlMessage: "bluetoothctl is required for Bluetooth controls."
@@ -61,6 +68,7 @@ Window {
     readonly property int postScanSyncDelayMs: 1200
     readonly property int statusClearDelayMs: 3500
     readonly property int refreshIntervalMs: 12000
+    readonly property bool daemonPreferred: true
 
     function setStatusMessage(message, autoClear) {
         statusMessage = message;
@@ -211,6 +219,12 @@ Window {
 
     function refreshAll() {
         listLoading = true;
+        if (daemonPreferred && DaemonRpc.canUse()) {
+            btStateFallbackTried = false;
+            btListFallbackTried = false;
+            btStateProc.command = DaemonRpc.command("bluetooth.state", {});
+            btListProc.command = DaemonRpc.command("bluetooth.list", {});
+        }
         btStateProc.running = true;
         btListProc.running = true;
     }
@@ -237,7 +251,12 @@ Window {
         if (!selectedMac || selectedPaired)
             return;
 
-        actionProc.command = ["stratum-cli", "bluetooth", "pair", selectedMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "pair", selectedMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.pair", { mac: selectedMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "pair", selectedMac];
         pendingAction = "pair";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Pairing with " + pendingActionTarget + "...", false);
@@ -249,7 +268,12 @@ Window {
         if (!selectedMac || selectedConnected)
             return;
 
-        actionProc.command = ["stratum-cli", "bluetooth", "connect", selectedMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "connect", selectedMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.connect", { mac: selectedMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "connect", selectedMac];
         pendingAction = "connect";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Connecting to " + pendingActionTarget + "...", false);
@@ -263,7 +287,12 @@ Window {
             return;
 
         const label = activeName || selectedName || targetMac;
-        actionProc.command = ["stratum-cli", "bluetooth", "disconnect", targetMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "disconnect", targetMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.disconnect", { mac: targetMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "disconnect", targetMac];
         pendingAction = "disconnect";
         pendingActionTarget = label;
         setStatusMessage("Disconnecting " + label + "...", false);
@@ -275,7 +304,12 @@ Window {
         if (!selectedMac)
             return;
 
-        actionProc.command = ["stratum-cli", "bluetooth", "forget", selectedMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "forget", selectedMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.forget", { mac: selectedMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "forget", selectedMac];
         pendingAction = "forget";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Removing " + pendingActionTarget + "...", false);
@@ -287,7 +321,12 @@ Window {
         if (!selectedMac || selectedTrusted)
             return;
 
-        actionProc.command = ["stratum-cli", "bluetooth", "trust", selectedMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "trust", selectedMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.trust", { mac: selectedMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "trust", selectedMac];
         pendingAction = "trust";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Trusting " + pendingActionTarget + "...", false);
@@ -299,7 +338,12 @@ Window {
         if (!selectedMac || !selectedTrusted)
             return;
 
-        actionProc.command = ["stratum-cli", "bluetooth", "untrust", selectedMac];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "untrust", selectedMac];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.untrust", { mac: selectedMac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "untrust", selectedMac];
         pendingAction = "untrust";
         pendingActionTarget = selectedName || selectedMac;
         setStatusMessage("Removing trust for " + pendingActionTarget + "...", false);
@@ -309,7 +353,12 @@ Window {
 
     function toggleBluetoothPower() {
         const target = bluetoothEnabled ? "off" : "on";
-        actionProc.command = ["stratum-cli", "bluetooth", "power", target];
+        actionFallbackCommand = ["stratum-cli", "bluetooth", "power", target];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.power", { target: target }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "power", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         setStatusMessage(bluetoothEnabled ? "Turning Bluetooth off..." : "Turning Bluetooth on...", false);
@@ -321,7 +370,12 @@ Window {
         if (scanning)
             return;
 
-        scanProc.command = ["stratum-cli", "bluetooth", "scan"];
+        scanFallbackCommand = ["stratum-cli", "bluetooth", "scan"];
+        scanFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            scanProc.command = DaemonRpc.command("bluetooth.scan", {}, 15);
+        else
+            scanProc.command = ["stratum-cli", "bluetooth", "scan"];
         scanning = true;
         GlobalState.bluetoothScanning = true;
         setStatusMessage("Scanning for devices...", false);
@@ -339,16 +393,31 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = bluetoothMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (bluetoothMenu.daemonPreferred && !bluetoothMenu.btStateFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        bluetoothMenu.btStateFallbackTried = true;
+                        btStateProc.command = ["stratum-cli", "bluetooth", "state"];
+                        btStateProc.running = true;
+                        return;
+                    }
                     bluetoothMenu.bluetoothEnabled = false;
                     GlobalState.bluetoothPowered = false;
                     GlobalState.bluetoothConnected = false;
                     GlobalState.bluetoothScanning = false;
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
+                    bluetoothMenu.setStatusMessage(source && source.error ? String(source.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                     return;
                 }
 
-                bluetoothMenu.bluetoothEnabled = String(payload.powered || "no") === "yes";
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                bluetoothMenu.btStateFallbackTried = false;
+
+                bluetoothMenu.bluetoothEnabled = String(source.powered || "no") === "yes";
                 GlobalState.bluetoothPowered = bluetoothMenu.bluetoothEnabled;
 
                 if (bluetoothMenu.pendingPowerSyncTarget) {
@@ -391,13 +460,28 @@ Window {
                     bluetoothMenu.listLoading = false;
 
                 const payload = bluetoothMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (bluetoothMenu.daemonPreferred && !bluetoothMenu.btListFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        bluetoothMenu.btListFallbackTried = true;
+                        btListProc.command = ["stratum-cli", "bluetooth", "list"];
+                        btListProc.running = true;
+                        return;
+                    }
                     bluetoothMenu.devices = [];
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
+                    bluetoothMenu.setStatusMessage(source && source.error ? String(source.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                     return;
                 }
 
-                const rows = Array.isArray(payload.devices) ? payload.devices : [];
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                bluetoothMenu.btListFallbackTried = false;
+
+                const rows = Array.isArray(source.devices) ? source.devices : [];
                 const parsed = [];
 
                 for (let i = 0; i < rows.length; i++) {
@@ -480,7 +564,8 @@ Window {
                 bluetoothMenu.actionWatchdogTimer.stop();
 
                 const payload = bluetoothMenu.parseCliJson(result);
-                const message = payload ? String(payload.output || payload.error || "") : result;
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                const message = source ? String(source.output || source.error || "") : result;
 
                 const {
                     pendingAction: action,
@@ -488,8 +573,16 @@ Window {
                 } = bluetoothMenu;
                 const lowerMsg = (message || "").toLowerCase();
 
-                if (!payload?.ok) {
-                    const errorMsg = payload?.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage;
+                if (!source?.ok) {
+                    if (bluetoothMenu.daemonPreferred && !bluetoothMenu.actionFallbackTried && bluetoothMenu.actionFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        bluetoothMenu.actionFallbackTried = true;
+                        actionProc.command = bluetoothMenu.actionFallbackCommand;
+                        actionProc.running = true;
+                        return;
+                    }
+                    const errorMsg = source?.error ? String(source.error) : bluetoothMenu.missingBluetoothctlMessage;
                     bluetoothMenu.setStatusMessage(errorMsg, true);
                 } else if (lowerMsg.includes("failed") || lowerMsg.includes("error")) {
                     bluetoothMenu.setStatusMessage(message, true);
@@ -515,8 +608,15 @@ Window {
                     bluetoothMenu.setStatusMessage(finalMessage, true);
                 }
 
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+
                 bluetoothMenu.pendingAction = "";
                 bluetoothMenu.pendingActionTarget = "";
+                bluetoothMenu.actionFallbackCommand = [];
+                bluetoothMenu.actionFallbackTried = false;
                 if (!bluetoothMenu.pendingPowerSyncTarget)
                     bluetoothMenu.refreshAll();
             }
@@ -575,13 +675,22 @@ Window {
                 const result = this.text.trim();
 
                 const payload = bluetoothMenu.parseCliJson(result);
-                const outputText = payload ? String(payload.output || "") : result;
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                const outputText = source ? String(source.output || "") : result;
 
                 bluetoothMenu.mergeScanOutputDevices(outputText);
                 bluetoothMenu.finishScanState();
 
-                if (!payload || payload.ok !== true) {
-                    bluetoothMenu.setStatusMessage(payload && payload.error ? String(payload.error) : bluetoothMenu.missingBluetoothctlMessage, true);
+                if (!source || source.ok !== true) {
+                    if (bluetoothMenu.daemonPreferred && !bluetoothMenu.scanFallbackTried && bluetoothMenu.scanFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        bluetoothMenu.scanFallbackTried = true;
+                        scanProc.command = bluetoothMenu.scanFallbackCommand;
+                        scanProc.running = true;
+                        return;
+                    }
+                    bluetoothMenu.setStatusMessage(source && source.error ? String(source.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                 } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("failed") !== -1) {
                     bluetoothMenu.setStatusMessage("Scan failed: " + outputText, true);
                 } else if (outputText.length > 0 && outputText.toLowerCase().indexOf("error") !== -1) {
@@ -589,6 +698,13 @@ Window {
                 } else {
                     bluetoothMenu.setStatusMessage("Scan completed.", true);
                 }
+
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                bluetoothMenu.scanFallbackCommand = [];
+                bluetoothMenu.scanFallbackTried = false;
 
                 bluetoothMenu.refreshAll();
                 bluetoothMenu.postScanSyncTimer.restart();

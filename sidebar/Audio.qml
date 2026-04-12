@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 import "../globals"
 
 Item {
@@ -17,6 +18,7 @@ Item {
     readonly property int volumeMidThreshold: 67
     readonly property int statusPollMs: 2500
     readonly property int iconFadeMs: 150
+    readonly property bool daemonPreferred: true
 
     property string icon: "󰖀"
     property int volumePercent: 0
@@ -47,17 +49,33 @@ Item {
         }
     }
 
+    function pollStatus() {
+        if (daemonPreferred && DaemonRpc.canUse())
+            daemonAudioProc.running = true;
+        else
+            audioProc.running = true;
+    }
+
     function updateStatus(output) {
         if (GlobalState.audioUserAdjusting)
             return;
 
         const payload = parseCliJson(output);
-        if (!payload || payload.ok !== true)
+        if (!payload)
             return;
 
-        const volumeText = String(payload.volume || "0%").trim();
-        const muteText = String(payload.mute || "yes").trim().toLowerCase();
-        const headphonesText = String(payload.headphones || "no").trim().toLowerCase();
+        let source = null;
+        if (payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.audio)
+            source = payload.result.audio;
+        else if (payload.ok === true)
+            source = payload;
+
+        if (!source)
+            return;
+
+        const volumeText = String(source.volume || "0%").trim();
+        const muteText = String(source.mute || "yes").trim().toLowerCase();
+        const headphonesText = String(source.headphones || "no").trim().toLowerCase();
         const parsedVolume = parseInt(volumeText.replace("%", ""));
 
         volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(volumeMaxPercent, parsedVolume));
@@ -81,9 +99,32 @@ Item {
     }
 
     Process {
+        id: daemonAudioProc
+        command: DaemonRpc.command("audio.status", {})
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                const payload = root.parseCliJson(result);
+                if (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true) {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                    root.updateStatus(result);
+                } else {
+                    DaemonRpc.recordFailure();
+                    GlobalState.daemonAvailable = false;
+                    audioProc.running = true;
+                    return;
+                }
+                refreshTimer.start();
+            }
+        }
+    }
+
+    Process {
         id: audioProc
         command: ["stratum-cli", "audio", "status"]
-        running: true
+        running: false
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -98,7 +139,7 @@ Item {
         id: refreshTimer
         interval: root.statusPollMs
         repeat: false
-        onTriggered: audioProc.running = true
+        onTriggered: root.pollStatus()
     }
 
     Process {
@@ -107,6 +148,7 @@ Item {
     }
 
     Component.onCompleted: MusicProvider.acquire()
+    Component.onCompleted: root.pollStatus()
     Component.onDestruction: MusicProvider.release()
 
     Text {

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 import "../globals"
 
 Item {
@@ -16,6 +17,7 @@ Item {
     readonly property int iconFadeMs: 150
     readonly property int hoverOpenDelayMs: 350
     readonly property int hoverExitGraceMs: 420
+    readonly property bool daemonPreferred: true
 
     // scanning=󰂰, connected=󰂱, powered=󰂯, off=󰂲
     property string icon: GlobalState.bluetoothScanning ? "󰂰" : (GlobalState.bluetoothConnected ? "󰂱" : (GlobalState.bluetoothPowered ? "󰂯" : "󰂲"))
@@ -32,16 +34,32 @@ Item {
         }
     }
 
+    function pollStatus() {
+        if (daemonPreferred && DaemonRpc.canUse())
+            daemonBluetoothProc.running = true;
+        else
+            bluetoothProc.running = true;
+    }
+
     function updateStatus(output) {
         // Skip polling sync while settings are open or active scan is running.
         if (GlobalState.showBluetoothSettings || GlobalState.bluetoothScanning)
             return;
 
         const payload = parseCliJson(output);
-        if (!payload || payload.ok !== true)
+        if (!payload)
             return;
 
-        const raw = String(payload.state || "").trim().toLowerCase();
+        let source = null;
+        if (payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.bluetooth)
+            source = payload.result.bluetooth;
+        else if (payload.ok === true)
+            source = payload;
+
+        if (!source)
+            return;
+
+        const raw = String(source.state || "").trim().toLowerCase();
         if (raw === "connected") {
             GlobalState.bluetoothPowered = true;
             GlobalState.bluetoothConnected = true;
@@ -59,9 +77,32 @@ Item {
     }
 
     Process {
+        id: daemonBluetoothProc
+        command: DaemonRpc.command("bluetooth.status", {})
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                const payload = root.parseCliJson(result);
+                if (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true) {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                    root.updateStatus(result);
+                } else {
+                    DaemonRpc.recordFailure();
+                    GlobalState.daemonAvailable = false;
+                    bluetoothProc.running = true;
+                    return;
+                }
+                refreshTimer.start();
+            }
+        }
+    }
+
+    Process {
         id: bluetoothProc
         command: ["stratum-cli", "bluetooth", "check"]
-        running: true
+        running: false
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
@@ -76,8 +117,10 @@ Item {
         id: refreshTimer
         interval: root.statusPollMs
         repeat: false
-        onTriggered: bluetoothProc.running = true
+        onTriggered: root.pollStatus()
     }
+
+    Component.onCompleted: root.pollStatus()
 
     Text {
         anchors.centerIn: parent

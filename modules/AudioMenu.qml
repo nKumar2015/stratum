@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
@@ -62,6 +63,10 @@ ApplicationWindow {
     property bool routeSwitching: false
     property string routeSwitchKind: ""
     property string routeStatusMsg: ""
+    property var routeFallbackCommand: []
+    property bool routeFallbackTried: false
+    property var eqActionFallbackCommand: []
+    property bool eqActionFallbackTried: false
     readonly property string musicStatus: MusicProvider.musicStatus
     readonly property string musicTitle: MusicProvider.musicTitle
     readonly property string musicArtist: MusicProvider.musicArtist
@@ -70,6 +75,7 @@ ApplicationWindow {
     readonly property int musicPositionSec: MusicProvider.musicPositionSec
     readonly property int musicLengthSec: MusicProvider.musicLengthSec
     readonly property int devicePollMs: 5000
+    readonly property bool daemonPreferred: true
 
     readonly property var eqFrequencies: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"]
     readonly property var eqFilterTypes: ["peaking", "low_shelf", "high_shelf", "low_pass", "high_pass", "band_pass"]
@@ -219,6 +225,10 @@ ApplicationWindow {
     function loadDevices() {
         loading = true;
         errorMsg = "";
+        if (daemonPreferred && DaemonRpc.canUse())
+            devicesProc.command = DaemonRpc.command("audio.devices", {});
+        else
+            devicesProc.command = ["stratum-cli", "audio", "status", "--hover"];
         devicesProc.running = true;
     }
 
@@ -226,7 +236,15 @@ ApplicationWindow {
         eqStatusMsg = "Applying preset...";
         eqApplyOk = true;
         eqApplyDryRun = false;
-        applyPresetProc.command = ["stratum-cli", "audio", "equalizer", "apply-preset", audioMenu.currentDevice, presetName];
+        eqActionFallbackCommand = ["stratum-cli", "audio", "equalizer", "apply-preset", audioMenu.currentDevice, presetName];
+        eqActionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            applyPresetProc.command = DaemonRpc.command("audio.eq_apply_preset", {
+                                                        device: audioMenu.currentDevice,
+                                                        preset_name: presetName
+                                                    }, 15);
+        else
+            applyPresetProc.command = ["stratum-cli", "audio", "equalizer", "apply-preset", audioMenu.currentDevice, presetName];
         applyPresetProc.running = true;
         currentPresetName = presetName;
         isCustomPreset = presetName === "Custom";
@@ -374,11 +392,26 @@ ApplicationWindow {
             return;
 
         const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0) ? audioMenu.eqParametricBands : makeParametricBandsFromLegacy(audioMenu.eqBands);
-        const payload = JSON.stringify({
+        const fallbackPayload = JSON.stringify({
             bands: bands,
             preamp_db: Number(audioMenu.eqPreampDb) || 0
         });
-        savePresetProc.command = ["stratum-cli", "audio", "equalizer", "save-preset-parametric", audioMenu.currentDevice, cleanName, payload];
+        eqActionFallbackCommand = ["stratum-cli", "audio", "equalizer", "save-preset-parametric", audioMenu.currentDevice, cleanName, fallbackPayload];
+        eqActionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            savePresetProc.command = DaemonRpc.command("audio.eq_save_preset_parametric", {
+                                                       device: audioMenu.currentDevice,
+                                                       preset_name: cleanName,
+                                                       bands: bands,
+                                                       preamp_db: Number(audioMenu.eqPreampDb) || 0
+                                                   }, 15);
+        else {
+            const payload = JSON.stringify({
+                bands: bands,
+                preamp_db: Number(audioMenu.eqPreampDb) || 0
+            });
+            savePresetProc.command = ["stratum-cli", "audio", "equalizer", "save-preset-parametric", audioMenu.currentDevice, cleanName, payload];
+        }
         savePresetProc.running = true;
         currentPresetName = cleanName;
         isCustomPreset = false;
@@ -391,7 +424,7 @@ ApplicationWindow {
 
     function applyCurrentEq() {
         const bands = (Array.isArray(audioMenu.eqParametricBands) && audioMenu.eqParametricBands.length > 0) ? audioMenu.eqParametricBands : makeParametricBandsFromLegacy(audioMenu.eqBands);
-        const payload = JSON.stringify({
+        const fallbackPayload = JSON.stringify({
             bands: bands,
             preamp_db: Number(audioMenu.eqPreampDb) || 0
         });
@@ -401,8 +434,22 @@ ApplicationWindow {
         eqApplyDryRun = false;
         currentPresetName = "Custom";
         isCustomPreset = true;
+        eqActionFallbackCommand = ["stratum-cli", "audio", "equalizer", "apply-parametric", audioMenu.currentDevice, fallbackPayload];
+        eqActionFallbackTried = false;
 
-        applyPresetProc.command = ["stratum-cli", "audio", "equalizer", "apply-parametric", audioMenu.currentDevice, payload];
+        if (daemonPreferred && DaemonRpc.canUse())
+            applyPresetProc.command = DaemonRpc.command("audio.eq_apply_parametric", {
+                                                        device: audioMenu.currentDevice,
+                                                        bands: bands,
+                                                        preamp_db: Number(audioMenu.eqPreampDb) || 0
+                                                    }, 15);
+        else {
+            const payload = JSON.stringify({
+                bands: bands,
+                preamp_db: Number(audioMenu.eqPreampDb) || 0
+            });
+            applyPresetProc.command = ["stratum-cli", "audio", "equalizer", "apply-parametric", audioMenu.currentDevice, payload];
+        }
         applyPresetProc.running = true;
     }
 
@@ -410,7 +457,15 @@ ApplicationWindow {
         if (!name || name === "Flat" || name === "Bass Boost" || name === "Bright" || name === "Treble Boost")
             return;
 
-        deletePresetProc.command = ["stratum-cli", "audio", "equalizer", "delete-preset", audioMenu.currentDevice, name];
+        eqActionFallbackCommand = ["stratum-cli", "audio", "equalizer", "delete-preset", audioMenu.currentDevice, name];
+        eqActionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            deletePresetProc.command = DaemonRpc.command("audio.eq_delete_preset", {
+                                                         device: audioMenu.currentDevice,
+                                                         preset_name: name
+                                                     }, 15);
+        else
+            deletePresetProc.command = ["stratum-cli", "audio", "equalizer", "delete-preset", audioMenu.currentDevice, name];
         deletePresetProc.running = true;
     }
 
@@ -428,7 +483,12 @@ ApplicationWindow {
     }
 
     function loadPresetsForDevice() {
-        listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
+        if (daemonPreferred && DaemonRpc.canUse())
+            listPresetsProc.command = DaemonRpc.command("audio.eq_list_presets", {
+                                                       device: audioMenu.currentDevice
+                                                   }, 4);
+        else
+            listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
         listPresetsProc.running = true;
     }
 
@@ -446,7 +506,12 @@ ApplicationWindow {
         routeSwitching = true;
         routeSwitchKind = "input";
         routeStatusMsg = "Switching input...";
-        routeProc.command = ["stratum-cli", "audio", "set-input", target];
+        routeFallbackCommand = ["stratum-cli", "audio", "set-input", target];
+        routeFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            routeProc.command = DaemonRpc.command("audio.set_input", { target: target });
+        else
+            routeProc.command = ["stratum-cli", "audio", "set-input", target];
         routeProc.running = true;
     }
 
@@ -458,7 +523,12 @@ ApplicationWindow {
         routeSwitching = true;
         routeSwitchKind = "output";
         routeStatusMsg = "Switching output...";
-        routeProc.command = ["stratum-cli", "audio", "set-output", target];
+        routeFallbackCommand = ["stratum-cli", "audio", "set-output", target];
+        routeFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            routeProc.command = DaemonRpc.command("audio.set_output", { target: target });
+        else
+            routeProc.command = ["stratum-cli", "audio", "set-output", target];
         routeProc.running = true;
     }
 
@@ -482,14 +552,28 @@ ApplicationWindow {
             onStreamFinished: {
                 audioMenu.loading = false;
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (!payload || payload.ok !== true) {
-                    audioMenu.errorMsg = payload?.error || "Failed to load devices";
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.audio) ? payload.result.audio : payload;
+
+                if (!source || source.ok !== true) {
+                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        devicesProc.command = ["stratum-cli", "audio", "status", "--hover"];
+                        devicesProc.running = true;
+                        return;
+                    }
+                    audioMenu.errorMsg = source?.error || payload?.error || "Failed to load devices";
                     return;
                 }
 
-                const sinks = Array.isArray(payload.sinks) ? payload.sinks : [];
-                const sources = Array.isArray(payload.sources) ? payload.sources : [];
-                const defaults = payload.default || {};
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+
+                const sinks = Array.isArray(source.sinks) ? source.sinks : [];
+                const sources = Array.isArray(source.sources) ? source.sources : [];
+                const defaults = source.default || {};
 
                 audioMenu.outputDevices = sinks.filter(s => String(s.name || "").trim()).map(s => ({
                             name: String(s.name || "").trim(),
@@ -509,6 +593,9 @@ ApplicationWindow {
                     audioMenu.currentDevice = defaultSink.name;
                     audioMenu.currentDeviceLabel = defaultSink.description || defaultSink.name;
                 }
+
+                if (audioMenu.currentDevice)
+                    audioMenu.loadPresetsForDevice();
             }
         }
     }
@@ -801,7 +888,12 @@ ApplicationWindow {
                                                 anchors.margins: -4
                                                 onReleased: {
                                                     const newPos = Math.round(menuSeekSlider.value);
-                                                    menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
+                                                    if (audioMenu.daemonPreferred && DaemonRpc.canUse())
+                                                        menuSeekProc.command = DaemonRpc.command("audio.media_seek", {
+                                                                                                           position_sec: newPos
+                                                                                                       }, 4);
+                                                    else
+                                                        menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
                                                     menuSeekProc.running = true;
                                                 }
                                             }
@@ -1065,13 +1157,31 @@ ApplicationWindow {
             onStreamFinished: {
                 audioMenu.routeSwitching = false;
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (!payload || payload.ok !== true) {
-                    audioMenu.routeStatusMsg = payload?.error || "Failed to switch input";
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.routeFallbackTried && audioMenu.routeFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        audioMenu.routeFallbackTried = true;
+                        routeProc.command = audioMenu.routeFallbackCommand;
+                        routeProc.running = true;
+                        return;
+                    }
+                    audioMenu.routeStatusMsg = source?.error || payload?.error || "Failed to switch input";
+                    audioMenu.routeFallbackCommand = [];
+                    audioMenu.routeFallbackTried = false;
                     return;
+                }
+
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
                 }
 
                 audioMenu.routeStatusMsg = audioMenu.routeSwitchKind === "output" ? "Output switched" : "Input switched";
                 audioMenu.routeSwitchKind = "";
+                audioMenu.routeFallbackCommand = [];
+                audioMenu.routeFallbackTried = false;
                 audioMenu.loadDevices();
             }
         }
@@ -1092,14 +1202,28 @@ ApplicationWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (!payload || payload.ok !== true)
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
+                        listPresetsProc.running = true;
+                        return;
+                    }
                     return;
+                }
 
-                const presets = Array.isArray(payload.presets) ? payload.presets : [];
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+
+                const presets = Array.isArray(source.presets) ? source.presets : [];
                 audioMenu.eqPresets = presets;
-                audioMenu.eqCapabilities = (payload.capabilities && typeof payload.capabilities === "object") ? payload.capabilities : {};
+                audioMenu.eqCapabilities = (source.capabilities && typeof source.capabilities === "object") ? source.capabilities : {};
 
-                const activePresetName = String(payload.active_preset || "").trim();
+                const activePresetName = String(source.active_preset || "").trim();
                 if (activePresetName.length)
                     audioMenu.currentPresetName = activePresetName;
 
@@ -1126,21 +1250,39 @@ ApplicationWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        audioMenu.eqActionFallbackTried = true;
+                        applyPresetProc.command = audioMenu.eqActionFallbackCommand;
+                        applyPresetProc.running = true;
+                        return;
+                    }
                     audioMenu.eqApplyOk = false;
                     audioMenu.eqApplyDryRun = true;
-                    audioMenu.eqStatusMsg = payload?.error || "Failed to apply preset.";
+                    audioMenu.eqStatusMsg = source?.error || payload?.error || "Failed to apply preset.";
+                    audioMenu.eqActionFallbackCommand = [];
+                    audioMenu.eqActionFallbackTried = false;
                     return;
                 }
 
-                const parametricBands = Array.isArray(payload.parametric_bands) ? payload.parametric_bands : [];
-                const legacyBands = Array.isArray(payload.bands) ? payload.bands : [];
-                audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, payload.preamp_db);
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
 
-                const applyInfo = (payload.apply && typeof payload.apply === "object") ? payload.apply : {};
-                audioMenu.eqApplyOk = payload.apply_ok !== false;
+                const parametricBands = Array.isArray(source.parametric_bands) ? source.parametric_bands : [];
+                const legacyBands = Array.isArray(source.bands) ? source.bands : [];
+                audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, source.preamp_db);
+
+                const applyInfo = (source.apply && typeof source.apply === "object") ? source.apply : {};
+                audioMenu.eqApplyOk = source.apply_ok !== false;
                 audioMenu.eqApplyDryRun = applyInfo.dry_run === true;
-                audioMenu.eqStatusMsg = String(payload.status || applyInfo.status || "Preset applied.");
+                audioMenu.eqStatusMsg = String(source.status || applyInfo.status || "Preset applied.");
+                audioMenu.eqActionFallbackCommand = [];
+                audioMenu.eqActionFallbackTried = false;
             }
         }
     }
@@ -1150,12 +1292,29 @@ ApplicationWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (payload && payload.ok === true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (source && source.ok === true) {
+                    if (payload && payload.jsonrpc === "2.0") {
+                        DaemonRpc.recordSuccess();
+                        GlobalState.daemonAvailable = true;
+                    }
                     audioMenu.eqStatusMsg = "Preset saved.";
+                    audioMenu.eqActionFallbackCommand = [];
+                    audioMenu.eqActionFallbackTried = false;
                     audioMenu.loadPresetsForDevice();
                 } else if (payload) {
+                    if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        audioMenu.eqActionFallbackTried = true;
+                        savePresetProc.command = audioMenu.eqActionFallbackCommand;
+                        savePresetProc.running = true;
+                        return;
+                    }
                     audioMenu.eqApplyOk = false;
-                    audioMenu.eqStatusMsg = payload.error || "Failed to save preset.";
+                    audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to save preset.";
+                    audioMenu.eqActionFallbackCommand = [];
+                    audioMenu.eqActionFallbackTried = false;
                 }
             }
         }
@@ -1166,13 +1325,30 @@ ApplicationWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const payload = audioMenu.parseCliJson(this.text.trim());
-                if (payload && payload.ok === true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (source && source.ok === true) {
+                    if (payload && payload.jsonrpc === "2.0") {
+                        DaemonRpc.recordSuccess();
+                        GlobalState.daemonAvailable = true;
+                    }
                     audioMenu.eqStatusMsg = "Preset deleted.";
+                    audioMenu.eqActionFallbackCommand = [];
+                    audioMenu.eqActionFallbackTried = false;
                     audioMenu.resetToFlat();
                     audioMenu.loadPresetsForDevice();
                 } else if (payload) {
+                    if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        audioMenu.eqActionFallbackTried = true;
+                        deletePresetProc.command = audioMenu.eqActionFallbackCommand;
+                        deletePresetProc.running = true;
+                        return;
+                    }
                     audioMenu.eqApplyOk = false;
-                    audioMenu.eqStatusMsg = payload.error || "Failed to delete preset.";
+                    audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to delete preset.";
+                    audioMenu.eqActionFallbackCommand = [];
+                    audioMenu.eqActionFallbackTried = false;
                 }
             }
         }

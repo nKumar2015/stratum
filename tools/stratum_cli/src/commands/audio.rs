@@ -824,6 +824,56 @@ fn resolve_effective_default_sink(default_sink: &str) -> String {
     parse_pw_info_property(&info, "target.object").unwrap_or_else(|| default_sink.to_string())
 }
 
+fn list_sink_names() -> Vec<String> {
+    let sink_output = match run_command_capture("pactl", &["list", "sinks"]) {
+        Ok(output) => output,
+        Err(_) => return Vec::new(),
+    };
+
+    parse_pactl_device_rows(&sink_output, "Sink #", false)
+        .into_iter()
+        .map(|row| row.name)
+        .collect()
+}
+
+fn try_disconnect_link(output_port: &str, input_port: &str) {
+    let _ = Command::new("pw-link")
+        .args(["-d", output_port, input_port])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn relink_static_eq_output_to_sink(sink: &str) -> Result<(), String> {
+    if find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK).is_none()
+        || find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE).is_none()
+    {
+        return Err("static EQ sink is not available".to_string());
+    }
+
+    let sink_names = list_sink_names();
+    if !sink_names.iter().any(|name| name == sink) {
+        return Err(format!("sink '{}' not found", sink));
+    }
+
+    for candidate in &sink_names {
+        for channel in ["FL", "FR"] {
+            let output_port = format!("{}:output_{}", EQ_VIRTUAL_OUTPUT_NODE, channel);
+            let input_port = format!("{}:playback_{}", candidate, channel);
+            try_disconnect_link(&output_port, &input_port);
+        }
+    }
+
+    for channel in ["FL", "FR"] {
+        let output_port = format!("{}:output_{}", EQ_VIRTUAL_OUTPUT_NODE, channel);
+        let input_port = format!("{}:playback_{}", sink, channel);
+        run_command_capture("pw-link", &[&output_port, &input_port])?;
+    }
+
+    run_command_capture("wpctl", &["set-default", EQ_VIRTUAL_INPUT_SINK])?;
+    Ok(())
+}
+
 fn find_node_id_by_name(node_name: &str) -> Option<u32> {
     let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
     let mut current_id: Option<u32> = None;
@@ -883,12 +933,8 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
         filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
     }
 
-    if let Some(existing_input_id) = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK) {
-        let _ = run_command_capture("pw-cli", &["destroy", &existing_input_id.to_string()]);
-    }
-    if let Some(existing_output_id) = find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE) {
-        let _ = run_command_capture("pw-cli", &["destroy", &existing_output_id.to_string()]);
-    }
+    let had_existing_eq = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK).is_some()
+        || find_node_id_by_name(EQ_VIRTUAL_OUTPUT_NODE).is_some();
 
     let module_args = format!(
         "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
@@ -903,6 +949,16 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if had_existing_eq {
+            return Err(if stderr.is_empty() {
+                "failed to reload EQ module dynamically; keeping existing EQ sink instance".to_string()
+            } else {
+                format!(
+                    "failed to reload EQ module dynamically; keeping existing EQ sink instance: {}",
+                    stderr
+                )
+            });
+        }
         return Err(if stderr.is_empty() {
             "failed to load PipeWire filter-chain module (module may be unavailable for dynamic loading)".to_string()
         } else {
@@ -1317,39 +1373,6 @@ fn cmd_equalizer_get_current(device_id: &str) {
     }));
 }
 
-fn resolve_current_eq_preset_for_device(device_id: &str) -> EqPreset {
-    let config_data = load_eq_config();
-    let current_name = config_data
-        .device_last_preset
-        .get(device_id)
-        .cloned()
-        .or_else(|| config_data.device_last_preset.get("@DEFAULT_SINK@").cloned())
-        .unwrap_or_else(|| "Flat".to_string());
-
-    config_data
-        .presets
-        .iter()
-        .find(|p| p.name == current_name && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
-        .or_else(|| {
-            config_data
-                .presets
-                .iter()
-                .find(|p| p.name == "Flat" && (p.device_id == device_id || p.device_id == "@DEFAULT_SINK@"))
-        })
-        .cloned()
-        .unwrap_or_else(|| EqPreset {
-            name: "Flat".to_string(),
-            device_id: device_id.to_string(),
-            bands: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-                .iter()
-                .enumerate()
-                .map(|(index, gain)| legacy_band(index, *gain))
-                .collect(),
-            preamp_db: 0.0,
-            is_builtin: true,
-        })
-}
-
 fn cmd_set_output(sink: &str) {
     let sink = sink.trim();
     if sink.is_empty() {
@@ -1368,43 +1391,15 @@ fn cmd_set_output(sink: &str) {
         return;
     }
 
-    let preset = resolve_current_eq_preset_for_device(sink);
-    match apply_eq_bands_wpctl(sink, &preset.bands, preset.preamp_db) {
-        Ok(result) if result.applied => {
+    match relink_static_eq_output_to_sink(sink) {
+        Ok(()) => {
             emit_json(json!({
                 "ok": true,
                 "command": "audio",
                 "subcommand": "set-output",
                 "sink": sink,
                 "routed_via_eq": true,
-                "apply": {
-                    "applied": result.applied,
-                    "dry_run": result.dry_run,
-                    "engine": result.engine,
-                    "resolved_device": result.resolved_device,
-                    "status": result.status,
-                },
-                "message": "output changed and EQ rerouted to selected sink",
-            }));
-        }
-        Ok(result) => {
-            let fallback =
-                run_command_capture("pactl", &["set-default-sink", sink]).unwrap_or_else(|e| fail(&e));
-            emit_json(json!({
-                "ok": true,
-                "command": "audio",
-                "subcommand": "set-output",
-                "sink": sink,
-                "routed_via_eq": false,
-                "apply": {
-                    "applied": result.applied,
-                    "dry_run": result.dry_run,
-                    "engine": result.engine,
-                    "resolved_device": result.resolved_device,
-                    "status": result.status,
-                },
-                "message": fallback,
-                "warning": "EQ backend unavailable; switched sink without EQ reroute",
+                "message": "output changed by relinking static EQ output to selected sink",
             }));
         }
         Err(err) => {

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 import "../globals"
 
 Item {
@@ -20,6 +21,7 @@ Item {
     readonly property int iconFadeMs: 150
     readonly property int hoverOpenDelayMs: 350
     readonly property int hoverExitGraceMs: 420
+    readonly property bool daemonPreferred: true
 
     // disconnected=\udb82\udd2e, ethernet=\udb80\ude00, Wi-Fi weak->strong=\udb82\udd2f..\udb82\udd28
     property string icon: "\udb82\udd2e"
@@ -36,16 +38,32 @@ Item {
         }
     }
 
+    function pollStatus() {
+        if (daemonPreferred && DaemonRpc.canUse())
+            daemonNetProc.running = true;
+        else
+            netProc.running = true;
+    }
+
     function updateStatus(output) {
         const payload = parseCliJson(output);
-        if (!payload || payload.ok !== true)
+        if (!payload)
             return;
 
-        const state = String(payload.state || "").trim().toLowerCase();
+        let source = null;
+        if (payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.net)
+            source = payload.result.net;
+        else if (payload.ok === true)
+            source = payload;
+
+        if (!source)
+            return;
+
+        const state = String(source.state || "").trim().toLowerCase();
         if (state === "ethernet") {
             icon = "\udb80\ude00";
         } else if (state === "wifi") {
-            let strength = parseInt(String(payload.signal_pct || "0"));
+            let strength = parseInt(String(source.signal_pct || "0"));
             if (isNaN(strength))
                 strength = 0;
             if (strength >= signalHighThreshold)
@@ -64,9 +82,32 @@ Item {
     }
 
     Process {
+        id: daemonNetProc
+        command: DaemonRpc.command("net.status", {})
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const result = this.text.trim();
+                const payload = root.parseCliJson(result);
+                if (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true) {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                    root.updateStatus(result);
+                } else {
+                    DaemonRpc.recordFailure();
+                    GlobalState.daemonAvailable = false;
+                    netProc.running = true;
+                    return;
+                }
+                refreshTimer.start();
+            }
+        }
+    }
+
+    Process {
         id: netProc
         command: ["stratum-cli", "net", "check"]
-        running: true
+        running: false
         stdout: StdioCollector {
             onStreamFinished: {
                 let result = this.text.trim();
@@ -82,8 +123,10 @@ Item {
         id: refreshTimer
         interval: root.statusPollMs
         repeat: false
-        onTriggered: netProc.running = true
+        onTriggered: root.pollStatus()
     }
+
+    Component.onCompleted: root.pollStatus()
 
     Text {
         anchors.centerIn: parent

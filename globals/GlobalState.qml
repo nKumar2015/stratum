@@ -14,6 +14,7 @@ QtObject {
     property int audioVolumePercent: 0
     property bool audioMuted: true
     property bool audioUserAdjusting: false
+    property bool daemonAvailable: false
     property bool showAudioMenu: false
     property string musicTitle: ""
     property string musicArtist: ""

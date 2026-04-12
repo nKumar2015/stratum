@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
@@ -49,11 +50,19 @@ Window {
     property bool requirePasswordRetry: false
     property bool pendingConnectWasKnown: false
     property bool pendingConnectWasSecure: false
+    property var actionFallbackCommand: []
+    property bool wifiStateFallbackTried: false
+    property bool deviceStatusFallbackTried: false
+    property bool knownConnectionsFallbackTried: false
+    property bool wifiListFallbackTried: false
+    property bool activeInfoFallbackTried: false
+    property bool actionFallbackTried: false
     readonly property string missingNmcliMessage: "nmcli is required for Wi-Fi controls."
     readonly property int signalStrongThreshold: 75
     readonly property int signalGoodThreshold: 50
     readonly property int signalFairThreshold: 25
     readonly property int refreshIntervalMs: 12000
+    readonly property bool daemonPreferred: true
 
     function isSecureNetwork(security) {
         if (!security)
@@ -135,6 +144,16 @@ Window {
 
     function refreshAll() {
         listLoading = true;
+        if (daemonPreferred && DaemonRpc.canUse()) {
+            wifiStateFallbackTried = false;
+            deviceStatusFallbackTried = false;
+            knownConnectionsFallbackTried = false;
+            wifiListFallbackTried = false;
+            wifiStateProc.command = DaemonRpc.command("wifi.state", {});
+            deviceStatusProc.command = DaemonRpc.command("wifi.device_status", {});
+            wifiListProc.command = DaemonRpc.command("wifi.list", {});
+            knownConnectionsProc.command = DaemonRpc.command("wifi.known_connections", {});
+        }
         wifiStateProc.running = true;
         deviceStatusProc.running = true;
         wifiListProc.running = true;
@@ -157,7 +176,11 @@ Window {
             return;
         }
 
-        activeInfoProc.command = ["stratum-cli", "wifi", "active-info", activeDevice];
+        activeInfoFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            activeInfoProc.command = DaemonRpc.command("wifi.active_info", { device: activeDevice });
+        else
+            activeInfoProc.command = ["stratum-cli", "wifi", "active-info", activeDevice];
         activeInfoProc.running = true;
     }
 
@@ -172,10 +195,23 @@ Window {
             return;
         }
 
-        const cmd = ["stratum-cli", "wifi", "connect", selectedSsid];
+        actionFallbackCommand = ["stratum-cli", "wifi", "connect", selectedSsid];
         if (showPassword)
-            cmd.push(trimmedPassword);
-        actionProc.command = cmd;
+            actionFallbackCommand.push(trimmedPassword);
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("wifi.connect", showPassword ? {
+                                                            ssid: selectedSsid,
+                                                            password: trimmedPassword
+                                                        } : {
+                                                            ssid: selectedSsid
+                                                        }, 15);
+        else {
+            const cmd = ["stratum-cli", "wifi", "connect", selectedSsid];
+            if (showPassword)
+                cmd.push(trimmedPassword);
+            actionProc.command = cmd;
+        }
         pendingAction = "connect";
         pendingActionTarget = selectedSsid;
         pendingConnectWasKnown = isKnownNetwork(selectedSsid);
@@ -189,7 +225,12 @@ Window {
         if (!activeDevice)
             return;
 
-        actionProc.command = ["stratum-cli", "wifi", "disconnect", activeDevice];
+        actionFallbackCommand = ["stratum-cli", "wifi", "disconnect", activeDevice];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("wifi.disconnect", { device: activeDevice }, 15);
+        else
+            actionProc.command = ["stratum-cli", "wifi", "disconnect", activeDevice];
         pendingAction = "disconnect";
         pendingActionTarget = activeSsid;
         statusMessage = "Disconnecting " + activeSsid + "...";
@@ -202,14 +243,24 @@ Window {
 
         pendingAction = "forget";
         pendingActionTarget = activeSsid;
-        actionProc.command = ["stratum-cli", "wifi", "forget", activeSsid];
+        actionFallbackCommand = ["stratum-cli", "wifi", "forget", activeSsid];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("wifi.forget", { ssid: activeSsid }, 15);
+        else
+            actionProc.command = ["stratum-cli", "wifi", "forget", activeSsid];
         statusMessage = "Forgetting " + activeSsid + "...";
         actionProc.running = true;
     }
 
     function toggleWifiRadio() {
         const target = wifiEnabled ? "off" : "on";
-        actionProc.command = ["stratum-cli", "wifi", "toggle", target];
+        actionFallbackCommand = ["stratum-cli", "wifi", "toggle", target];
+        actionFallbackTried = false;
+        if (daemonPreferred && DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("wifi.toggle", { target: target }, 15);
+        else
+            actionProc.command = ["stratum-cli", "wifi", "toggle", target];
         pendingAction = "toggle";
         pendingActionTarget = target;
         statusMessage = wifiEnabled ? "Turning Wi-Fi off..." : "Turning Wi-Fi on...";
@@ -223,13 +274,28 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.wifiStateFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.wifiStateFallbackTried = true;
+                        wifiStateProc.command = ["stratum-cli", "wifi", "state"];
+                        wifiStateProc.running = true;
+                        return;
+                    }
                     wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     wifiMenu.wifiEnabled = false;
                     return;
                 }
 
-                const state = String(payload.state || "").toLowerCase();
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                wifiMenu.wifiStateFallbackTried = false;
+
+                const state = String(source.state || "").toLowerCase();
                 wifiMenu.wifiEnabled = state.indexOf("enabled") !== -1;
             }
         }
@@ -242,12 +308,27 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.deviceStatusFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.deviceStatusFallbackTried = true;
+                        deviceStatusProc.command = ["stratum-cli", "wifi", "device-status"];
+                        deviceStatusProc.running = true;
+                        return;
+                    }
                     wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     return;
                 }
 
-                const rows = Array.isArray(payload.devices) ? payload.devices : [];
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                wifiMenu.deviceStatusFallbackTried = false;
+
+                const rows = Array.isArray(source.devices) ? source.devices : [];
                 let currentDevice = "";
                 let currentSsid = "";
                 let currentState = "";
@@ -290,10 +371,26 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true)
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.knownConnectionsFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.knownConnectionsFallbackTried = true;
+                        knownConnectionsProc.command = ["stratum-cli", "wifi", "known-connections"];
+                        knownConnectionsProc.running = true;
+                        return;
+                    }
                     return;
+                }
 
-                const rows = Array.isArray(payload.connections) ? payload.connections : [];
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                wifiMenu.knownConnectionsFallbackTried = false;
+
+                const rows = Array.isArray(source.connections) ? source.connections : [];
                 const known = {};
 
                 for (let i = 0; i < rows.length; i++) {
@@ -320,13 +417,28 @@ Window {
                 const result = this.text.trim();
                 wifiMenu.listLoading = false;
                 const payload = wifiMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.wifiListFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.wifiListFallbackTried = true;
+                        wifiListProc.command = ["stratum-cli", "wifi", "list"];
+                        wifiListProc.running = true;
+                        return;
+                    }
                     wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     wifiMenu.networks = [];
                     return;
                 }
 
-                const rows = Array.isArray(payload.networks) ? payload.networks : [];
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                wifiMenu.wifiListFallbackTried = false;
+
+                const rows = Array.isArray(source.networks) ? source.networks : [];
                 const dedupBySsid = {};
                 let candidateCount = 0;
 
@@ -424,13 +536,28 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.activeInfoFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.activeInfoFallbackTried = true;
+                        activeInfoProc.command = ["stratum-cli", "wifi", "active-info", wifiMenu.activeDevice];
+                        activeInfoProc.running = true;
+                        return;
+                    }
                     wifiMenu.statusMessage = wifiMenu.missingNmcliMessage;
                     return;
                 }
 
-                wifiMenu.activeIp = String(payload.ip4_address || "");
-                wifiMenu.activeGateway = String(payload.ip4_gateway || "");
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+                wifiMenu.activeInfoFallbackTried = false;
+
+                wifiMenu.activeIp = String(source.ip4_address || "");
+                wifiMenu.activeGateway = String(source.ip4_gateway || "");
             }
         }
     }
@@ -441,21 +568,30 @@ Window {
             onStreamFinished: {
                 const result = this.text.trim();
                 const payload = wifiMenu.parseCliJson(result);
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
 
-                if (!payload || payload.ok !== true) {
+                if (!source || source.ok !== true) {
+                    if (wifiMenu.daemonPreferred && !wifiMenu.actionFallbackTried && wifiMenu.actionFallbackCommand.length > 0) {
+                        DaemonRpc.recordFailure();
+                        GlobalState.daemonAvailable = false;
+                        wifiMenu.actionFallbackTried = true;
+                        actionProc.command = wifiMenu.actionFallbackCommand;
+                        actionProc.running = true;
+                        return;
+                    }
                     if (wifiMenu.pendingAction === "connect" && wifiMenu.pendingConnectWasKnown && wifiMenu.pendingConnectWasSecure && !wifiMenu.requirePasswordRetry) {
                         wifiMenu.requirePasswordRetry = true;
                         wifiMenu.statusMessage = "Saved credentials failed. Enter password and retry.";
                     } else {
-                        wifiMenu.statusMessage = payload && payload.error ? String(payload.error) : "Action failed.";
+                        wifiMenu.statusMessage = source && source.error ? String(source.error) : (payload && payload.error ? String(payload.error) : "Action failed.");
                     }
                     wifiMenu.autoHideOnConnectSsid = "";
-                } else if (String(payload.message || "").toLowerCase().indexOf("error") !== -1) {
+                } else if (String(source.message || "").toLowerCase().indexOf("error") !== -1) {
                     if (wifiMenu.pendingAction === "connect" && wifiMenu.pendingConnectWasKnown && wifiMenu.pendingConnectWasSecure && !wifiMenu.requirePasswordRetry) {
                         wifiMenu.requirePasswordRetry = true;
                         wifiMenu.statusMessage = "Saved credentials failed. Enter password and retry.";
                     } else {
-                        wifiMenu.statusMessage = String(payload.message || "Action failed.");
+                        wifiMenu.statusMessage = String(source.message || "Action failed.");
                     }
                     wifiMenu.autoHideOnConnectSsid = "";
                 } else if (wifiMenu.pendingAction === "forget") {
@@ -466,10 +602,17 @@ Window {
                         wifiMenu.requirePasswordRetry = false;
                 }
 
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    GlobalState.daemonAvailable = true;
+                }
+
                 wifiMenu.pendingAction = "";
                 wifiMenu.pendingActionTarget = "";
                 wifiMenu.pendingConnectWasKnown = false;
                 wifiMenu.pendingConnectWasSecure = false;
+                wifiMenu.actionFallbackCommand = [];
+                wifiMenu.actionFallbackTried = false;
 
                 if (!wifiMenu.shouldShowPasswordField())
                     selectedWifiPanel.passwordText = "";

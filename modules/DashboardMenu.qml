@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 
@@ -35,6 +36,7 @@ PanelWindow {
     property int calendarPrefetchYear: 0
     property int calendarPrefetchMonth: 0
     readonly property int dashboardRefreshMs: 2000
+    readonly property bool daemonPreferred: true
 
     readonly property string musicStatus: MusicProvider.musicStatus
     readonly property string musicPlayer: MusicProvider.musicPlayer
@@ -427,6 +429,15 @@ PanelWindow {
     function refreshDashboard() {
         loading = true;
         lastError = "";
+        if (daemonPreferred && DaemonRpc.canUse()) {
+            daemonDataProc.command = DaemonRpc.command("dashboard.status", {
+                                                         year: selectedCalendarYear,
+                                                         month: selectedCalendarMonth
+                                                     });
+            daemonDataProc.running = true;
+            return;
+        }
+
         dataProc.command = ["stratum-cli", "dashboard", "all", String(selectedCalendarYear), String(selectedCalendarMonth)];
         dataProc.running = true;
     }
@@ -520,6 +531,39 @@ PanelWindow {
         onTriggered: {
             if (GlobalState.showDashboardMenu)
                 dashboard.refreshDashboard();
+        }
+    }
+
+    Process {
+        id: daemonDataProc
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                dashboard.loading = false;
+
+                const raw = this.text.trim();
+                if (!raw) {
+                    dashboard.lastError = "No dashboard data";
+                    dataProc.command = ["stratum-cli", "dashboard", "all", String(dashboard.selectedCalendarYear), String(dashboard.selectedCalendarMonth)];
+                    dataProc.running = true;
+                    return;
+                }
+
+                const envelope = dashboard.parseCliJson(raw);
+                const response = envelope && envelope.jsonrpc === "2.0" && envelope.result && envelope.result.dashboard ? envelope.result.dashboard : null;
+
+                if (!response || response.ok !== true) {
+                    DaemonRpc.recordFailure();
+                    GlobalState.daemonAvailable = false;
+                    dataProc.command = ["stratum-cli", "dashboard", "all", String(dashboard.selectedCalendarYear), String(dashboard.selectedCalendarMonth)];
+                    dataProc.running = true;
+                    return;
+                }
+
+                DaemonRpc.recordSuccess();
+                GlobalState.daemonAvailable = true;
+                dashboard.applyDashboardResponse(response, JSON.stringify(response));
+            }
         }
     }
 
