@@ -129,23 +129,5 @@ in {
         };
       };
     };
-
-    systemd.user.services.stratumd = {
-      Unit = {
-        Description = "Stratum shell daemon";
-        After = ["graphical-session.target"];
-      };
-      Service = {
-        ExecStart = "${config.home.profileDirectory}/bin/stratumd";
-        Environment = [
-          "PATH=${config.home.profileDirectory}/bin:${config.home.homeDirectory}/.local/state/nix/profile/bin:/run/current-system/sw/bin:/usr/bin:/bin"
-        ];
-        Restart = "always";
-        RestartSec = "1";
-      };
-      Install = {
-        WantedBy = ["default.target"];
-      };
-    };
   };
 }
