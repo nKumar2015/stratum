@@ -50,10 +50,12 @@ Item {
             anchors.centerIn: parent
             spacing: 8
             width: Math.min(implicitWidth, parent.width - 20)
-            IconImage {
+
+            Image {
                 id: appIcon
                 source: Quickshell.iconPath(appTitleRoot.displayAppId, "application-x-executable")
-                implicitSize: 16
+                Layout.preferredWidth: 16
+                Layout.preferredHeight: 16
                 Layout.alignment: Qt.AlignVCenter
 
                 visible: appText.text !== "\uf4a9  Desktop"
