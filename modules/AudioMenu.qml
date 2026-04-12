@@ -240,9 +240,9 @@ ApplicationWindow {
         eqActionFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
             applyPresetProc.command = DaemonRpc.command("audio.eq_apply_preset", {
-                                                        device: audioMenu.currentDevice,
-                                                        preset_name: presetName
-                                                    }, 15);
+                device: audioMenu.currentDevice,
+                preset_name: presetName
+            }, 15);
         else
             applyPresetProc.command = ["stratum-cli", "audio", "equalizer", "apply-preset", audioMenu.currentDevice, presetName];
         applyPresetProc.running = true;
@@ -400,11 +400,11 @@ ApplicationWindow {
         eqActionFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
             savePresetProc.command = DaemonRpc.command("audio.eq_save_preset_parametric", {
-                                                       device: audioMenu.currentDevice,
-                                                       preset_name: cleanName,
-                                                       bands: bands,
-                                                       preamp_db: Number(audioMenu.eqPreampDb) || 0
-                                                   }, 15);
+                device: audioMenu.currentDevice,
+                preset_name: cleanName,
+                bands: bands,
+                preamp_db: Number(audioMenu.eqPreampDb) || 0
+            }, 15);
         else {
             const payload = JSON.stringify({
                 bands: bands,
@@ -439,10 +439,10 @@ ApplicationWindow {
 
         if (daemonPreferred && DaemonRpc.canUse())
             applyPresetProc.command = DaemonRpc.command("audio.eq_apply_parametric", {
-                                                        device: audioMenu.currentDevice,
-                                                        bands: bands,
-                                                        preamp_db: Number(audioMenu.eqPreampDb) || 0
-                                                    }, 15);
+                device: audioMenu.currentDevice,
+                bands: bands,
+                preamp_db: Number(audioMenu.eqPreampDb) || 0
+            }, 15);
         else {
             const payload = JSON.stringify({
                 bands: bands,
@@ -461,9 +461,9 @@ ApplicationWindow {
         eqActionFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
             deletePresetProc.command = DaemonRpc.command("audio.eq_delete_preset", {
-                                                         device: audioMenu.currentDevice,
-                                                         preset_name: name
-                                                     }, 15);
+                device: audioMenu.currentDevice,
+                preset_name: name
+            }, 15);
         else
             deletePresetProc.command = ["stratum-cli", "audio", "equalizer", "delete-preset", audioMenu.currentDevice, name];
         deletePresetProc.running = true;
@@ -485,8 +485,8 @@ ApplicationWindow {
     function loadPresetsForDevice() {
         if (daemonPreferred && DaemonRpc.canUse())
             listPresetsProc.command = DaemonRpc.command("audio.eq_list_presets", {
-                                                       device: audioMenu.currentDevice
-                                                   }, 4);
+                device: audioMenu.currentDevice
+            }, 4);
         else
             listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
         listPresetsProc.running = true;
@@ -509,7 +509,9 @@ ApplicationWindow {
         routeFallbackCommand = ["stratum-cli", "audio", "set-input", target];
         routeFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
-            routeProc.command = DaemonRpc.command("audio.set_input", { target: target });
+            routeProc.command = DaemonRpc.command("audio.set_input", {
+                target: target
+            });
         else
             routeProc.command = ["stratum-cli", "audio", "set-input", target];
         routeProc.running = true;
@@ -526,7 +528,9 @@ ApplicationWindow {
         routeFallbackCommand = ["stratum-cli", "audio", "set-output", target];
         routeFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
-            routeProc.command = DaemonRpc.command("audio.set_output", { target: target });
+            routeProc.command = DaemonRpc.command("audio.set_output", {
+                target: target
+            });
         else
             routeProc.command = ["stratum-cli", "audio", "set-output", target];
         routeProc.running = true;
@@ -894,8 +898,8 @@ ApplicationWindow {
                                                     const newPos = Math.round(menuSeekSlider.value);
                                                     if (audioMenu.daemonPreferred && DaemonRpc.canUse())
                                                         menuSeekProc.command = DaemonRpc.command("audio.media_seek", {
-                                                                                                           position_sec: newPos
-                                                                                                       }, 4);
+                                                            position_sec: newPos
+                                                        }, 4);
                                                     else
                                                         menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
                                                     menuSeekProc.running = true;
@@ -1054,7 +1058,7 @@ ApplicationWindow {
         background: Rectangle {
             color: Theme.palette.bgMain
             radius: 12
-            border.color: Theme.palette.bgInactive
+            border.color: Theme.palette.borderInactive
             border.width: 1
         }
 

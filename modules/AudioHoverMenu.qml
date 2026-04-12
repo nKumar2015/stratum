@@ -96,7 +96,7 @@ PanelWindow {
             showLoading = true;
         loading = showLoading;
         errorMsg = "";
-        
+
         if (DaemonRpc.canUse()) {
             statusProc.command = DaemonRpc.command("audio.devices", {});
         } else {
@@ -182,9 +182,11 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching output...";
-        
+
         if (DaemonRpc.canUse()) {
-            actionProc.command = DaemonRpc.command("audio.set_output", { target: name });
+            actionProc.command = DaemonRpc.command("audio.set_output", {
+                target: name
+            });
         } else {
             actionProc.command = ["stratum-cli", "audio", "set-output", name];
         }
@@ -196,9 +198,11 @@ PanelWindow {
             return;
         switching = true;
         statusMsg = "Switching input...";
-        
+
         if (DaemonRpc.canUse()) {
-            actionProc.command = DaemonRpc.command("audio.set_input", { target: name });
+            actionProc.command = DaemonRpc.command("audio.set_input", {
+                target: name
+            });
         } else {
             actionProc.command = ["stratum-cli", "audio", "set-input", name];
         }
@@ -571,7 +575,9 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultOutput
-                    color: outputHover.containsMouse ? Theme.palette.outlineVariant : "transparent"
+                    color: outputHover.containsMouse ? Theme.palette.bgHover : "transparent"
+                    border.color: outputHover.containsMouse ? Theme.palette.borderActive : "transparent"
+                    border.width: 1
 
                     RowLayout {
                         anchors.fill: parent
@@ -640,7 +646,9 @@ PanelWindow {
                     height: 30
                     radius: 6
                     property bool selected: modelData.name === hoverMenu.defaultInput
-                    color: inputHover.containsMouse ? Theme.palette.outlineVariant : "transparent"
+                    color: inputHover.containsMouse ? Theme.palette.bgHover : "transparent"
+                    border.color: inputHover.containsMouse ? Theme.palette.borderActive : "transparent"
+                    border.width: 1
 
                     RowLayout {
                         anchors.fill: parent
