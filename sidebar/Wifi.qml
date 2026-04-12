@@ -53,13 +53,13 @@ Item {
 
         if (state === "wifi") {
             const strength = Math.max(0, Math.min(100, Number(GlobalState.wifiSignalPercent) || 0));
-            if (strength >= signalStrongThreshold)
+            if (strength >= signalHighThreshold)
                 icon = "\udb82\udd28";
-            else if (strength >= signalGoodThreshold)
+            else if (strength >= signalMediumHighThreshold)
                 icon = "\udb82\udd25";
-            else if (strength >= signalFairThreshold)
+            else if (strength >= signalMediumThreshold)
                 icon = "\udb82\udd22";
-            else if (strength > 0)
+            else if (strength >= signalLowThreshold)
                 icon = "\udb82\udd1f";
             else
                 icon = "\udb82\udd2f";

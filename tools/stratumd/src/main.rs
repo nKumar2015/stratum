@@ -488,13 +488,15 @@ fn maybe_launch_quickshell() {
         return;
     };
 
-    if let Err(err) = Command::new(shell_bin)
+    // Launch quickshell fully detached to avoid zombie processes
+    if let Err(err) = Command::new("setsid")
+        .arg(shell_bin)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
     {
-        eprintln!("failed to launch quickshell: {}", err);
+        eprintln!("failed to launch quickshell (detached): {}", err);
     }
 }
 
