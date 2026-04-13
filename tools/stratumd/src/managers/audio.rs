@@ -647,6 +647,7 @@ lazy_static! {
     static ref LAST_SYNCED_STATE: Mutex<(String, Instant)> = Mutex::new((String::new(), Instant::now()));
     static ref IS_RESTORING: Mutex<bool> = Mutex::new(false);
     static ref GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
+    static ref DEVICE_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 }
 
 fn spawn_eq_module(module_args: &str) -> std::io::Result<()> {
@@ -893,6 +894,17 @@ pub fn status() -> Value {
 }
 
 pub fn devices() -> Value {
+    let cache = DEVICE_CACHE.lock().unwrap();
+    if let Some(data) = &*cache {
+        return data.clone();
+    }
+    
+    // Fallback if cache is empty (usually only on first boot)
+    drop(cache);
+    refresh_device_cache()
+}
+
+pub fn refresh_device_cache() -> Value {
     let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
     let default_sink = resolve_effective_default_sink(&default_sink_raw);
     let default_source = run_command_capture("pactl", &["get-default-source"]).unwrap_or_default();
@@ -934,7 +946,7 @@ pub fn devices() -> Value {
         })
         .collect::<Vec<_>>();
 
-    json!({
+    let result = json!({
         "ok": true,
         "command": "audio",
         "subcommand": "status",
@@ -951,7 +963,11 @@ pub fn devices() -> Value {
         "sinks": sinks,
         "sources": sources,
         "active_preset": load_eq_config().device_last_preset.get(&resolve_effective_default_sink(&default_sink)),
-    })
+    });
+
+    let mut cache = DEVICE_CACHE.lock().unwrap();
+    *cache = Some(result.clone());
+    result
 }
 
 pub fn set_output(target: &str) -> Value {
@@ -975,7 +991,7 @@ pub fn set_output(target: &str) -> Value {
         *lock = (target.to_string(), Instant::now());
     }
 
-    if res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+    let result = if res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         json!({
             "ok": true,
             "sink": target,
@@ -992,17 +1008,22 @@ pub fn set_output(target: &str) -> Value {
             "routed_via_eq": false,
             "warning": res.get("error"),
         })
-    }
+    };
+
+    refresh_device_cache();
+    result
 }
 
 pub fn set_input(target: &str) -> Value {
     let _ = run_command_capture("pactl", &["set-default-source", target]);
+    refresh_device_cache();
     json!({"ok": true, "source": target})
 }
 
 pub fn set_volume(percent: i64) -> Value {
     let p = percent.clamp(0, 150).to_string();
     let _ = run_command_capture("pactl", &["set-sink-volume", "@DEFAULT_SINK@", &format!("{}%", p)]);
+    refresh_device_cache();
     json!({"ok": true, "volume": p})
 }
 
