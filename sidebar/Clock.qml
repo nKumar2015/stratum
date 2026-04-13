@@ -58,6 +58,6 @@ ColumnLayout {
     }
 
     TapHandler {
-        onTapped: GlobalState.showDashboardMenu = true
+        onTapped: DashboardState.showMenu = true
     }
 }

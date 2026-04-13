@@ -10,63 +10,194 @@ import "modules"
 import "globals"
 
 ShellRoot {
+    // Phase 2: Centralized IPC
+    IpcModule {}
 
-    PowerMenu {}
-    LockScreen {}
+    // Phase 1: Background Logic (Always Active)
+    LockScreen {} // UI is lazy-loaded internally
     SystemOsd {}
     NotificationListener {}
-    NotificationCenter {}
-    BluetoothMenu {}
-    BluetoothHoverMenu {}
-    WifiMenu {}
-    WifiHoverMenu {}
-    AudioHoverMenu {}
-    AudioMenu {}
-    BatteryHoverMenu {}
-    DashboardMenu {
-        id: dashboardMenu
+
+    function updateLoader(loader, state, source, monitorName) {
+        if (state) {
+            console.log("[Shell] Loading " + source);
+            // Don't pass the screen property to standard XDG windows!
+            loader.setSource("modules/" + source);
+        } else {
+            console.log("[Shell] Destroying " + source);
+            if (loader.item && typeof loader.item.cleanupWindow === "function") {
+                loader.item.cleanupWindow();
+            }
+            loader.source = ""; // Destroys the window
+        }
     }
-    ThemeSwitcher {}
+
+    Connections {
+        target: PowerState
+        function onShowPowerMenuChanged() {
+            updateLoader(powerLoader, PowerState.showPowerMenu, "PowerMenu.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: NotificationState
+        function onShowCenterChanged() {
+            updateLoader(notificationLoader, NotificationState.showCenter, "NotificationCenter.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: BluetoothState
+        function onShowMenuChanged() {
+            updateLoader(bluetoothLoader, BluetoothState.showMenu, "BluetoothMenu.qml", GlobalState.popupMonitorName);
+        }
+        function onShowHoverMenuChanged() {
+            updateLoader(bluetoothHoverLoader, BluetoothState.showHoverMenu, "BluetoothHoverMenu.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: WifiState
+        function onShowMenuChanged() {
+            updateLoader(wifiLoader, WifiState.showMenu, "WifiMenu.qml", GlobalState.popupMonitorName);
+        }
+        function onShowHoverMenuChanged() {
+            updateLoader(wifiHoverLoader, WifiState.showHoverMenu, "WifiHoverMenu.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: AudioState
+        function onShowMenuChanged() {
+            updateLoader(audioLoader, AudioState.showMenu, "AudioMenu.qml", GlobalState.popupMonitorName);
+        }
+        function onShowHoverMenuChanged() {
+            updateLoader(audioHoverLoader, AudioState.showHoverMenu, "AudioHoverMenu.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: DashboardState
+        function onShowMenuChanged() {
+            updateLoader(dashboardLoader, DashboardState.showMenu, "DashboardMenu.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    Connections {
+        target: GlobalState
+        function onShowThemeSwitcherChanged() {
+            updateLoader(themeLoader, GlobalState.showThemeSwitcher, "ThemeSwitcher.qml", GlobalState.popupMonitorName);
+        }
+        function onShowScreenshotViewerChanged() {
+            updateLoader(screenshotLoader, GlobalState.showScreenshotViewer, "ScreenshotViewer.qml", GlobalState.popupMonitorName);
+        }
+    }
+
+    function screenByName(name) {
+        const target = String(name || "").trim();
+        const screens = Quickshell.screens || [];
+        if (!screens.length)
+            return null;
+        if (!target)
+            return screens[0];
+        for (let i = 0; i < screens.length; i++) {
+            const mon = Hyprland.monitorFor(screens[i]);
+            if (mon?.name === target)
+                return screens[i];
+        }
+        return screens[0];
+    }
+
+    // Phase 3: Lazy-Loaded UI Components
+    Loader {
+        id: powerLoader
+        onLoaded: console.log("[Shell] PowerMenu loaded")
+    }
+
+    Loader {
+        id: notificationLoader
+        onLoaded: console.log("[Shell] NotificationCenter loaded")
+    }
+
+    Loader {
+        id: bluetoothLoader
+        onLoaded: {
+            console.log("[Shell] BluetoothMenu successfully built in RAM.");
+            if (typeof item.initializeWindow === "function") {
+                item.initializeWindow();
+            }
+            item.show();
+            item.requestActivate();
+        }
+    }
+
+    Loader {
+        id: bluetoothHoverLoader
+    }
+
+    Loader {
+        id: wifiLoader
+        onLoaded: {
+            console.log("[Shell] WifiMenu successfully built in RAM.");
+            if (typeof item.initializeWindow === "function") {
+                item.initializeWindow();
+            }
+            item.show();
+            item.requestActivate();
+        }
+    }
+
+    Loader {
+        id: wifiHoverLoader
+    }
+
+    Loader {
+        id: audioHoverLoader
+    }
+
+    Loader {
+        id: audioLoader
+        onLoaded: {
+            console.log("[Shell] AudioMenu successfully built in RAM.");
+
+            // 1. Run your background logic
+            if (typeof item.initializeWindow === "function") {
+                item.initializeWindow();
+            }
+
+            // 2. Explicitly request the OS to map the window
+            item.show();
+
+            // 3. Force Wayland to focus it so it doesn't spawn behind things
+            item.requestActivate();
+        }
+    }
+
+    Loader {
+        id: batteryHoverLoader
+    }
+
+    Loader {
+        id: dashboardLoader
+        onLoaded: console.log("[Shell] DashboardLoader loaded")
+    }
+
+    Loader {
+        id: themeLoader
+        onLoaded: console.log("[Shell] ThemeSwitcher loaded")
+    }
+
+    Loader {
+        id: screenshotLoader
+        onLoaded: console.log("[Shell] ScreenshotViewer loaded")
+    }
+
     Variants {
         model: Quickshell.screens
 
         ScreenshotToolbar {
             property var modelData
             screen: modelData
-        }
-    }
-    ScreenshotViewer {}
-
-    IpcHandler {
-        target: "screenshot"
-
-        function start(): void {
-            if (!GlobalState.screenshotOverlayOpen)
-                GlobalState.screenshotOverlayOpen = true;
-        }
-    }
-
-    IpcHandler {
-        target: "daemon"
-
-        function audio(payloadText: string): void {
-            GlobalState.applyDaemonAudioSnapshot(payloadText);
-        }
-
-        function wifi(payloadText: string): void {
-            GlobalState.applyDaemonWifiSnapshot(payloadText);
-        }
-
-        function bluetooth(payloadText: string): void {
-            GlobalState.applyDaemonBluetoothSnapshot(payloadText);
-        }
-
-        function music(payloadText: string): void {
-            MusicProvider.applyDaemonMusicSnapshot(payloadText);
-        }
-
-        function dashboard(payloadText: string): void {
-            dashboardMenu.applyDaemonDashboardSnapshot(payloadText);
         }
     }
 

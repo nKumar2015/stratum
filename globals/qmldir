@@ -1,4 +1,10 @@
 singleton GlobalState 1.0 GlobalState.qml
 singleton MusicProvider 1.0 MusicProvider.qml
-NotificationStore 1.0 NotificationStore.qml
 singleton Theme 1.0 GlobalTheme.qml
+singleton AudioState 1.0 AudioState.qml
+singleton WifiState 1.0 WifiState.qml
+singleton BluetoothState 1.0 BluetoothState.qml
+singleton NotificationState 1.0 NotificationState.qml
+singleton DashboardState 1.0 DashboardState.qml
+singleton PowerState 1.0 PowerState.qml
+IpcModule 1.0 IpcModule.qml

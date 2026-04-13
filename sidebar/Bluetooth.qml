@@ -16,7 +16,7 @@ Item {
     readonly property int hoverExitGraceMs: 420
 
     // scanning=󰂰, connected=󰂱, powered=󰂯, off=󰂲
-    property string icon: GlobalState.bluetoothScanning ? "󰂰" : (GlobalState.bluetoothConnected ? "󰂱" : (GlobalState.bluetoothPowered ? "󰂯" : "󰂲"))
+    property string icon: BluetoothState.scanning ? "󰂰" : (BluetoothState.connected ? "󰂱" : (BluetoothState.powered ? "󰂯" : "󰂲"))
 
     Text {
         anchors.centerIn: parent
@@ -37,8 +37,8 @@ Item {
         interval: root.hoverOpenDelayMs
         repeat: false
         onTriggered: {
-            if (bluetoothHover.containsMouse && !GlobalState.showBluetoothSettings)
-                GlobalState.showBluetoothHoverMenu = true;
+            if (bluetoothHover.containsMouse && !BluetoothState.showSettings)
+                BluetoothState.showHoverMenu = true;
         }
     }
 
@@ -48,7 +48,7 @@ Item {
         repeat: false
         onTriggered: {
             if (!bluetoothHover.containsMouse)
-                GlobalState.bluetoothHoverIntent = false;
+                BluetoothState.hoverIntent = false;
         }
     }
 
@@ -59,8 +59,8 @@ Item {
         onEntered: {
             hoverExitGraceTimer.stop();
             GlobalState.setPopupMonitorName(root.monitorName);
-            GlobalState.bluetoothIconY = root.mapToGlobal(0, root.height / 2).y;
-            GlobalState.bluetoothHoverIntent = true;
+            BluetoothState.iconY = root.mapToGlobal(0, root.height / 2).y;
+            BluetoothState.hoverIntent = true;
             hoverShowTimer.start();
         }
         onExited: {
@@ -68,11 +68,12 @@ Item {
             hoverExitGraceTimer.restart();
         }
         onClicked: {
+            console.log("[Sidebar][Bluetooth] Icon clicked. Monitor: " + root.monitorName + ", New State: " + !BluetoothState.showMenu);
             hoverExitGraceTimer.stop();
-            GlobalState.bluetoothHoverIntent = false;
+            BluetoothState.hoverIntent = false;
             hoverShowTimer.stop();
-            GlobalState.showBluetoothHoverMenu = false;
-            GlobalState.showBluetoothSettings = !GlobalState.showBluetoothSettings;
+            BluetoothState.showHoverMenu = false;
+            BluetoothState.showMenu = !BluetoothState.showMenu;
         }
     }
 }

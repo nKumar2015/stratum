@@ -38,17 +38,17 @@ Item {
     }
 
     Connections {
-        target: GlobalState
-        function onAudioVolumePercentChanged() {
-            volumePercent = Math.max(0, Math.min(volumeMaxPercent, GlobalState.audioVolumePercent));
+        target: AudioState
+        function onVolumePercentChanged() {
+            volumePercent = Math.max(0, Math.min(volumeMaxPercent, AudioState.volumePercent));
             applyIconState();
         }
-        function onAudioMutedChanged() {
-            muted = GlobalState.audioMuted;
+        function onMutedChanged() {
+            muted = AudioState.muted;
             applyIconState();
         }
-        function onAudioHeadphonesOutputChanged() {
-            headphonesOutput = GlobalState.audioHeadphonesOutput;
+        function onHeadphonesOutputChanged() {
+            headphonesOutput = AudioState.headphonesOutput;
             applyIconState();
         }
     }
@@ -75,7 +75,7 @@ Item {
         repeat: false
         onTriggered: {
             if (audioHover.containsMouse)
-                GlobalState.showAudioHoverMenu = true;
+                AudioState.showHoverMenu = true;
         }
     }
 
@@ -85,7 +85,7 @@ Item {
         repeat: false
         onTriggered: {
             if (!audioHover.containsMouse)
-                GlobalState.audioHoverIntent = false;
+                AudioState.hoverIntent = false;
         }
     }
 
@@ -96,8 +96,8 @@ Item {
         onEntered: {
             hoverExitGraceTimer.stop();
             GlobalState.setPopupMonitorName(root.monitorName);
-            GlobalState.audioIconY = root.mapToGlobal(0, root.height / 2).y;
-            GlobalState.audioHoverIntent = true;
+            AudioState.iconY = root.mapToGlobal(0, root.height / 2).y;
+            AudioState.hoverIntent = true;
             hoverShowTimer.start();
         }
         onExited: {
@@ -105,10 +105,11 @@ Item {
             hoverExitGraceTimer.restart();
         }
         onClicked: {
+            console.log("[Sidebar][Audio] Icon clicked. Monitor: " + root.monitorName + ", New State: " + !AudioState.showMenu);
             hoverExitGraceTimer.stop();
-            GlobalState.audioHoverIntent = false;
-            GlobalState.showAudioMenu = true;
-            GlobalState.showAudioHoverMenu = false;
+            AudioState.hoverIntent = false;
+            AudioState.showMenu = !AudioState.showMenu;
+            AudioState.showHoverMenu = false;
         }
     }
 }

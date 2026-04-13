@@ -23,14 +23,14 @@ Item {
     property string icon: "\udb82\udd2e"
 
     function syncIconFromGlobalState() {
-        const state = String(GlobalState.wifiState || "disconnected").trim().toLowerCase();
+        const state = String(WifiState.state || "disconnected").trim().toLowerCase();
         if (state === "ethernet") {
             icon = "\udb80\ude00";
             return;
         }
 
         if (state === "wifi") {
-            const strength = Math.max(0, Math.min(100, Number(GlobalState.wifiSignalPercent) || 0));
+            const strength = Math.max(0, Math.min(100, Number(WifiState.signalPercent) || 0));
             if (strength >= signalHighThreshold)
                 icon = "\udb82\udd28";
             else if (strength >= signalMediumHighThreshold)
@@ -48,11 +48,11 @@ Item {
     }
 
     Connections {
-        target: GlobalState
-        function onWifiStateChanged() {
+        target: WifiState
+        function onStateChanged() {
             root.syncIconFromGlobalState();
         }
-        function onWifiSignalPercentChanged() {
+        function onSignalPercentChanged() {
             root.syncIconFromGlobalState();
         }
     }
@@ -77,8 +77,8 @@ Item {
         interval: root.hoverOpenDelayMs
         repeat: false
         onTriggered: {
-            if (wifiHover.containsMouse && !GlobalState.showWifiSettings)
-                GlobalState.showWifiHoverMenu = true;
+            if (wifiHover.containsMouse && !WifiState.showMenu)
+                WifiState.showHoverMenu = true;
         }
     }
 
@@ -88,7 +88,7 @@ Item {
         repeat: false
         onTriggered: {
             if (!wifiHover.containsMouse)
-                GlobalState.wifiHoverIntent = false;
+                WifiState.hoverIntent = false;
         }
     }
 
@@ -99,8 +99,8 @@ Item {
         onEntered: {
             hoverExitGraceTimer.stop();
             GlobalState.setPopupMonitorName(root.monitorName);
-            GlobalState.wifiIconY = root.mapToGlobal(0, root.height / 2).y;
-            GlobalState.wifiHoverIntent = true;
+            WifiState.iconY = root.mapToGlobal(0, root.height / 2).y;
+            WifiState.hoverIntent = true;
             hoverShowTimer.start();
         }
         onExited: {
@@ -108,11 +108,12 @@ Item {
             hoverExitGraceTimer.restart();
         }
         onClicked: {
+            console.log("[Sidebar][Wifi] Icon clicked. Monitor: " + root.monitorName + ", New State: " + !WifiState.showMenu);
             hoverExitGraceTimer.stop();
-            GlobalState.wifiHoverIntent = false;
+            WifiState.hoverIntent = false;
             hoverShowTimer.stop();
-            GlobalState.showWifiHoverMenu = false;
-            GlobalState.showWifiSettings = !GlobalState.showWifiSettings;
+            WifiState.showHoverMenu = false;
+            WifiState.showMenu = !WifiState.showMenu;
         }
     }
 }

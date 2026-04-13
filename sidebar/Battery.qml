@@ -102,7 +102,7 @@ ColumnLayout {
         repeat: false
         onTriggered: {
             if (root.hoverActive)
-                GlobalState.showBatteryHoverMenu = true;
+                PowerState.showBatteryHoverMenu = true;
         }
     }
 
@@ -112,7 +112,7 @@ ColumnLayout {
         repeat: false
         onTriggered: {
             if (!root.hoverActive)
-                GlobalState.batteryHoverIntent = false;
+                PowerState.batteryHoverIntent = false;
         }
     }
 
@@ -122,8 +122,8 @@ ColumnLayout {
             if (hovered) {
                 hoverExitGraceTimer.stop();
                 GlobalState.setPopupMonitorName(root.monitorName);
-                GlobalState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
-                GlobalState.batteryHoverIntent = true;
+                PowerState.batteryIconY = root.mapToGlobal(0, root.height / 2).y;
+                PowerState.batteryHoverIntent = true;
                 hoverShowTimer.start();
             } else {
                 hoverShowTimer.stop();

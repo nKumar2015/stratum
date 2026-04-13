@@ -3,6 +3,7 @@ pragma Singleton
 import QtQuick
 import Quickshell.Io
 import "."
+import "../globals/DaemonRpc.js" as DaemonRpc
 
 Item {
     id: musicProvider
@@ -17,6 +18,16 @@ Item {
     property string musicArtUrl: ""
     property int musicPositionSec: 0
     property int musicLengthSec: 0
+
+    property bool _isInitialStatusFetched: false
+
+    Timer {
+        id: fallbackPollingTimer
+        interval: 2500
+        repeat: true
+        running: consumerCount > 0
+        onTriggered: musicProvider.refreshStatusFromDaemon()
+    }
 
     function parseCliJson(raw) {
         try {
@@ -37,14 +48,14 @@ Item {
     }
 
     function syncGlobalState() {
-        GlobalState.musicTitle = musicTitle;
-        GlobalState.musicArtist = musicArtist;
-        GlobalState.musicAlbum = musicAlbum;
-        GlobalState.musicPlayer = musicPlayer;
-        GlobalState.musicStatus = musicStatus;
-        GlobalState.musicPosition = musicPositionSec;
-        GlobalState.musicLength = musicLengthSec;
-        GlobalState.musicArtUrl = musicArtUrl;
+        AudioState.musicTitle = musicTitle;
+        AudioState.musicArtist = musicArtist;
+        AudioState.musicAlbum = musicAlbum;
+        AudioState.musicPlayer = musicPlayer;
+        AudioState.musicStatus = musicStatus;
+        AudioState.musicPosition = musicPositionSec;
+        AudioState.musicLength = musicLengthSec;
+        AudioState.musicArtUrl = musicArtUrl;
     }
 
     function applyMusicPayload(musicPayload) {
@@ -55,10 +66,11 @@ Item {
         musicTitle = String(music.title || "Nothing playing").trim();
         musicArtist = String(music.artist || "N/A").trim();
         musicAlbum = String(music.album || "N/A").trim();
-        musicArtUrl = String(music.art_url || "").trim();
+        musicArtUrl = String(music.art_url || music.artUrl || "").trim();
 
-        const posSec = Number(music.position_sec);
-        const lenSec = Number(music.length_sec);
+        const posSec = Number(music.position_sec ?? music.positionSec ?? music.position);
+        const lenSec = Number(music.length_sec ?? music.lengthSec ?? music.length);
+        
         musicPositionSec = isNaN(posSec) ? parseTimeToSeconds(music.position || "0:00") : Math.max(0, Math.round(posSec));
         musicLengthSec = isNaN(lenSec) ? parseTimeToSeconds(music.length || "0:00") : Math.max(0, Math.round(lenSec));
 
@@ -67,11 +79,26 @@ Item {
 
     function applyDaemonMusicSnapshot(payloadText) {
         const payload = parseCliJson(payloadText);
+        // Daemon might send { music: { ... } } or just the fields depending on the IPC call
         const music = (payload && payload.music && typeof payload.music === "object") ? payload.music : payload;
         if (!music || typeof music !== "object")
             return;
 
         applyMusicPayload(music);
+    }
+
+    function refreshStatusFromDaemon() {
+        if (!DaemonRpc.canUse()) return;
+        
+        refreshProc.command = DaemonRpc.command("audio.media_info");
+        refreshProc.running = true;
+    }
+
+    Process {
+        id: refreshProc
+        stdout: StdioCollector {
+            onStreamFinished: applyDaemonMusicSnapshot(this.text)
+        }
     }
 
     function acquire() {
