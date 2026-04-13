@@ -20,90 +20,29 @@ PanelWindow {
 
     WlrLayershell.layer: WlrLayer.Overlay
     color: "#a0000000"
-    visible: false
+    visible: true
 
     WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     property int selectedIndex: 0
     property var powerOptions: [
-        {
-            name: "Shutdown",
-            command: ["systemctl", "poweroff"],
-            icon: "../themes/icons/shutdown.svg"
-        },
-        {
-            name: "Reboot",
-            command: ["systemctl", "reboot"],
-            icon: "../themes/icons/reboot.svg"
-        },
-        {
-            name: "Suspend",
-            command: ["systemctl", "suspend"],
-            icon: "../themes/icons/suspend.svg"
-        },
-        {
-            name: "Logout",
-            command: ["hyprctl", "dispatch", "exit"],
-            icon: "../themes/icons/logout.svg"
-        },
-        {
-            name: "Reboot into Windows",
-            command: ["systemctl", "reboot", "--boot-loader-entry=windows.conf"],
-            icon: "../themes/icons/windows.svg"
-        },
-        {
-            name: "Reboot into BIOS",
-            command: ["systemctl", "reboot", "--firmware-setup"],
-            icon: "../themes/icons/bios.svg"
-        }
+        // ... (lines 28-57)
     ]
 
-    Process {
-        id: cmdRunner
-    }
-
-    function executeSelected() {
-        powerMenu.visible = false;
-        cmdRunner.command = powerOptions[selectedIndex].command;
-        cmdRunner.running = true;
-    }
-
-    IpcHandler {
-        target: "powermenu"
-        function toggle(): void {
-            powerMenu.visible = !powerMenu.visible;
-        }
-    }
+    // ... (lines 60-68)
 
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            powerMenu.visible = false;
+            PowerState.showPowerMenu = false;
         }
     }
 
-    Shortcut {
-        sequence: "Left"
-        onActivated: {
-            powerMenu.selectedIndex = (powerMenu.selectedIndex > 0) ? powerMenu.selectedIndex - 1 : powerMenu.powerOptions.length - 1;
-        }
-    }
-
-    Shortcut {
-        sequence: "Right"
-        onActivated: {
-            powerMenu.selectedIndex = (powerMenu.selectedIndex < powerMenu.powerOptions.length - 1) ? powerMenu.selectedIndex + 1 : 0;
-        }
-    }
-
-    Shortcut {
-        sequence: "Return"
-        onActivated: powerMenu.executeSelected()
-    }
+    // ... (lines 79-95)
 
     MouseArea {
         anchors.fill: parent
         onClicked: {
-            powerMenu.visible = false;
+            PowerState.showPowerMenu = false;
         }
     }
 

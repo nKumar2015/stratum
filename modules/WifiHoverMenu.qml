@@ -30,7 +30,7 @@ PanelWindow {
     // Flush right of the 40px sidebar + 4px gap
     margins.left: 44
     margins.top: {
-        const iconY = GlobalState.wifiIconY;
+        const iconY = WifiState.iconY;
         const minTop = 8;
         const bottomInset = 8;
         const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2);
@@ -46,7 +46,7 @@ PanelWindow {
     implicitWidth: 260
     implicitHeight: Math.max(col.implicitHeight + 24, 80)
 
-    visible: GlobalState.showWifiHoverMenu
+    visible: WifiState.showHoverMenu
     color: "transparent"
 
     // ── Network state ────────────────────────────────────────────────────
@@ -147,15 +147,15 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.wifiHoverIntent && !menuHover.hovered)
-                GlobalState.showWifiHoverMenu = false;
+            if (!WifiState.hoverIntent && !menuHover.hovered)
+                WifiState.showHoverMenu = false;
         }
     }
 
     Connections {
-        target: GlobalState
-        function onWifiHoverIntentChanged() {
-            if (GlobalState.wifiHoverIntent)
+        target: WifiState
+        function onHoverIntentChanged() {
+            if (WifiState.hoverIntent)
                 hideTimer.stop();
             else
                 hideTimer.restart();
@@ -173,7 +173,7 @@ PanelWindow {
         HoverHandler {
             id: menuHover
             onHoveredChanged: {
-                GlobalState.wifiHoverIntent = hovered;
+                WifiState.hoverIntent = hovered;
                 if (!hovered)
                     hideTimer.restart();
             }
@@ -213,7 +213,7 @@ PanelWindow {
                         id: closeHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: GlobalState.showWifiHoverMenu = false
+                        onClicked: WifiState.showHoverMenu = false
                     }
 
                     Behavior on color {
@@ -356,8 +356,8 @@ PanelWindow {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        GlobalState.showWifiHoverMenu = false;
-                        GlobalState.showWifiSettings = true;
+                        WifiState.showHoverMenu = false;
+                        WifiState.showMenu = true;
                     }
                 }
 

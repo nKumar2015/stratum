@@ -62,9 +62,9 @@ Scope {
     function buildSnapshotPayload() {
         return {
             version: snapshotVersion,
-            doNotDisturb: !!GlobalState.doNotDisturb,
-            nextNotificationId: Number(GlobalState.nextNotificationId || 1),
-            notifications: GlobalState.notifications || []
+            doNotDisturb: !!NotificationState.doNotDisturb,
+            nextNotificationId: Number(NotificationState.nextNotificationId || 1),
+            notifications: NotificationState.notifications || []
         };
     }
 
@@ -98,7 +98,6 @@ Scope {
             return;
 
         const payload = buildSnapshotPayload();
-
         const json = JSON.stringify(payload);
         const encoded = encodeURIComponent(json);
         snapshotSaveProc.command = ["stratum-cli", "notifications-snapshot", "snapshot-save", encoded];
@@ -120,14 +119,14 @@ Scope {
                 return false;
 
             restoringSnapshot = true;
-            const normalized = GlobalState.normalizeSnapshotNotifications(list);
+            const normalized = NotificationState.normalizeSnapshotNotifications(list);
             for (let i = 0; i < normalized.length; i++)
                 normalized[i] = root.normalizeSnapshotNotification(normalized[i]);
 
-            GlobalState.doNotDisturb = !!parsed.doNotDisturb;
-            GlobalState.notifications = normalized.slice(0, Math.max(1, Number(GlobalState.maxNotifications || 50)));
+            NotificationState.doNotDisturb = !!parsed.doNotDisturb;
+            NotificationState.notifications = normalized.slice(0, Math.max(1, Number(NotificationState.maxNotifications || 50)));
 
-            GlobalState.nextNotificationId = root.nextNotificationIdForSnapshot(parsed.nextNotificationId, GlobalState.notifications);
+            NotificationState.nextNotificationId = root.nextNotificationIdForSnapshot(parsed.nextNotificationId, NotificationState.notifications);
             restoringSnapshot = false;
             return true;
         } catch (err) {
@@ -184,8 +183,6 @@ Scope {
             text = "image://icon/" + text.substring("image://icon/image://icon/".length);
         }
 
-        // Some backends expose absolute icon file paths through the icon provider
-        // as image://icon//abs/path; convert those to direct file URLs.
         if (text.startsWith("image://icon//")) {
             const rawPath = text.substring("image://icon//".length);
             return root.canonicalFileUrl(rawPath);
@@ -225,7 +222,7 @@ Scope {
 
     function syncNativeMaps() {
         const validIds = {};
-        const list = GlobalState.notifications || [];
+        const list = NotificationState.notifications || [];
         for (let i = 0; i < list.length; i++) {
             const id = Number(list[i].id || 0);
             if (id > 0)
@@ -320,7 +317,7 @@ Scope {
         if (isNaN(normalized) || normalized <= 0)
             return -1;
 
-        const match = Number(GlobalState.findNotificationIdBySource(normalized));
+        const match = Number(NotificationState.findNotificationIdBySource(normalized));
         return match > 0 ? match : -1;
     }
 
@@ -346,7 +343,7 @@ Scope {
         if (identity.summary.length === 0)
             return -1;
 
-        const list = GlobalState.notifications || [];
+        const list = NotificationState.notifications || [];
         let fallbackAny = -1;
         for (let i = 0; i < list.length; i++) {
             const item = list[i] || {};
@@ -366,10 +363,6 @@ Scope {
     }
 
     function findLocalTargetId(notification, appId, appName, summary) {
-        // Match priority:
-        // 1) explicit source id from backend event
-        // 2) explicit replaces-id hint
-        // 3) summary/app identity fallback for providers with unstable ids
         const sourceMatch = root.findBySourceId(notification.id);
         if (sourceMatch > 0)
             return sourceMatch;
@@ -442,14 +435,14 @@ Scope {
 
         notification.closed.connect(function(reason) {
             const reasonText = String(NotificationCloseReason.toString(reason));
-            GlobalState.patchNotification(localId, {
+            NotificationState.patchNotification(localId, {
                 closeReason: reasonText,
                 updatedAt: Date.now()
             });
             if (reasonText === "Expired") {
-                GlobalState.expireToast(localId);
+                NotificationState.expireToast(localId);
             } else {
-                GlobalState.dismissNotification(localId);
+                NotificationState.dismissNotification(localId);
             }
         });
     }
@@ -498,13 +491,13 @@ Scope {
         };
 
         if (existingLocalId > 0) {
-            GlobalState.patchNotification(existingLocalId, updatePayload);
+            NotificationState.patchNotification(existingLocalId, updatePayload);
             root.clearNative(existingLocalId);
             root.registerNative(existingLocalId, notification);
             return;
         }
 
-        const localId = GlobalState.addNotification(updatePayload);
+        const localId = NotificationState.addNotification(updatePayload);
 
         if (localId < 0)
             return;
@@ -582,11 +575,11 @@ Scope {
     }
 
     Connections {
-        target: GlobalState
-        function onNotificationActionRequested(notificationId, actionKey, replyText) {
+        target: NotificationState
+        function onActionRequested(notificationId, actionKey, replyText) {
             root.handleActionRequest(notificationId, actionKey, replyText);
         }
-        function onNotificationDismissRequested(notificationId, expired) {
+        function onDismissRequested(notificationId, expired) {
             root.handleDismissRequest(notificationId, expired);
             root.clearNative(notificationId);
         }

@@ -29,7 +29,7 @@ PanelWindow {
 
     margins.left: 44
     margins.top: {
-        const iconY = GlobalState.batteryIconY;
+        const iconY = PowerState.batteryIconY;
         const minTop = 8;
         const bottomInset = 8;
         const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2) - 40;
@@ -45,7 +45,7 @@ PanelWindow {
     implicitWidth: 280
     implicitHeight: Math.max(col.implicitHeight + 24, 180)
 
-    visible: GlobalState.showBatteryHoverMenu
+    visible: PowerState.showBatteryHoverMenu
     color: "transparent"
 
     property bool loading: false
@@ -209,15 +209,15 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.batteryHoverIntent && !menuHoverHandler.hovered)
-                GlobalState.showBatteryHoverMenu = false;
+            if (!PowerState.batteryHoverIntent && !menuHoverHandler.hovered)
+                PowerState.showBatteryHoverMenu = false;
         }
     }
 
     Connections {
-        target: GlobalState
+        target: PowerState
         function onBatteryHoverIntentChanged() {
-            if (GlobalState.batteryHoverIntent || menuHoverHandler.hovered)
+            if (PowerState.batteryHoverIntent || menuHoverHandler.hovered)
                 hideTimer.stop();
             else
                 hideTimer.restart();
@@ -233,7 +233,7 @@ PanelWindow {
 
         HoverHandler {
             id: menuHoverHandler
-            onHoveredChanged: GlobalState.batteryHoverIntent = hovered
+            onHoveredChanged: PowerState.batteryHoverIntent = hovered
         }
 
         ColumnLayout {
@@ -267,7 +267,7 @@ PanelWindow {
                         id: closeHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: GlobalState.showBatteryHoverMenu = false
+                        onClicked: PowerState.showBatteryHoverMenu = false
                     }
 
                     Behavior on color {

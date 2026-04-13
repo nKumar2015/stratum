@@ -156,8 +156,8 @@ PanelWindow {
                 const muteValue = String(payload.mute || "yes").trim().toLowerCase();
                 const isMuted = muteValue === "yes" || muteValue === "true";
 
-                GlobalState.audioVolumePercent = volume;
-                GlobalState.audioMuted = isMuted;
+                AudioState.volumePercent = volume;
+                AudioState.muted = isMuted;
 
                 const changed = (volume !== osd.lastVolume) || (isMuted !== osd.lastMuted);
                 osd.lastVolume = volume;

@@ -68,7 +68,7 @@ QtObject {
     }
 
     function notifyPostActionFailure(message) {
-        GlobalState.addNotification({
+        NotificationState.addNotification({
             appName: "Screenshot",
             summary: "Viewer action failed",
             body: message || "Unknown error",

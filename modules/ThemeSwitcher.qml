@@ -84,28 +84,6 @@ PanelWindow {
 
     onFilteredThemesChanged: switcher.clampSelection()
 
-    IpcHandler {
-        target: "theme"
-
-        function open(): void {
-            switcher.visible = true;
-            searchField.text = "";
-            switcher.selectedIndex = switcher.indexForCurrentTheme();
-            searchField.forceActiveFocus();
-        }
-
-        function close(): void {
-            switcher.visible = false;
-        }
-
-        function toggle(): void {
-            switcher.visible = !switcher.visible;
-        }
-
-        function set(themeName: string): void {
-            switcher.applyTheme(themeName);
-        }
-    }
 
     Shortcut {
         sequence: "Escape"

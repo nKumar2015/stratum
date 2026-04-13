@@ -31,7 +31,7 @@ PanelWindow {
 
     margins.left: 44
     margins.top: {
-        const iconY = GlobalState.audioIconY;
+        const iconY = AudioState.iconY;
         const minTop = 8;
         const bottomInset = 8;
         const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2);
@@ -47,7 +47,7 @@ PanelWindow {
     implicitWidth: 260
     implicitHeight: Math.max(col.implicitHeight + 24, 220)
 
-    visible: GlobalState.showAudioHoverMenu
+    visible: AudioState.showHoverMenu
     color: "transparent"
     readonly property color hoverSurface: Theme.palette.bgWidget
     readonly property color hoverBorder: Theme.palette.outlineVariant || Qt.rgba(1, 1, 1, 0.14)
@@ -121,15 +121,15 @@ PanelWindow {
         const clamped = Math.max(0, Math.min(volumeMaxPercent, Math.round(value)));
         currentVolume = clamped;
         currentMuted = clamped === 0;
-        GlobalState.audioVolumePercent = clamped;
-        GlobalState.audioMuted = currentMuted;
+        AudioState.volumePercent = clamped;
+        AudioState.muted = currentMuted;
     }
 
     function queueVolumeCommit(value) {
         pendingVolume = Math.max(0, Math.min(volumeMaxPercent, Math.round(value)));
         expectedVolume = pendingVolume;
         expectedVolumeMisses = 0;
-        GlobalState.audioUserAdjusting = true;
+        AudioState.userAdjusting = true;
         if (!volumeProc.running)
             commitPendingVolume();
     }
@@ -149,10 +149,10 @@ PanelWindow {
         const statusVolume = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(volumeMaxPercent, parsedVolume));
         const statusMuted = (muteText || "yes").trim().toLowerCase() === "yes";
 
-        if (GlobalState.audioUserAdjusting && !volumeSlider.pressed && pendingVolume < 0)
-            GlobalState.audioUserAdjusting = false;
+        if (AudioState.userAdjusting && !volumeSlider.pressed && pendingVolume < 0)
+            AudioState.userAdjusting = false;
 
-        if (GlobalState.audioUserAdjusting || volumeSlider.pressed || pendingVolume >= 0)
+        if (AudioState.userAdjusting || volumeSlider.pressed || pendingVolume >= 0)
             return;
 
         if (expectedVolume >= 0) {
@@ -167,8 +167,8 @@ PanelWindow {
 
         currentVolume = statusVolume;
         currentMuted = statusMuted;
-        GlobalState.audioVolumePercent = currentVolume;
-        GlobalState.audioMuted = currentMuted;
+        AudioState.volumePercent = currentVolume;
+        AudioState.muted = currentMuted;
 
         if (!volumeSlider.pressed) {
             sliderSyncing = true;
@@ -307,7 +307,7 @@ PanelWindow {
                     hoverMenu.statusMsg = "Volume change failed";
                     hoverMenu.expectedVolume = -1;
                     hoverMenu.expectedVolumeMisses = 0;
-                    GlobalState.audioUserAdjusting = false;
+                    AudioState.userAdjusting = false;
                     statusClearTimer.restart();
                     return;
                 }
@@ -318,7 +318,7 @@ PanelWindow {
                 }
 
                 if (!volumeSlider.pressed)
-                    GlobalState.audioUserAdjusting = false;
+                    AudioState.userAdjusting = false;
 
                 hoverMenu.loadStatus(false);
             }
@@ -350,7 +350,7 @@ PanelWindow {
             pendingVolume = -1;
             expectedVolume = -1;
             expectedVolumeMisses = 0;
-            GlobalState.audioUserAdjusting = false;
+            AudioState.userAdjusting = false;
             loadStatus();
         } else {
             hideTimer.stop();
@@ -358,7 +358,7 @@ PanelWindow {
             expectedVolume = -1;
             expectedVolumeMisses = 0;
             statusRetryTimer.stop();
-            GlobalState.audioUserAdjusting = false;
+            AudioState.userAdjusting = false;
         }
     }
 
@@ -368,15 +368,15 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.audioHoverIntent && !menuHover.hovered)
-                GlobalState.showAudioHoverMenu = false;
+            if (!AudioState.hoverIntent && !menuHover.hovered)
+                AudioState.showHoverMenu = false;
         }
     }
 
     Connections {
-        target: GlobalState
-        function onAudioHoverIntentChanged() {
-            if (GlobalState.audioHoverIntent)
+        target: AudioState
+        function onHoverIntentChanged() {
+            if (AudioState.hoverIntent)
                 hideTimer.stop();
             else
                 hideTimer.restart();
@@ -393,7 +393,7 @@ PanelWindow {
         HoverHandler {
             id: menuHover
             onHoveredChanged: {
-                GlobalState.audioHoverIntent = hovered;
+                AudioState.hoverIntent = hovered;
                 if (!hovered)
                     hideTimer.restart();
             }
@@ -430,7 +430,7 @@ PanelWindow {
                         id: closeHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: GlobalState.showAudioHoverMenu = false
+                        onClicked: AudioState.showHoverMenu = false
                     }
 
                     Behavior on color {
@@ -528,7 +528,7 @@ PanelWindow {
 
                         onPressedChanged: {
                             if (pressed) {
-                                GlobalState.audioUserAdjusting = true;
+                                AudioState.userAdjusting = true;
                             } else if (!hoverMenu.sliderSyncing) {
                                 hoverMenu.queueVolumeCommit(value);
                             }
@@ -703,9 +703,9 @@ PanelWindow {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        GlobalState.audioHoverIntent = false;
-                        GlobalState.showAudioMenu = true;
-                        GlobalState.showAudioHoverMenu = false;
+                        AudioState.hoverIntent = false;
+                        AudioState.showMenu = true;
+                        AudioState.showHoverMenu = false;
                     }
                 }
 

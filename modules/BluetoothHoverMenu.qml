@@ -32,7 +32,7 @@ PanelWindow {
     margins.left: 44
     // Vertically center on the Bluetooth icon using its captured screen Y
     margins.top: {
-        const iconY = GlobalState.bluetoothIconY;
+        const iconY = BluetoothState.iconY;
         const minTop = 8;
         const bottomInset = 8;
         const desiredTop = iconY <= 0 ? 100 : Math.round(iconY - implicitHeight / 2);
@@ -49,7 +49,7 @@ PanelWindow {
     implicitWidth: 260
     implicitHeight: Math.max(col.implicitHeight + 24, 96)
 
-    visible: GlobalState.showBluetoothHoverMenu
+    visible: BluetoothState.showHoverMenu
     color: "transparent"
 
     property bool loading: false
@@ -178,15 +178,15 @@ PanelWindow {
         repeat: false
         running: false
         onTriggered: {
-            if (!GlobalState.bluetoothHoverIntent && !menuHover.hovered)
-                GlobalState.showBluetoothHoverMenu = false;
+            if (!BluetoothState.hoverIntent && !menuHover.hovered)
+                BluetoothState.showHoverMenu = false;
         }
     }
 
     Connections {
-        target: GlobalState
-        function onBluetoothHoverIntentChanged() {
-            if (GlobalState.bluetoothHoverIntent)
+        target: BluetoothState
+        function onHoverIntentChanged() {
+            if (BluetoothState.hoverIntent)
                 hideTimer.stop();
             else
                 hideTimer.restart();
@@ -206,7 +206,7 @@ PanelWindow {
         HoverHandler {
             id: menuHover
             onHoveredChanged: {
-                GlobalState.bluetoothHoverIntent = hovered;
+                BluetoothState.hoverIntent = hovered;
                 if (!hovered)
                     hideTimer.restart();
             }
@@ -246,7 +246,7 @@ PanelWindow {
                         id: closeHover
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: GlobalState.showBluetoothHoverMenu = false
+                        onClicked: BluetoothState.showHoverMenu = false
                     }
 
                     Behavior on color {
@@ -370,8 +370,8 @@ PanelWindow {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        GlobalState.showBluetoothHoverMenu = false;
-                        GlobalState.showBluetoothSettings = true;
+                        BluetoothState.showHoverMenu = false;
+                        BluetoothState.showMenu = true;
                     }
                 }
 

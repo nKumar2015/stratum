@@ -310,7 +310,7 @@ PanelWindow {
                 if (!payload) {
                     toolbar.visibleState = true;
                     toolbar.freezeReady = true;
-                    GlobalState.addNotification({
+                    NotificationState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
                         body: "Invalid response from capture process",
@@ -324,7 +324,7 @@ PanelWindow {
                     const errorMessage = String(payload.error || "Unknown error").trim();
                     toolbar.visibleState = true;
                     toolbar.freezeReady = true;
-                    GlobalState.addNotification({
+                    NotificationState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
                         body: errorMessage || "Unknown error",
@@ -339,7 +339,7 @@ PanelWindow {
                 if (!imagePath) {
                     toolbar.visibleState = true;
                     toolbar.freezeReady = true;
-                    GlobalState.addNotification({
+                    NotificationState.addNotification({
                         appName: "Screenshot",
                         summary: "Capture failed",
                         body: "No file path returned",
@@ -369,7 +369,7 @@ PanelWindow {
                 if (!payload) {
                     toolbar.freezeReady = false;
                     toolbar.closeToolbar(true);
-                    GlobalState.addNotification({
+                    NotificationState.addNotification({
                         appName: "Screenshot",
                         summary: "Start failed",
                         body: "Invalid freeze response",
@@ -383,7 +383,7 @@ PanelWindow {
                     const message = String(payload.error || "Could not freeze screen").trim();
                     toolbar.freezeReady = false;
                     toolbar.closeToolbar(true);
-                    GlobalState.addNotification({
+                    NotificationState.addNotification({
                         appName: "Screenshot",
                         summary: "Start failed",
                         body: message || "Could not freeze screen",
