@@ -3,8 +3,15 @@ use std::fs;
 use std::path::Path;
 
 use crate::managers::common::{command_available, run_capture_optional, run_command_capture};
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
-fn current_date_parts() -> (i32, u32, u32) {
+lazy_static! {
+    static ref CALENDAR_CACHE: Mutex<HashMap<(i32, u32), Value>> = Mutex::new(HashMap::new());
+}
+
+pub fn current_date_parts() -> (i32, u32, u32) {
     let output = run_command_capture("date", &["+%Y %m %d"]).unwrap_or_default();
     let mut parts = output.split_whitespace();
     let year = parts
@@ -26,6 +33,22 @@ fn current_date_parts() -> (i32, u32, u32) {
 
 fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+pub fn adjust_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
+    let mut y = year;
+    let mut m = month as i32 + delta;
+
+    while m > 12 {
+        m -= 12;
+        y += 1;
+    }
+    while m < 1 {
+        m += 12;
+        y -= 1;
+    }
+
+    (y, m as u32)
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
@@ -88,7 +111,13 @@ fn parse_weekdays(line: &str) -> Vec<String> {
     }
 }
 
-fn calendar_payload(year: i32, month: u32) -> Value {
+pub fn calendar_payload(year: i32, month: u32) -> Value {
+    if let Ok(cache) = CALENDAR_CACHE.lock() {
+        if let Some(cached) = cache.get(&(year, month)) {
+            return cached.clone();
+        }
+    }
+
     if !command_available("cal") {
         return json!({
             "error": "cal not found",
@@ -135,7 +164,7 @@ fn calendar_payload(year: i32, month: u32) -> Value {
         -1
     };
 
-    json!({
+    let result = json!({
         "title": title,
         "year": year,
         "month": month,
@@ -144,7 +173,13 @@ fn calendar_payload(year: i32, month: u32) -> Value {
         "weekdays": weekdays,
         "rows": rows,
         "today": today,
-    })
+    });
+
+    if let Ok(mut cache) = CALENDAR_CACHE.lock() {
+        cache.insert((year, month), result.clone());
+    }
+
+    result
 }
 
 fn parse_first_int(text: &str) -> Option<i64> {

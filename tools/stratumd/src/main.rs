@@ -256,16 +256,30 @@ fn maybe_launch_quickshell() {
 // --- Monitor threads ---
 
 fn spawn_audio_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let snapshot = managers::audio::status();
+    thread::spawn(move || {
+        let mut iteration = 0;
+        // Initial refresh
+        managers::audio::refresh_device_cache();
         
-        // Auto-restore EQ when the hardware output shifts
-        if let Some(sink) = snapshot.get("default_sink").and_then(Value::as_str) {
-            managers::audio::notify_default_sink_changed(sink);
-        }
+        loop {
+            let snapshot = managers::audio::status();
+            
+            // Auto-restore EQ when the hardware output shifts
+            if let Some(sink) = snapshot.get("default_sink").and_then(Value::as_str) {
+                managers::audio::notify_default_sink_changed(sink);
+            }
 
-        state.audio.update(snapshot);
-        thread::sleep(Duration::from_secs(2));
+            state.audio.update(snapshot);
+            
+            // Refresh device list every 10 seconds (5 * 2s)
+            iteration += 1;
+            if iteration >= 5 {
+                managers::audio::refresh_device_cache();
+                iteration = 0;
+            }
+            
+            thread::sleep(Duration::from_secs(2));
+        }
     });
 }
 
@@ -294,19 +308,39 @@ fn spawn_music_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_dashboard_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let watched = state
-            .dashboard_watch
-            .lock()
-            .ok()
-            .and_then(|guard| *guard);
+    thread::spawn(move || {
+        loop {
+            let watched = state
+                .dashboard_watch
+                .lock()
+                .ok()
+                .and_then(|guard| *guard);
 
-        if let Some((year, month)) = watched {
-            let snapshot = managers::dashboard::status(year, month as i32);
-            state.dashboard.update(snapshot);
+            let (center_year, center_month) = if let Some((y, m)) = watched {
+                (y, m)
+            } else {
+                let (y, m, _) = managers::dashboard::current_date_parts();
+                (y, m)
+            };
+
+            // Maintain a 7-month sliding window [-3..+3]
+            for delta in -3..=3 {
+                let (y, m) = managers::dashboard::adjust_month(center_year, center_month, delta);
+                
+                // Only refresh the center month's performance data every 2s
+                // Side months (calendar only) don't need frequent refreshes
+                if delta == 0 {
+                    let snapshot = managers::dashboard::status(y, m as i32);
+                    state.dashboard.update(snapshot);
+                } else {
+                    // Just ensure the calendar payload is cached
+                    managers::dashboard::calendar_payload(y, m);
+                }
+            }
+
+            // Sleep 2s between maintenance cycles
+            thread::sleep(Duration::from_secs(2));
         }
-
-        thread::sleep(Duration::from_secs(2));
     });
 }
 
@@ -616,7 +650,7 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
         "bluetooth.scan" => Ok(managers::bluetooth::scan()),
 
         // Read from in-memory state
-        "music.status" => Ok(json!({
+        "music.status" | "audio.media_info" => Ok(json!({
             "ok": true,
             "music": state.music.snapshot(),
         })),
@@ -630,6 +664,22 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
                 "dashboard": managers::dashboard::status(year, month),
             }))
         }
+        "dashboard.all" => {
+            let year = param_i64(_params, "year", 0) as i32;
+            let month = param_i64(_params, "month", 0) as i32;
+
+            // Fast-track: if requesting current year/month, try to return cached state first
+            let snapshot = state.dashboard.snapshot();
+            if let Some(cal) = snapshot.get("calendar") {
+                if cal.get("year").and_then(Value::as_i64) == Some(year as i64) &&
+                   cal.get("month").and_then(Value::as_i64) == Some(month as i64) {
+                    return Ok(snapshot);
+                }
+            }
+
+            Ok(managers::dashboard::status(year, month))
+        }
+
         "dashboard.watch" => {
             let now = chrono_like_now();
             let year = param_i64(_params, "year", now.0 as i64) as i32;
