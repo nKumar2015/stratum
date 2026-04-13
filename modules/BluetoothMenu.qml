@@ -1,29 +1,32 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Window
+import Quickshell
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Io
 import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
 
-Window {
+ApplicationWindow {
     id: bluetoothMenu
-
-    title: "Bluetooth"
-    flags: Qt.Window
-
-    visible: GlobalState.showBluetoothSettings
-
     width: 700
     height: 560
+    flags: Qt.Window | Qt.WindowStaysOnTopHint
     color: "transparent"
 
-    onClosing: {
-        close.accepted = false;
-        GlobalState.showBluetoothSettings = false;
+    function initializeWindow() {
+        refreshAll();
     }
+
+    function cleanupWindow() {
+        actionWatchdogTimer.stop();
+        powerStateSyncTimer.stop();
+    }
+
+    
 
     property bool bluetoothEnabled: false
     property string activeMac: ""
@@ -80,7 +83,7 @@ Window {
 
     function finishScanState() {
         scanning = false;
-        GlobalState.bluetoothScanning = false;
+        BluetoothState.scanning = false;
         scanRefreshTimer.running = false;
         scanWatchdogTimer.running = false;
         listLoading = false;
@@ -121,8 +124,8 @@ Window {
             autoScanRetryCount = 0;
             autoScanRetryTimer.stop();
             toggleOnAutoScanTimer.stop();
-            GlobalState.bluetoothConnected = false;
-            GlobalState.bluetoothScanning = false;
+            BluetoothState.connected = false;
+            BluetoothState.scanning = false;
             clearDeviceState();
             setStatusMessage("Bluetooth turned off.", true);
         }
@@ -377,7 +380,7 @@ Window {
         else
             scanProc.command = ["stratum-cli", "bluetooth", "scan"];
         scanning = true;
-        GlobalState.bluetoothScanning = true;
+        BluetoothState.scanning = true;
         setStatusMessage("Scanning for devices...", false);
         listLoading = true;
         scanRefreshTimer.running = true;
@@ -397,28 +400,28 @@ Window {
                 if (!source || source.ok !== true) {
                     if (bluetoothMenu.daemonPreferred && !bluetoothMenu.btStateFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         bluetoothMenu.btStateFallbackTried = true;
                         btStateProc.command = ["stratum-cli", "bluetooth", "state"];
                         btStateProc.running = true;
                         return;
                     }
                     bluetoothMenu.bluetoothEnabled = false;
-                    GlobalState.bluetoothPowered = false;
-                    GlobalState.bluetoothConnected = false;
-                    GlobalState.bluetoothScanning = false;
+                    BluetoothState.powered = false;
+                    BluetoothState.connected = false;
+                    BluetoothState.scanning = false;
                     bluetoothMenu.setStatusMessage(source && source.error ? String(source.error) : bluetoothMenu.missingBluetoothctlMessage, true);
                     return;
                 }
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 bluetoothMenu.btStateFallbackTried = false;
 
                 bluetoothMenu.bluetoothEnabled = String(source.powered || "no") === "yes";
-                GlobalState.bluetoothPowered = bluetoothMenu.bluetoothEnabled;
+                BluetoothState.powered = bluetoothMenu.bluetoothEnabled;
 
                 if (bluetoothMenu.pendingPowerSyncTarget) {
                     const expectedOn = bluetoothMenu.pendingPowerSyncTarget === "on";
@@ -429,8 +432,8 @@ Window {
                 }
 
                 if (!bluetoothMenu.bluetoothEnabled) {
-                    GlobalState.bluetoothConnected = false;
-                    GlobalState.bluetoothScanning = false;
+                    BluetoothState.connected = false;
+                    BluetoothState.scanning = false;
                     const poweringOn = bluetoothMenu.pendingAction === "toggle" && bluetoothMenu.pendingActionTarget === "on";
                     if (!bluetoothMenu.pendingAutoScan && !bluetoothMenu.scanning && !poweringOn)
                         bluetoothMenu.clearDeviceState();
@@ -440,10 +443,10 @@ Window {
                     if (bluetoothMenu.bluetoothEnabled && !bluetoothMenu.scanning) {
                         bluetoothMenu.pendingAutoScan = false;
                         bluetoothMenu.autoScanRetryCount = 0;
-                        bluetoothMenu.autoScanRetryTimer.stop();
+                        autoScanRetryTimer.stop();
                         bluetoothMenu.startScan();
                     } else if (!bluetoothMenu.bluetoothEnabled && !bluetoothMenu.scanning) {
-                        bluetoothMenu.autoScanRetryTimer.restart();
+                        autoScanRetryTimer.restart();
                     }
                 }
             }
@@ -464,7 +467,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (bluetoothMenu.daemonPreferred && !bluetoothMenu.btListFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         bluetoothMenu.btListFallbackTried = true;
                         btListProc.command = ["stratum-cli", "bluetooth", "list"];
                         btListProc.running = true;
@@ -477,7 +480,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 bluetoothMenu.btListFallbackTried = false;
 
@@ -529,13 +532,13 @@ Window {
                     bluetoothMenu.activeName = active.name;
                     bluetoothMenu.activeTrusted = active.trusted;
                     bluetoothMenu.activePaired = active.paired;
-                    GlobalState.bluetoothConnected = true;
+                    BluetoothState.connected = true;
                 } else {
                     bluetoothMenu.activeMac = "";
                     bluetoothMenu.activeName = "";
                     bluetoothMenu.activeTrusted = "";
                     bluetoothMenu.activePaired = "";
-                    GlobalState.bluetoothConnected = false;
+                    BluetoothState.connected = false;
                 }
 
                 let selectedFound = false;
@@ -576,7 +579,7 @@ Window {
                 if (!source?.ok) {
                     if (bluetoothMenu.daemonPreferred && !bluetoothMenu.actionFallbackTried && bluetoothMenu.actionFallbackCommand.length > 0) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         bluetoothMenu.actionFallbackTried = true;
                         actionProc.command = bluetoothMenu.actionFallbackCommand;
                         actionProc.running = true;
@@ -610,7 +613,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
 
                 bluetoothMenu.pendingAction = "";
@@ -684,7 +687,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (bluetoothMenu.daemonPreferred && !bluetoothMenu.scanFallbackTried && bluetoothMenu.scanFallbackCommand.length > 0) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         bluetoothMenu.scanFallbackTried = true;
                         scanProc.command = bluetoothMenu.scanFallbackCommand;
                         scanProc.running = true;
@@ -701,7 +704,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 bluetoothMenu.scanFallbackCommand = [];
                 bluetoothMenu.scanFallbackTried = false;
@@ -714,7 +717,7 @@ Window {
 
     Shortcut {
         sequence: "Escape"
-        onActivated: GlobalState.showBluetoothSettings = false
+        onActivated: BluetoothState.showMenu = false
     }
 
     onVisibleChanged: {
@@ -851,11 +854,16 @@ Window {
         onTriggered: bluetoothMenu.refreshAll()
     }
 
+
+
     Rectangle {
         id: menuCard
         anchors.fill: parent
         color: Theme.palette.bgMain
         radius: 12
+        border.color: Theme.palette.borderInactive
+        border.width: 1
+        clip: true
 
         MouseArea {
             anchors.fill: parent
@@ -901,7 +909,7 @@ Window {
                     iconPixelSize: 13
                     borderColor: "transparent"
                     hoverBorderColor: "transparent"
-                    onClicked: GlobalState.showBluetoothSettings = false
+                    onClicked: BluetoothState.showMenu = false
                 }
             }
 

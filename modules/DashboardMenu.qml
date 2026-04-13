@@ -10,6 +10,16 @@ import "../globals"
 PanelWindow {
     id: dashboard
 
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+    anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+    }
+
     property bool loading: false
     property string lastError: ""
 
@@ -98,7 +108,7 @@ PanelWindow {
             return;
 
         DaemonRpc.recordSuccess();
-        GlobalState.daemonAvailable = true;
+        AudioState.daemonAvailable = true;
         dashboardWatchActive = true;
         dashboardWatchPending = false;
         applyDashboardResponse(dashboardPayload, JSON.stringify(dashboardPayload));
@@ -484,19 +494,9 @@ PanelWindow {
         MusicProvider.refreshNow();
     }
 
-    anchors {
-        top: true
-        bottom: true
-        left: true
-        right: true
-    }
-
     color: "#90000000"
     exclusiveZone: -1
-    visible: GlobalState.showDashboardMenu
-
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    visible: DashboardState.showMenu
 
     onVisibleChanged: {
         if (visible) {
@@ -526,27 +526,12 @@ PanelWindow {
             MusicProvider.release();
     }
 
-    IpcHandler {
-        target: "dashboard"
-
-        function open(): void {
-            GlobalState.showDashboardMenu = true;
-        }
-
-        function close(): void {
-            GlobalState.showDashboardMenu = false;
-        }
-
-        function toggle(): void {
-            GlobalState.showDashboardMenu = !GlobalState.showDashboardMenu;
-        }
-    }
 
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (GlobalState.showDashboardMenu)
-                GlobalState.showDashboardMenu = false;
+            if (DashboardState.showMenu)
+                DashboardState.showMenu = false;
         }
     }
 
@@ -559,12 +544,12 @@ PanelWindow {
                 const response = dashboard.parseCliJson(raw);
                 if (response && response.ok === true) {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                     dashboardWatchActive = true;
                     dashboardWatchPending = false;
                 } else {
                     DaemonRpc.recordFailure();
-                    GlobalState.daemonAvailable = false;
+                    AudioState.daemonAvailable = false;
                     dashboardWatchActive = false;
                     dashboardWatchPending = false;
                 }
@@ -592,7 +577,7 @@ PanelWindow {
 
                 if (!response || response.ok !== true) {
                     DaemonRpc.recordFailure();
-                    GlobalState.daemonAvailable = false;
+                    AudioState.daemonAvailable = false;
                     dashboardWatchActive = false;
                     dashboardWatchPending = false;
                     dataProc.command = ["stratum-cli", "dashboard", "all", String(dashboard.selectedCalendarYear), String(dashboard.selectedCalendarMonth)];
@@ -601,7 +586,7 @@ PanelWindow {
                 }
 
                 DaemonRpc.recordSuccess();
-                GlobalState.daemonAvailable = true;
+                AudioState.daemonAvailable = true;
                 dashboard.applyDashboardResponse(response, JSON.stringify(response));
             }
         }
@@ -657,7 +642,7 @@ PanelWindow {
 
     MouseArea {
         anchors.fill: parent
-        onClicked: GlobalState.showDashboardMenu = false
+        onClicked: DashboardState.showMenu = false
     }
 
     Rectangle {
@@ -666,7 +651,7 @@ PanelWindow {
         height: panelContentRow.implicitHeight + (dashboard.lastError.length > 0 ? 18 : 0) + 16
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: GlobalState.showDashboardMenu ? 12 : -height - 18
+        anchors.topMargin: DashboardState.showMenu ? 12 : -height - 18
 
         color: Theme.palette.bgMain
         radius: 14

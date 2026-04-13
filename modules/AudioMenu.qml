@@ -1,6 +1,9 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import QtQuick.Layouts
 import QtQuick.Controls
 import Quickshell.Io
@@ -11,25 +14,28 @@ import "../components"
 
 ApplicationWindow {
     id: audioMenu
-
-    title: "Audio Menu"
+    flags: Qt.Window | Qt.WindowStaysOnTopHint
+    color: "transparent"
     width: 900
     height: 700
-    minimumWidth: 820
-    minimumHeight: 620
-    flags: Qt.Window | Qt.WindowStaysOnTopHint
 
-    visible: GlobalState.showAudioMenu
-    onVisibleChanged: {
-        if (visible) {
-            loadDevices();
-            devicesRefreshTimer.start();
-            MusicProvider.acquire();
-        } else {
-            GlobalState.showAudioMenu = false;
-            devicesRefreshTimer.stop();
-            MusicProvider.release();
-        }
+    // 2. Lock the bounds
+    minimumWidth: 900
+    maximumWidth: 900
+    minimumHeight: 700
+    maximumHeight: 700
+    // Replace it with an explicit initialization function
+    function initializeWindow() {
+        audioMenu.eqParametricBands = audioMenu.makeParametricBandsFromLegacy(audioMenu.eqBands);
+        loadDevices();
+        loadPresetsForDevice();
+        devicesRefreshTimer.start();
+        MusicProvider.acquire();
+    }
+
+    function cleanupWindow() {
+        devicesRefreshTimer.stop();
+        MusicProvider.release();
     }
 
     // EQ state
@@ -139,7 +145,7 @@ ApplicationWindow {
             savePresetDialog.close();
             return;
         }
-        GlobalState.showAudioMenu = false;
+        AudioState.showMenu = false;
     }
 
     Shortcut {
@@ -561,7 +567,7 @@ ApplicationWindow {
                 if (!source || source.ok !== true) {
                     if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         devicesProc.command = ["stratum-cli", "audio", "status", "--hover"];
                         devicesProc.running = true;
                         return;
@@ -572,7 +578,7 @@ ApplicationWindow {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
 
                 const sinks = Array.isArray(source.sinks) ? source.sinks : [];
@@ -609,769 +615,769 @@ ApplicationWindow {
     }
 
     Rectangle {
+        id: menuCard
         anchors.fill: parent
         color: Theme.palette.bgMain
-    }
+        radius: 12
+        border.color: Theme.palette.borderInactive
+        border.width: 1
+        clip: true
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 24
-        spacing: 18
+        MouseArea {
+            anchors.fill: parent
+        }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 14
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 18
 
-            Text {
-                text: "Audio Settings"
-                color: Theme.palette.textMain
-                font.family: Theme.palette.font
-                font.pixelSize: 23
-                font.bold: true
-                font.letterSpacing: 0.3
-            }
-
-            Item {
+            RowLayout {
                 Layout.fillWidth: true
-            }
-
-            Rectangle {
-                id: closeButton
-                Layout.preferredHeight: 34
-                Layout.preferredWidth: 40
-                radius: 6
-                color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
+                spacing: 14
 
                 Text {
-                    anchors.centerIn: parent
-                    text: "󰅖"
-                    color: Theme.palette.error
+                    text: "Audio Settings"
+                    color: Theme.palette.textMain
                     font.family: Theme.palette.font
-                    font.pixelSize: 13
+                    font.pixelSize: 23
+                    font.bold: true
+                    font.letterSpacing: 0.3
                 }
 
-                MouseArea {
-                    id: closeMouse
-                    anchors.fill: parent
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Rectangle {
+                    id: closeButton
+                    Layout.preferredHeight: 34
+                    Layout.preferredWidth: 40
+                    radius: 6
+                    color: closeMouse.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "󰅖"
+                        color: Theme.palette.error
+                        font.family: Theme.palette.font
+                        font.pixelSize: 13
+                    }
+
+                    MouseArea {
+                        id: closeMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: audioMenu.closeMenu()
+                    }
+                }
+            }
+
+            TabBar {
+                id: tabBar
+                Layout.fillWidth: true
+                spacing: 8
+
+                background: Rectangle {
+                    color: Theme.palette.bgDark
+                    radius: 12
+                }
+
+                TabButton {
+                    text: "Playback"
+                    implicitHeight: 40
                     hoverEnabled: true
-                    onClicked: audioMenu.closeMenu()
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
+                        font.family: Theme.palette.font
+                        font.pixelSize: 12
+                        font.bold: parent.checked
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                        radius: 10
+                        border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
+                        border.width: 1
+                    }
+                }
+
+                TabButton {
+                    text: "Equalizer"
+                    implicitHeight: 40
+                    hoverEnabled: true
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
+                        font.family: Theme.palette.font
+                        font.pixelSize: 12
+                        font.bold: parent.checked
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
+                        radius: 10
+                        border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
+                        border.width: 1
+                    }
                 }
             }
-        }
 
-        TabBar {
-            id: tabBar
-            Layout.fillWidth: true
-            spacing: 8
+            StackLayout {
+                currentIndex: tabBar.currentIndex
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-            background: Rectangle {
-                color: Theme.palette.bgDark
-                radius: 12
-            }
-
-            TabButton {
-                text: "Playback"
-                implicitHeight: 40
-                hoverEnabled: true
-                contentItem: Text {
-                    text: parent.text
-                    color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
-                    font.family: Theme.palette.font
-                    font.pixelSize: 12
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                    radius: 10
-                    border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
+                Rectangle {
+                    color: Theme.palette.bgMain
+                    radius: 14
+                    border.color: Theme.palette.borderInactive
                     border.width: 1
-                }
-            }
-
-            TabButton {
-                text: "Equalizer"
-                implicitHeight: 40
-                hoverEnabled: true
-                contentItem: Text {
-                    text: parent.text
-                    color: parent.checked ? Theme.palette.textMain : Theme.palette.textMuted
-                    font.family: Theme.palette.font
-                    font.pixelSize: 12
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgWidget
-                    radius: 10
-                    border.color: parent.checked ? Theme.palette.borderActive : Theme.palette.borderInactive
-                    border.width: 1
-                }
-            }
-        }
-
-        StackLayout {
-            currentIndex: tabBar.currentIndex
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-
-            Rectangle {
-                color: Theme.palette.bgMain
-                radius: 14
-                border.color: Theme.palette.borderInactive
-                border.width: 1
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
 
                     ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 20
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
 
-                        Item {
+                        ColumnLayout {
+                            Layout.fillWidth: true
                             Layout.fillHeight: true
-                        }
+                            spacing: 20
 
-                        RowLayout {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: 700
-                            spacing: 18
-
-                            Rectangle {
-                                Layout.alignment: Qt.AlignBottom
-                                implicitWidth: 400
-                                implicitHeight: 400
-                                radius: 14
-                                color: Theme.palette.bgWidget
-                                border.color: Theme.palette.borderInactive
-                                border.width: 1
-
-                                Image {
-                                    id: albumArt
-                                    anchors.fill: parent
-                                    source: audioMenu.musicArtUrl
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    visible: audioMenu.musicArtUrl == ""
-                                    text: "󰎆"
-                                    color: Theme.palette.textMain
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 75
-                                }
+                            Item {
+                                Layout.fillHeight: true
                             }
 
-                            ColumnLayout {
-                                Layout.alignment: Qt.AlignBottom
-                                Layout.fillWidth: true
-                                spacing: 12
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                Layout.preferredWidth: 700
+                                spacing: 18
 
-                                Item {
-                                    id: marqueeRoot
-                                    Layout.fillWidth: true
-                                    implicitHeight: 28
-                                    clip: true
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignBottom
+                                    implicitWidth: 400
+                                    implicitHeight: 400
+                                    radius: 14
+                                    color: Theme.palette.bgWidget
+                                    border.color: Theme.palette.borderInactive
+                                    border.width: 1
 
-                                    readonly property int marqueeGap: 42
-                                    readonly property bool needsMarquee: titleText.implicitWidth > width
-
-                                    Row {
-                                        id: titleMarqueeRow
-                                        x: 0
-                                        y: (parent.height - height) / 2
-                                        spacing: parent.marqueeGap
-
-                                        Text {
-                                            id: titleText
-                                            text: audioMenu.hasPlayableMusic() ? (audioMenu.musicTitle || "Unknown Title") : "Nothing is playing right now"
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 18
-                                            font.bold: true
-                                            wrapMode: Text.NoWrap
-                                        }
-
-                                        Text {
-                                            visible: marqueeRoot.needsMarquee
-                                            text: titleText.text
-                                            color: Theme.palette.textMain
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 18
-                                            font.bold: true
-                                            wrapMode: Text.NoWrap
-                                        }
+                                    Image {
+                                        id: albumArt
+                                        anchors.fill: parent
+                                        source: audioMenu.musicArtUrl
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
                                     }
 
-                                    SequentialAnimation {
-                                        running: marqueeRoot.needsMarquee
-                                        loops: Animation.Infinite
-
-                                        PauseAnimation {
-                                            duration: 650
-                                        }
-
-                                        NumberAnimation {
-                                            target: titleMarqueeRow
-                                            property: "x"
-                                            from: 0
-                                            to: -(titleText.implicitWidth + marqueeRoot.marqueeGap)
-                                            duration: Math.max(3200, Math.round((titleText.implicitWidth + marqueeRoot.marqueeGap) * 24))
-                                            easing.type: Easing.Linear
-                                        }
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: audioMenu.musicArtUrl == ""
+                                        text: "󰎆"
+                                        color: Theme.palette.textMain
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 75
                                     }
-
-                                    onNeedsMarqueeChanged: {
-                                        if (!needsMarquee)
-                                            titleMarqueeRow.x = 0;
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: audioMenu.musicArtist || "Unknown Artist"
-                                    color: Theme.palette.textMuted
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 14
-                                    maximumLineCount: 1
-                                    horizontalAlignment: Text.AlignLeft
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: audioMenu.musicAlbum || ""
-                                    color: Theme.palette.textMuted
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                    maximumLineCount: 1
-                                    horizontalAlignment: Text.AlignLeft
-                                    visible: audioMenu.musicAlbum && audioMenu.musicAlbum !== "N/A"
                                 }
 
                                 ColumnLayout {
+                                    Layout.alignment: Qt.AlignBottom
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: 12
 
-                                    Slider {
-                                        id: menuSeekSlider
-                                        from: 0
-                                        to: Math.max(1, audioMenu.musicLengthSec)
-                                        value: audioMenu.musicPositionSec
+                                    Item {
+                                        id: marqueeRoot
                                         Layout.fillWidth: true
+                                        implicitHeight: 28
+                                        clip: true
 
-                                        background: Rectangle {
-                                            x: menuSeekSlider.leftPadding
-                                            y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
-                                            width: menuSeekSlider.availableWidth
-                                            height: 4
-                                            radius: 2
-                                            color: Theme.palette.bgHover
+                                        readonly property int marqueeGap: 42
+                                        readonly property bool needsMarquee: titleText.implicitWidth > width
 
-                                            Rectangle {
-                                                width: menuSeekSlider.visualPosition * parent.width
-                                                height: parent.height
-                                                radius: 2
-                                                color: Theme.palette.primary
+                                        Row {
+                                            id: titleMarqueeRow
+                                            x: 0
+                                            y: (parent.height - height) / 2
+                                            spacing: parent.marqueeGap
+
+                                            Text {
+                                                id: titleText
+                                                text: audioMenu.hasPlayableMusic() ? (audioMenu.musicTitle || "Unknown Title") : "Nothing is playing right now"
+                                                color: Theme.palette.textMain
+                                                font.family: Theme.palette.font
+                                                font.pixelSize: 18
+                                                font.bold: true
+                                                wrapMode: Text.NoWrap
+                                            }
+
+                                            Text {
+                                                visible: marqueeRoot.needsMarquee
+                                                text: titleText.text
+                                                color: Theme.palette.textMain
+                                                font.family: Theme.palette.font
+                                                font.pixelSize: 18
+                                                font.bold: true
+                                                wrapMode: Text.NoWrap
                                             }
                                         }
 
-                                        handle: Rectangle {
-                                            x: menuSeekSlider.leftPadding + menuSeekSlider.visualPosition * (menuSeekSlider.availableWidth - width)
-                                            y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
-                                            implicitWidth: 12
-                                            implicitHeight: 12
-                                            radius: 6
-                                            color: Theme.palette.primary
+                                        SequentialAnimation {
+                                            running: marqueeRoot.needsMarquee
+                                            loops: Animation.Infinite
 
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                anchors.margins: -4
-                                                onReleased: {
-                                                    const newPos = Math.round(menuSeekSlider.value);
-                                                    if (audioMenu.daemonPreferred && DaemonRpc.canUse())
-                                                        menuSeekProc.command = DaemonRpc.command("audio.media_seek", {
-                                                            position_sec: newPos
-                                                        }, 4);
-                                                    else
-                                                        menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
-                                                    menuSeekProc.running = true;
+                                            PauseAnimation {
+                                                duration: 650
+                                            }
+
+                                            NumberAnimation {
+                                                target: titleMarqueeRow
+                                                property: "x"
+                                                from: 0
+                                                to: -(titleText.implicitWidth + marqueeRoot.marqueeGap)
+                                                duration: Math.max(3200, Math.round((titleText.implicitWidth + marqueeRoot.marqueeGap) * 24))
+                                                easing.type: Easing.Linear
+                                            }
+                                        }
+
+                                        onNeedsMarqueeChanged: {
+                                            if (!needsMarquee)
+                                                titleMarqueeRow.x = 0;
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: audioMenu.musicArtist || "Unknown Artist"
+                                        color: Theme.palette.textMuted
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 14
+                                        maximumLineCount: 1
+                                        horizontalAlignment: Text.AlignLeft
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: audioMenu.musicAlbum || ""
+                                        color: Theme.palette.textMuted
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                        maximumLineCount: 1
+                                        horizontalAlignment: Text.AlignLeft
+                                        visible: audioMenu.musicAlbum && audioMenu.musicAlbum !== "N/A"
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+
+                                        Slider {
+                                            id: menuSeekSlider
+                                            from: 0
+                                            to: Math.max(1, audioMenu.musicLengthSec)
+                                            value: audioMenu.musicPositionSec
+                                            Layout.fillWidth: true
+
+                                            background: Rectangle {
+                                                x: menuSeekSlider.leftPadding
+                                                y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
+                                                width: menuSeekSlider.availableWidth
+                                                height: 4
+                                                radius: 2
+                                                color: Theme.palette.bgHover
+
+                                                Rectangle {
+                                                    width: menuSeekSlider.visualPosition * parent.width
+                                                    height: parent.height
+                                                    radius: 2
+                                                    color: Theme.palette.primary
                                                 }
+                                            }
+
+                                            handle: Rectangle {
+                                                x: menuSeekSlider.leftPadding + menuSeekSlider.visualPosition * (menuSeekSlider.availableWidth - width)
+                                                y: menuSeekSlider.topPadding + menuSeekSlider.availableHeight / 2 - height / 2
+                                                implicitWidth: 12
+                                                implicitHeight: 12
+                                                radius: 6
+                                                color: Theme.palette.primary
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    anchors.margins: -4
+                                                    onReleased: {
+                                                        const newPos = Math.round(menuSeekSlider.value);
+                                                        if (audioMenu.daemonPreferred && DaemonRpc.canUse())
+                                                            menuSeekProc.command = DaemonRpc.command("audio.media_seek", {
+                                                                position_sec: newPos
+                                                            }, 4);
+                                                        else
+                                                            menuSeekProc.command = ["stratum-cli", "audio", "media", "seek", String(newPos)];
+                                                        menuSeekProc.running = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+
+                                            Text {
+                                                text: formatTime(audioMenu.musicPositionSec)
+                                                color: Theme.palette.textMuted
+                                                font.family: Theme.palette.font
+                                                font.pixelSize: 11
+                                            }
+
+                                            Item {
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Text {
+                                                text: formatTime(audioMenu.musicLengthSec)
+                                                color: Theme.palette.textMuted
+                                                font.family: Theme.palette.font
+                                                font.pixelSize: 11
                                             }
                                         }
                                     }
 
                                     RowLayout {
                                         Layout.fillWidth: true
+                                        spacing: 12
 
-                                        Text {
-                                            text: formatTime(audioMenu.musicPositionSec)
-                                            color: Theme.palette.textMuted
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 11
-                                        }
-
-                                        Item {
+                                        CompactIconButton {
                                             Layout.fillWidth: true
+                                            implicitHeight: 40
+                                            buttonRadius: 8
+                                            iconText: ""
+                                            iconPixelSize: 30
+                                            onClicked: MusicProvider.mediaPrevious()
                                         }
 
-                                        Text {
-                                            text: formatTime(audioMenu.musicLengthSec)
-                                            color: Theme.palette.textMuted
-                                            font.family: Theme.palette.font
-                                            font.pixelSize: 11
+                                        CompactIconButton {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 40
+                                            buttonRadius: 8
+                                            iconText: audioMenu.musicStatus === "Playing" ? "" : ""
+                                            iconPixelSize: 30
+                                            onClicked: MusicProvider.mediaPlayPause()
+                                        }
+
+                                        CompactIconButton {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 40
+                                            buttonRadius: 8
+                                            iconText: ""
+                                            iconPixelSize: 30
+                                            onClicked: MusicProvider.mediaNext()
                                         }
                                     }
                                 }
+                            }
 
-                                RowLayout {
+                            RowLayout {
+                                id: routeSelectorsRow
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 12
+                                    Layout.preferredWidth: 1
+                                    Layout.minimumWidth: 0
+                                    spacing: 6
 
-                                    CompactIconButton {
+                                    Text {
                                         Layout.fillWidth: true
-                                        implicitHeight: 40
-                                        buttonRadius: 8
-                                        iconText: ""
-                                        iconPixelSize: 30
-                                        onClicked: MusicProvider.mediaPrevious()
+                                        text: "Audio Input"
+                                        color: Theme.palette.textMuted
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 11
                                     }
 
-                                    CompactIconButton {
+                                    ThemedComboBox {
                                         Layout.fillWidth: true
-                                        implicitHeight: 40
-                                        buttonRadius: 8
-                                        iconText: audioMenu.musicStatus === "Playing" ? "" : ""
-                                        iconPixelSize: 30
-                                        onClicked: MusicProvider.mediaPlayPause()
+                                        Layout.minimumWidth: 0
+                                        items: audioMenu.inputDevices
+                                        selectedName: audioMenu.defaultInputName
+                                        placeholderText: "Select input device"
+                                        labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
+                                        onItemChosen: item => audioMenu.switchInput(item?.name)
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 1
+                                    Layout.minimumWidth: 0
+                                    spacing: 6
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Audio Output"
+                                        color: Theme.palette.textMuted
+                                        font.family: Theme.palette.font
+                                        font.pixelSize: 11
                                     }
 
-                                    CompactIconButton {
+                                    ThemedComboBox {
                                         Layout.fillWidth: true
-                                        implicitHeight: 40
-                                        buttonRadius: 8
-                                        iconText: ""
-                                        iconPixelSize: 30
-                                        onClicked: MusicProvider.mediaNext()
+                                        Layout.minimumWidth: 0
+                                        items: audioMenu.outputDevices
+                                        selectedName: audioMenu.defaultOutputName
+                                        placeholderText: "Select output device"
+                                        labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
+                                        onItemChosen: item => audioMenu.switchOutputRoute(item?.name)
                                     }
                                 }
                             }
                         }
+                    }
+                }
 
-                        RowLayout {
-                            id: routeSelectorsRow
+                Rectangle {
+                    color: Theme.palette.bgMain
+                    radius: 14
+                    border.color: Theme.palette.borderInactive
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+
+                        AudioEqualizerPanel {
                             Layout.fillWidth: true
-                            spacing: 10
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 1
-                                Layout.minimumWidth: 0
-                                spacing: 6
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "Audio Input"
-                                    color: Theme.palette.textMuted
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 11
-                                }
-
-                                ThemedComboBox {
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 0
-                                    items: audioMenu.inputDevices
-                                    selectedName: audioMenu.defaultInputName
-                                    placeholderText: "Select input device"
-                                    labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
-                                    onItemChosen: item => audioMenu.switchInput(item?.name)
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 1
-                                Layout.minimumWidth: 0
-                                spacing: 6
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "Audio Output"
-                                    color: Theme.palette.textMuted
-                                    font.family: Theme.palette.font
-                                    font.pixelSize: 11
-                                }
-
-                                ThemedComboBox {
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 0
-                                    items: audioMenu.outputDevices
-                                    selectedName: audioMenu.defaultOutputName
-                                    placeholderText: "Select output device"
-                                    labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
-                                    onItemChosen: item => audioMenu.switchOutputRoute(item?.name)
-                                }
-                            }
+                            Layout.fillHeight: true
+                            audioMenu: audioMenu
                         }
                     }
-                }
-            }
-
-            Rectangle {
-                color: Theme.palette.bgMain
-                radius: 14
-                border.color: Theme.palette.borderInactive
-                border.width: 1
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 10
-
-                    AudioEqualizerPanel {
-                        Layout.fillWidth: true
+                    Item {
                         Layout.fillHeight: true
-                        audioMenu: audioMenu
                     }
                 }
-                Item {
-                    Layout.fillHeight: true
-                }
             }
         }
-    }
 
-    Popup {
-        id: savePresetDialog
-        anchors.centerIn: parent
-        width: 320
-        height: 156
-        modal: true
+        Popup {
+            id: savePresetDialog
+            anchors.centerIn: parent
+            width: 320
+            height: 156
+            modal: true
 
-        background: Rectangle {
-            color: Theme.palette.bgMain
-            radius: 12
-            border.color: Theme.palette.borderInactive
-            border.width: 1
-        }
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 12
-
-            Text {
-                text: "Save preset as"
-                color: Theme.palette.textMain
-                font.family: Theme.palette.font
-                font.pixelSize: 14
-                font.bold: true
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 36
-                color: Theme.palette.bgWidget
+            background: Rectangle {
+                color: Theme.palette.bgMain
+                radius: 12
                 border.color: Theme.palette.borderInactive
                 border.width: 1
-                radius: 8
+            }
 
-                TextInput {
-                    id: presetNameInput
-                    anchors.fill: parent
-                    anchors.margins: 8
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                Text {
+                    text: "Save preset as"
                     color: Theme.palette.textMain
                     font.family: Theme.palette.font
-                    font.pixelSize: 12
-                    clip: true
-                    selectedTextColor: Theme.palette.bgMain
-                    selectionColor: Theme.palette.primary
+                    font.pixelSize: 14
+                    font.bold: true
+                }
 
-                    Keys.onReturnPressed: {
-                        audioMenu.saveCurrentPreset(text);
-                        savePresetDialog.close();
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 36
+                    color: Theme.palette.bgWidget
+                    border.color: Theme.palette.borderInactive
+                    border.width: 1
+                    radius: 8
+
+                    TextInput {
+                        id: presetNameInput
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        color: Theme.palette.textMain
+                        font.family: Theme.palette.font
+                        font.pixelSize: 12
+                        clip: true
+                        selectedTextColor: Theme.palette.bgMain
+                        selectionColor: Theme.palette.primary
+
+                        Keys.onReturnPressed: {
+                            audioMenu.saveCurrentPreset(text);
+                            savePresetDialog.close();
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Button {
+                        text: "Save"
+                        Layout.fillWidth: true
+                        hoverEnabled: true
+                        background: Rectangle {
+                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
+                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                            border.width: 1
+                            radius: 8
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        onClicked: {
+                            audioMenu.saveCurrentPreset(presetNameInput.text);
+                            savePresetDialog.close();
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel"
+                        Layout.fillWidth: true
+                        hoverEnabled: true
+                        background: Rectangle {
+                            color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
+                            border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
+                            border.width: 1
+                            radius: 8
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: Theme.palette.textMain
+                            font.family: Theme.palette.font
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        onClicked: savePresetDialog.close()
                     }
                 }
             }
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-
-                Button {
-                    text: "Save"
-                    Layout.fillWidth: true
-                    hoverEnabled: true
-                    background: Rectangle {
-                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
-                        border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
-                        border.width: 1
-                        radius: 8
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: Theme.palette.textMain
-                        font.family: Theme.palette.font
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    onClicked: {
-                        audioMenu.saveCurrentPreset(presetNameInput.text);
-                        savePresetDialog.close();
-                    }
-                }
-
-                Button {
-                    text: "Cancel"
-                    Layout.fillWidth: true
-                    hoverEnabled: true
-                    background: Rectangle {
-                        color: parent.hovered ? Theme.palette.bgHover : Theme.palette.bgMain
-                        border.color: parent.hovered ? Theme.palette.borderActive : Theme.palette.borderInactive
-                        border.width: 1
-                        radius: 8
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: Theme.palette.textMain
-                        font.family: Theme.palette.font
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    onClicked: savePresetDialog.close()
-                }
+            onOpened: {
+                presetNameInput.text = "";
+                presetNameInput.forceActiveFocus();
             }
         }
 
-        onOpened: {
-            presetNameInput.text = "";
-            presetNameInput.forceActiveFocus();
+        Process {
+            id: menuSeekProc
+            stdout: StdioCollector {}
         }
-    }
 
-    Process {
-        id: menuSeekProc
-        stdout: StdioCollector {}
-    }
-
-    Process {
-        id: routeProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                audioMenu.routeSwitching = false;
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
-                if (!source || source.ok !== true) {
-                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.routeFallbackTried && audioMenu.routeFallbackCommand.length > 0) {
-                        DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
-                        audioMenu.routeFallbackTried = true;
-                        routeProc.command = audioMenu.routeFallbackCommand;
-                        routeProc.running = true;
+        Process {
+            id: routeProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    audioMenu.routeSwitching = false;
+                    const payload = audioMenu.parseCliJson(this.text.trim());
+                    const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                    if (!source || source.ok !== true) {
+                        if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.routeFallbackTried && audioMenu.routeFallbackCommand.length > 0) {
+                            DaemonRpc.recordFailure();
+                            AudioState.daemonAvailable = false;
+                            audioMenu.routeFallbackTried = true;
+                            routeProc.command = audioMenu.routeFallbackCommand;
+                            routeProc.running = true;
+                            return;
+                        }
+                        audioMenu.routeStatusMsg = source?.error || payload?.error || "Failed to switch input";
+                        audioMenu.routeFallbackCommand = [];
+                        audioMenu.routeFallbackTried = false;
                         return;
                     }
-                    audioMenu.routeStatusMsg = source?.error || payload?.error || "Failed to switch input";
+
+                    if (payload && payload.jsonrpc === "2.0") {
+                        DaemonRpc.recordSuccess();
+                        AudioState.daemonAvailable = true;
+                    }
+
+                    audioMenu.routeStatusMsg = audioMenu.routeSwitchKind === "output" ? "Output switched" : "Input switched";
+                    audioMenu.routeSwitchKind = "";
                     audioMenu.routeFallbackCommand = [];
                     audioMenu.routeFallbackTried = false;
-                    return;
+                    audioMenu.loadDevices();
                 }
-
-                if (payload && payload.jsonrpc === "2.0") {
-                    DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
-                }
-
-                audioMenu.routeStatusMsg = audioMenu.routeSwitchKind === "output" ? "Output switched" : "Input switched";
-                audioMenu.routeSwitchKind = "";
-                audioMenu.routeFallbackCommand = [];
-                audioMenu.routeFallbackTried = false;
-                audioMenu.loadDevices();
             }
         }
-    }
 
-    Timer {
-        id: devicesRefreshTimer
-        interval: audioMenu.devicePollMs
-        repeat: true
-        onTriggered: {
-            if (audioMenu.visible && !audioMenu.loading && !devicesProc.running)
-                audioMenu.loadDevices();
+        Timer {
+            id: devicesRefreshTimer
+            interval: audioMenu.devicePollMs
+            repeat: true
+            onTriggered: {
+                if (audioMenu.visible && !audioMenu.loading && !devicesProc.running)
+                    audioMenu.loadDevices();
+            }
         }
-    }
 
-    Process {
-        id: listPresetsProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
-                if (!source || source.ok !== true) {
-                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred) {
-                        DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
-                        listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
-                        listPresetsProc.running = true;
+        Process {
+            id: listPresetsProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const payload = audioMenu.parseCliJson(this.text.trim());
+                    const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                    if (!source || source.ok !== true) {
+                        if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred) {
+                            DaemonRpc.recordFailure();
+                            AudioState.daemonAvailable = false;
+                            listPresetsProc.command = ["stratum-cli", "audio", "equalizer", "list-presets", audioMenu.currentDevice];
+                            listPresetsProc.running = true;
+                            return;
+                        }
                         return;
                     }
-                    return;
-                }
 
-                if (payload && payload.jsonrpc === "2.0") {
-                    DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
-                }
-
-                const presets = Array.isArray(source.presets) ? source.presets : [];
-                audioMenu.eqPresets = presets;
-                audioMenu.eqCapabilities = (source.capabilities && typeof source.capabilities === "object") ? source.capabilities : {};
-
-                const activePresetName = String(source.active_preset || "").trim();
-                if (activePresetName.length)
-                    audioMenu.currentPresetName = activePresetName;
-
-                const names = presets.map(p => String(p.name || ""));
-                if (!names.includes(audioMenu.currentPresetName)) {
-                    audioMenu.currentPresetName = "Flat";
-                    audioMenu.isCustomPreset = false;
-                }
-
-                const active = presets.find(p => String(p.name || "") === audioMenu.currentPresetName);
-                if (active) {
-                    const parametricBands = Array.isArray(active.parametric_bands) ? active.parametric_bands : [];
-                    const legacyBands = Array.isArray(active.bands) ? active.bands : [];
-                    audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, active.preamp_db);
-                }
-
-                audioMenu.eqStatusMsg = "Loaded " + presets.length + " preset" + (presets.length === 1 ? "" : "s") + " for this output.";
-            }
-        }
-    }
-
-    Process {
-        id: applyPresetProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
-                if (!source || source.ok !== true) {
-                    if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
-                        DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
-                        audioMenu.eqActionFallbackTried = true;
-                        applyPresetProc.command = audioMenu.eqActionFallbackCommand;
-                        applyPresetProc.running = true;
-                        return;
-                    }
-                    audioMenu.eqApplyOk = false;
-                    audioMenu.eqApplyDryRun = true;
-                    audioMenu.eqStatusMsg = source?.error || payload?.error || "Failed to apply preset.";
-                    audioMenu.eqActionFallbackCommand = [];
-                    audioMenu.eqActionFallbackTried = false;
-                    return;
-                }
-
-                if (payload && payload.jsonrpc === "2.0") {
-                    DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
-                }
-
-                const parametricBands = Array.isArray(source.parametric_bands) ? source.parametric_bands : [];
-                const legacyBands = Array.isArray(source.bands) ? source.bands : [];
-                audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, source.preamp_db);
-
-                const applyInfo = (source.apply && typeof source.apply === "object") ? source.apply : {};
-                audioMenu.eqApplyOk = source.apply_ok !== false;
-                audioMenu.eqApplyDryRun = applyInfo.dry_run === true;
-                audioMenu.eqStatusMsg = String(source.status || applyInfo.status || "Preset applied.");
-                audioMenu.eqActionFallbackCommand = [];
-                audioMenu.eqActionFallbackTried = false;
-            }
-        }
-    }
-
-    Process {
-        id: savePresetProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
-                if (source && source.ok === true) {
                     if (payload && payload.jsonrpc === "2.0") {
                         DaemonRpc.recordSuccess();
-                        GlobalState.daemonAvailable = true;
+                        AudioState.daemonAvailable = true;
                     }
-                    audioMenu.eqStatusMsg = "Preset saved.";
-                    audioMenu.eqActionFallbackCommand = [];
-                    audioMenu.eqActionFallbackTried = false;
-                    audioMenu.loadPresetsForDevice();
-                } else if (payload) {
-                    if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
-                        DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
-                        audioMenu.eqActionFallbackTried = true;
-                        savePresetProc.command = audioMenu.eqActionFallbackCommand;
-                        savePresetProc.running = true;
+
+                    const presets = Array.isArray(source.presets) ? source.presets : [];
+                    audioMenu.eqPresets = presets;
+                    audioMenu.eqCapabilities = (source.capabilities && typeof source.capabilities === "object") ? source.capabilities : {};
+
+                    const activePresetName = String(source.active_preset || "").trim();
+                    if (activePresetName.length)
+                        audioMenu.currentPresetName = activePresetName;
+
+                    const names = presets.map(p => String(p.name || ""));
+                    if (!names.includes(audioMenu.currentPresetName)) {
+                        audioMenu.currentPresetName = "Flat";
+                        audioMenu.isCustomPreset = false;
+                    }
+
+                    const active = presets.find(p => String(p.name || "") === audioMenu.currentPresetName);
+                    if (active) {
+                        const parametricBands = Array.isArray(active.parametric_bands) ? active.parametric_bands : [];
+                        const legacyBands = Array.isArray(active.bands) ? active.bands : [];
+                        audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, active.preamp_db);
+                    }
+
+                    audioMenu.eqStatusMsg = "Loaded " + presets.length + " preset" + (presets.length === 1 ? "" : "s") + " for this output.";
+                }
+            }
+        }
+
+        Process {
+            id: applyPresetProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const payload = audioMenu.parseCliJson(this.text.trim());
+                    const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                    if (!source || source.ok !== true) {
+                        if (payload && payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                            DaemonRpc.recordFailure();
+                            AudioState.daemonAvailable = false;
+                            audioMenu.eqActionFallbackTried = true;
+                            applyPresetProc.command = audioMenu.eqActionFallbackCommand;
+                            applyPresetProc.running = true;
+                            return;
+                        }
+                        audioMenu.eqApplyOk = false;
+                        audioMenu.eqApplyDryRun = true;
+                        audioMenu.eqStatusMsg = source?.error || payload?.error || "Failed to apply preset.";
+                        audioMenu.eqActionFallbackCommand = [];
+                        audioMenu.eqActionFallbackTried = false;
                         return;
                     }
-                    audioMenu.eqApplyOk = false;
-                    audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to save preset.";
+
+                    if (payload && payload.jsonrpc === "2.0") {
+                        DaemonRpc.recordSuccess();
+                        AudioState.daemonAvailable = true;
+                    }
+
+                    const parametricBands = Array.isArray(source.parametric_bands) ? source.parametric_bands : [];
+                    const legacyBands = Array.isArray(source.bands) ? source.bands : [];
+                    audioMenu.applyEqStateFromPayloadBands(parametricBands, legacyBands, source.preamp_db);
+
+                    const applyInfo = (source.apply && typeof source.apply === "object") ? source.apply : {};
+                    audioMenu.eqApplyOk = source.apply_ok !== false;
+                    audioMenu.eqApplyDryRun = applyInfo.dry_run === true;
+                    audioMenu.eqStatusMsg = String(source.status || applyInfo.status || "Preset applied.");
                     audioMenu.eqActionFallbackCommand = [];
                     audioMenu.eqActionFallbackTried = false;
                 }
             }
         }
-    }
 
-    Process {
-        id: deletePresetProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const payload = audioMenu.parseCliJson(this.text.trim());
-                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
-                if (source && source.ok === true) {
-                    if (payload && payload.jsonrpc === "2.0") {
-                        DaemonRpc.recordSuccess();
-                        GlobalState.daemonAvailable = true;
+        Process {
+            id: savePresetProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const payload = audioMenu.parseCliJson(this.text.trim());
+                    const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                    if (source && source.ok === true) {
+                        if (payload && payload.jsonrpc === "2.0") {
+                            DaemonRpc.recordSuccess();
+                            AudioState.daemonAvailable = true;
+                        }
+                        audioMenu.eqStatusMsg = "Preset saved.";
+                        audioMenu.eqActionFallbackCommand = [];
+                        audioMenu.eqActionFallbackTried = false;
+                        audioMenu.loadPresetsForDevice();
+                    } else if (payload) {
+                        if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                            DaemonRpc.recordFailure();
+                            AudioState.daemonAvailable = false;
+                            audioMenu.eqActionFallbackTried = true;
+                            savePresetProc.command = audioMenu.eqActionFallbackCommand;
+                            savePresetProc.running = true;
+                            return;
+                        }
+                        audioMenu.eqApplyOk = false;
+                        audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to save preset.";
+                        audioMenu.eqActionFallbackCommand = [];
+                        audioMenu.eqActionFallbackTried = false;
                     }
-                    audioMenu.eqStatusMsg = "Preset deleted.";
-                    audioMenu.eqActionFallbackCommand = [];
-                    audioMenu.eqActionFallbackTried = false;
-                    audioMenu.resetToFlat();
-                    audioMenu.loadPresetsForDevice();
-                } else if (payload) {
-                    if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
-                        DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
-                        audioMenu.eqActionFallbackTried = true;
-                        deletePresetProc.command = audioMenu.eqActionFallbackCommand;
-                        deletePresetProc.running = true;
-                        return;
+                }
+            }
+        }
+
+        Process {
+            id: deletePresetProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const payload = audioMenu.parseCliJson(this.text.trim());
+                    const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+                    if (source && source.ok === true) {
+                        if (payload && payload.jsonrpc === "2.0") {
+                            DaemonRpc.recordSuccess();
+                            AudioState.daemonAvailable = true;
+                        }
+                        audioMenu.eqStatusMsg = "Preset deleted.";
+                        audioMenu.eqActionFallbackCommand = [];
+                        audioMenu.eqActionFallbackTried = false;
+                        audioMenu.resetToFlat();
+                        audioMenu.loadPresetsForDevice();
+                    } else if (payload) {
+                        if (payload.jsonrpc === "2.0" && audioMenu.daemonPreferred && !audioMenu.eqActionFallbackTried && audioMenu.eqActionFallbackCommand.length > 0) {
+                            DaemonRpc.recordFailure();
+                            AudioState.daemonAvailable = false;
+                            audioMenu.eqActionFallbackTried = true;
+                            deletePresetProc.command = audioMenu.eqActionFallbackCommand;
+                            deletePresetProc.running = true;
+                            return;
+                        }
+                        audioMenu.eqApplyOk = false;
+                        audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to delete preset.";
+                        audioMenu.eqActionFallbackCommand = [];
+                        audioMenu.eqActionFallbackTried = false;
                     }
-                    audioMenu.eqApplyOk = false;
-                    audioMenu.eqStatusMsg = source?.error || payload.error || "Failed to delete preset.";
-                    audioMenu.eqActionFallbackCommand = [];
-                    audioMenu.eqActionFallbackTried = false;
                 }
             }
         }
     }
 
     Component.onCompleted: {
-        audioMenu.eqParametricBands = audioMenu.makeParametricBandsFromLegacy(audioMenu.eqBands);
-        audioMenu.loadDevices();
-        audioMenu.loadPresetsForDevice();
-        if (audioMenu.visible)
-            MusicProvider.acquire();
-    }
-
-    Component.onDestruction: {
-        if (audioMenu.visible)
-            MusicProvider.release();
+        // Handled by initializeWindow
     }
 }

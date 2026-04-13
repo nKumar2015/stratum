@@ -1,29 +1,32 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Window
+import Quickshell
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import Quickshell.Io
 import "../globals/DaemonRpc.js" as DaemonRpc
 
 import "../globals"
 import "../components"
 
-Window {
+ApplicationWindow {
     id: wifiMenu
-
-    title: "Wi-Fi"
-    flags: Qt.Window
-
-    visible: GlobalState.showWifiSettings
-
     width: 700
     height: 560
+    flags: Qt.Window | Qt.WindowStaysOnTopHint
     color: "transparent"
 
-    onClosing: {
-        close.accepted = false;
-        GlobalState.showWifiSettings = false;
+    function initializeWindow() {
+        refreshAll();
+        refreshTimer.start();
     }
+
+    function cleanupWindow() {
+        refreshTimer.stop();
+    }
+
+    
 
     property bool wifiEnabled: true
     property string activeDevice: ""
@@ -278,7 +281,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.wifiStateFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.wifiStateFallbackTried = true;
                         wifiStateProc.command = ["stratum-cli", "wifi", "state"];
                         wifiStateProc.running = true;
@@ -291,7 +294,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 wifiMenu.wifiStateFallbackTried = false;
 
@@ -312,7 +315,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.deviceStatusFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.deviceStatusFallbackTried = true;
                         deviceStatusProc.command = ["stratum-cli", "wifi", "device-status"];
                         deviceStatusProc.running = true;
@@ -324,7 +327,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 wifiMenu.deviceStatusFallbackTried = false;
 
@@ -375,7 +378,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.knownConnectionsFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.knownConnectionsFallbackTried = true;
                         knownConnectionsProc.command = ["stratum-cli", "wifi", "known-connections"];
                         knownConnectionsProc.running = true;
@@ -386,7 +389,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 wifiMenu.knownConnectionsFallbackTried = false;
 
@@ -421,7 +424,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.wifiListFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.wifiListFallbackTried = true;
                         wifiListProc.command = ["stratum-cli", "wifi", "list"];
                         wifiListProc.running = true;
@@ -434,7 +437,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 wifiMenu.wifiListFallbackTried = false;
 
@@ -540,7 +543,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.activeInfoFallbackTried) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.activeInfoFallbackTried = true;
                         activeInfoProc.command = ["stratum-cli", "wifi", "active-info", wifiMenu.activeDevice];
                         activeInfoProc.running = true;
@@ -552,7 +555,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
                 wifiMenu.activeInfoFallbackTried = false;
 
@@ -573,7 +576,7 @@ Window {
                 if (!source || source.ok !== true) {
                     if (wifiMenu.daemonPreferred && !wifiMenu.actionFallbackTried && wifiMenu.actionFallbackCommand.length > 0) {
                         DaemonRpc.recordFailure();
-                        GlobalState.daemonAvailable = false;
+                        AudioState.daemonAvailable = false;
                         wifiMenu.actionFallbackTried = true;
                         actionProc.command = wifiMenu.actionFallbackCommand;
                         actionProc.running = true;
@@ -604,7 +607,7 @@ Window {
 
                 if (payload && payload.jsonrpc === "2.0") {
                     DaemonRpc.recordSuccess();
-                    GlobalState.daemonAvailable = true;
+                    AudioState.daemonAvailable = true;
                 }
 
                 wifiMenu.pendingAction = "";
@@ -623,7 +626,7 @@ Window {
 
     Shortcut {
         sequence: "Escape"
-        onActivated: GlobalState.showWifiSettings = false
+        onActivated: WifiState.showMenu = false
     }
 
     onVisibleChanged: {
@@ -644,11 +647,16 @@ Window {
         onTriggered: wifiMenu.refreshAll()
     }
 
+
+
     Rectangle {
         id: menuCard
         anchors.fill: parent
         color: Theme.palette.bgMain
         radius: 12
+        border.color: Theme.palette.borderInactive
+        border.width: 1
+        clip: true
 
         MouseArea {
             anchors.fill: parent
@@ -693,7 +701,7 @@ Window {
                     iconPixelSize: 13
                     borderColor: "transparent"
                     hoverBorderColor: "transparent"
-                    onClicked: GlobalState.showWifiSettings = false
+                    onClicked: WifiState.showMenu = false
                 }
             }
 

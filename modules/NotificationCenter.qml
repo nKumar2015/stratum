@@ -14,7 +14,7 @@ PanelWindow {
 
     property bool keyboardFocusRequested: false
     property bool panelClosing: false
-    readonly property bool centerOpen: GlobalState.showNotificationCenter
+    readonly property bool centerOpen: NotificationState.showCenter
 
     function requestKeyboardFocus(): void {
         keyboardFocusRequested = true;
@@ -78,7 +78,7 @@ PanelWindow {
 
     readonly property var activeToasts: {
         const out = [];
-        const list = GlobalState.notifications || [];
+        const list = NotificationState.notifications || [];
         for (let i = 0; i < list.length; i++) {
             const item = list[i];
             if (!!item.dismissed)
@@ -94,7 +94,7 @@ PanelWindow {
 
     readonly property var visibleNotifications: {
         const out = [];
-        const list = GlobalState.notifications || [];
+        const list = NotificationState.notifications || [];
         for (let i = 0; i < list.length; i++) {
             const item = list[i];
             if (!!item.dismissed)
@@ -106,39 +106,11 @@ PanelWindow {
         return out;
     }
 
-    IpcHandler {
-        target: "notifications"
-
-        function open(): void {
-            GlobalState.showNotificationCenter = true;
-        }
-
-        function close(): void {
-            GlobalState.showNotificationCenter = false;
-            center.releaseKeyboardFocus();
-        }
-
-        function toggle(): void {
-            GlobalState.showNotificationCenter = !GlobalState.showNotificationCenter;
-        }
-
-        function clear(): void {
-            GlobalState.clearAllNotifications();
-        }
-
-        function toggleDnd(): void {
-            GlobalState.setDoNotDisturb(!GlobalState.doNotDisturb);
-        }
-
-        // Keep IPC target strictly typed by arity; dynamic-typed arguments trigger
-        // unsupported QVariant warnings in current quickshell IPC parser.
-    }
-
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (GlobalState.showNotificationCenter)
-                GlobalState.showNotificationCenter = false;
+            if (NotificationState.showCenter)
+                NotificationState.showCenter = false;
         }
     }
 
@@ -220,15 +192,15 @@ PanelWindow {
                 notification: notifItem.modelData
                 compact: true
                 autoDismissEnabled: true
-                onDismissRequested: notificationId => GlobalState.dismissNotification(notificationId)
-                onExpiredRequested: notificationId => GlobalState.expireToast(notificationId)
+                onDismissRequested: notificationId => NotificationState.dismissNotification(notificationId)
+                onExpiredRequested: notificationId => NotificationState.expireToast(notificationId)
                 onActionRequested: (notificationId, actionKey, replyText) => {
-                    GlobalState.invokeAction(notificationId, actionKey, replyText);
-                    GlobalState.dismissNotification(notificationId);
+                    NotificationState.invokeAction(notificationId, actionKey, replyText);
+                    NotificationState.dismissNotification(notificationId);
                 }
                 onDefaultActionRequested: notificationId => {
-                    GlobalState.invokeDefaultAction(notificationId);
-                    GlobalState.dismissNotification(notificationId);
+                    NotificationState.invokeDefaultAction(notificationId);
+                    NotificationState.dismissNotification(notificationId);
                 }
             }
         }
@@ -325,13 +297,13 @@ PanelWindow {
                 CompactIconButton {
                     Layout.preferredWidth: 30
                     Layout.preferredHeight: 24
-                    iconText: GlobalState.doNotDisturb ? "󰂛" : "󰂚"
+                    iconText: NotificationState.doNotDisturb ? "󰂛" : "󰂚"
                     iconColor: Theme.palette.textMain
-                    backgroundColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgWidget
-                    hoverBackgroundColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.bgHover
-                    borderColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderInactive
-                    hoverBorderColor: GlobalState.doNotDisturb ? Theme.palette.error : Theme.palette.borderActive
-                    onClicked: GlobalState.setDoNotDisturb(!GlobalState.doNotDisturb)
+                    backgroundColor: NotificationState.doNotDisturb ? Theme.palette.error : Theme.palette.bgWidget
+                    hoverBackgroundColor: NotificationState.doNotDisturb ? Theme.palette.error : Theme.palette.bgHover
+                    borderColor: NotificationState.doNotDisturb ? Theme.palette.error : Theme.palette.borderInactive
+                    hoverBorderColor: NotificationState.doNotDisturb ? Theme.palette.error : Theme.palette.borderActive
+                    onClicked: NotificationState.setDoNotDisturb(!NotificationState.doNotDisturb)
                 }
 
                 CompactIconButton {
@@ -339,7 +311,7 @@ PanelWindow {
                     Layout.preferredHeight: 24
                     iconText: "󰄬"
                     iconColor: Theme.palette.textMain
-                    onClicked: GlobalState.markAllRead()
+                    onClicked: NotificationState.markAllRead()
                 }
 
                 CompactIconButton {
@@ -347,7 +319,7 @@ PanelWindow {
                     Layout.preferredHeight: 24
                     iconText: "󰃢"
                     iconColor: Theme.palette.textMain
-                    onClicked: GlobalState.clearAllNotifications()
+                    onClicked: NotificationState.clearAllNotifications()
                 }
 
                 CompactIconButton {
@@ -356,7 +328,7 @@ PanelWindow {
                     iconText: "󰅖"
                     iconColor: Theme.palette.textMain
                     onClicked: {
-                        GlobalState.showNotificationCenter = false;
+                        NotificationState.showCenter = false;
                         center.releaseKeyboardFocus();
                     }
                 }
@@ -392,10 +364,10 @@ PanelWindow {
                                 compact: false
                                 autoDismissEnabled: false
                                 showReplyPreviewOnly: true
-                                onDismissRequested: notificationId => GlobalState.dismissNotification(notificationId)
-                                onExpiredRequested: notificationId => GlobalState.expireToast(notificationId)
-                                onActionRequested: (notificationId, actionKey, replyText) => GlobalState.invokeAction(notificationId, actionKey, replyText)
-                                onDefaultActionRequested: notificationId => GlobalState.invokeDefaultAction(notificationId)
+                                onDismissRequested: notificationId => NotificationState.dismissNotification(notificationId)
+                                onExpiredRequested: notificationId => NotificationState.expireToast(notificationId)
+                                onActionRequested: (notificationId, actionKey, replyText) => NotificationState.invokeAction(notificationId, actionKey, replyText)
+                                onDefaultActionRequested: notificationId => NotificationState.invokeDefaultAction(notificationId)
                             }
                         }
                     }
