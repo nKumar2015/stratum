@@ -53,6 +53,7 @@
         cargoLock.lockFile = ./tools/stratumd/Cargo.lock;
 
         nativeBuildInputs = with pkgs; [pkg-config];
+        buildInputs = with pkgs; [pam];
       };
 
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
@@ -104,6 +105,7 @@
           dbus
           glib
           openssl
+          pam
         ];
 
         shellHook = ''
