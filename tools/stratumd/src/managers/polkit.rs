@@ -40,7 +40,7 @@ impl PolkitAgent {
 }
 
 pub async fn register_agent(state: Arc<AppState>) -> zbus::Result<()> {
-    let connection = Connection::session().await?;
+    let connection = Connection::system().await?;
     let agent = PolkitAgent { state: Arc::clone(&state) };
     
     connection
@@ -92,7 +92,7 @@ pub fn verify_password(user: &str, password: &str) -> bool {
 pub async fn notify_response(cookie: String, success: bool) -> zbus::Result<()> {
     if !success { return Ok(()); }
     
-    let connection = Connection::session().await?;
+    let connection = Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &connection,
         "org.freedesktop.PolicyKit1",

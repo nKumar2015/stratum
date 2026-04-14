@@ -363,7 +363,8 @@ fn spawn_polkit_agent(state: Arc<AppState>) {
             
         rt.block_on(async {
             if let Err(e) = managers::polkit::register_agent(state).await {
-                eprintln!("failed to register polkit agent: {}", e);
+                eprintln!("[polkit] [error] failed to register authentication agent: {}", e);
+                eprintln!("[polkit] [hint] ensure the Polkit service is running (e.g., 'services.polkit.enable = true' on NixOS)");
             }
         });
     });
