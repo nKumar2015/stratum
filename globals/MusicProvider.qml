@@ -59,7 +59,20 @@ Item {
     }
 
     function applyMusicPayload(musicPayload) {
-        const music = (musicPayload && typeof musicPayload === "object") ? musicPayload : {};
+        if (!musicPayload || typeof musicPayload !== "object")
+            return;
+
+        // If it's an empty object, it's likely a generic 'ok' response from the daemon 
+        // without music data. We should skip this to avoid flickering to "Nothing playing".
+        // However, if we explicitly have a status or title, we should apply it.
+        const hasData = musicPayload.hasOwnProperty("title") || 
+                        musicPayload.hasOwnProperty("status") || 
+                        musicPayload.hasOwnProperty("player");
+        
+        if (!hasData)
+            return;
+
+        const music = musicPayload;
 
         musicStatus = String(music.status || "Stopped").trim();
         musicPlayer = String(music.player || "N/A").trim();
@@ -79,12 +92,21 @@ Item {
 
     function applyDaemonMusicSnapshot(payloadText) {
         const payload = parseCliJson(payloadText);
-        // Daemon might send { music: { ... } } or just the fields depending on the IPC call
-        const music = (payload && payload.music && typeof payload.music === "object") ? payload.music : payload;
-        if (!music || typeof music !== "object")
-            return;
+        if (!payload) return;
 
-        applyMusicPayload(music);
+        // Extract from JSON-RPC wrapper if present
+        let music = null;
+        if (payload.jsonrpc === "2.0" && payload.result) {
+            // Check if result contains 'music' field or is the music info itself
+            music = (payload.result.music && typeof payload.result.music === "object") ? payload.result.music : payload.result;
+        } else {
+            // Direct payload (e.g. from IpcHandler)
+            music = (payload.music && typeof payload.music === "object") ? payload.music : payload;
+        }
+
+        if (music && typeof music === "object") {
+            applyMusicPayload(music);
+        }
     }
 
     function refreshStatusFromDaemon() {

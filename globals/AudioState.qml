@@ -12,6 +12,11 @@ QtObject {
     property bool userAdjusting: false
     property bool daemonAvailable: true
 
+    property var outputDevices: []
+    property var inputDevices: []
+    property string defaultOutput: ""
+    property string defaultInput: ""
+
     // Music properties (moved from GlobalState)
     property string musicTitle: ""
     property string musicArtist: ""
@@ -27,9 +32,33 @@ QtObject {
         if (!audio || typeof audio !== "object")
             return;
 
-        const parsedVolume = parseInt(String(audio.volume || "0").replace("%", ""));
-        volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
-        muted = String(audio.mute || "yes").trim().toLowerCase() === "yes";
+        if (!userAdjusting) {
+            const parsedVolume = parseInt(String(audio.volume || "0").replace("%", ""));
+            volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
+            muted = String(audio.mute || "yes").trim().toLowerCase() === "yes";
+        }
         headphonesOutput = String(audio.headphones || "no").trim().toLowerCase() === "yes";
+
+        // Device lists
+        if (Array.isArray(audio.sinks)) {
+            outputDevices = audio.sinks.map(function(row) {
+                return {
+                    name: String(row.name || "").trim(),
+                    description: String(row.description || String(row.name || "")).trim()
+                };
+            }).slice(0, 6);
+        }
+
+        if (Array.isArray(audio.sources)) {
+            inputDevices = audio.sources.map(function(row) {
+                return {
+                    name: String(row.name || "").trim(),
+                    description: String(row.description || String(row.name || "")).trim()
+                };
+            }).slice(0, 6);
+        }
+
+        defaultOutput = String(audio.default_sink || "");
+        defaultInput = String(audio.default_source || "");
     }
 }

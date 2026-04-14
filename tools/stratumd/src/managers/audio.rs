@@ -875,6 +875,8 @@ fn is_headphone_default_sink(default_sink: &str) -> String {
 pub fn status() -> Value {
     let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
     let default_sink = resolve_effective_default_sink(&default_sink_raw);
+    let default_source = run_command_capture("pactl", &["get-default-source"]).unwrap_or_default();
+
     let volume = run_command_capture("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
         .ok()
         .and_then(|out| extract_first_percent(&out))
@@ -885,11 +887,26 @@ pub fn status() -> Value {
         .unwrap_or_else(|| "yes".to_string());
     let headphones = is_headphone_default_sink(&default_sink);
 
+    let (sinks, sources) = {
+        let cache = DEVICE_CACHE.lock().unwrap();
+        if let Some(val) = &*cache {
+            (
+                val.get("sinks").cloned().unwrap_or_else(|| json!([])),
+                val.get("sources").cloned().unwrap_or_else(|| json!([])),
+            )
+        } else {
+            (json!([]), json!([]))
+        }
+    };
+
     json!({
         "default_sink": default_sink,
+        "default_source": default_source,
         "volume": volume,
         "mute": mute,
         "headphones": headphones,
+        "sinks": sinks,
+        "sources": sources,
     })
 }
 

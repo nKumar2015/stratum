@@ -53,15 +53,15 @@ PanelWindow {
     readonly property color hoverBorder: Theme.palette.outlineVariant || Qt.rgba(1, 1, 1, 0.14)
 
     property bool loading: false
-    property var outputDevices: []
-    property var inputDevices: []
-    property string defaultOutput: ""
-    property string defaultInput: ""
+    property var outputDevices: AudioState.outputDevices
+    property var inputDevices: AudioState.inputDevices
+    property string defaultOutput: AudioState.defaultOutput
+    property string defaultInput: AudioState.defaultInput
     property string errorMsg: ""
     property string statusMsg: ""
     property bool switching: false
-    property int currentVolume: 0
-    property bool currentMuted: false
+    property int currentVolume: AudioState.volumePercent
+    property bool currentMuted: AudioState.muted
     property bool sliderSyncing: false
     property int pendingVolume: -1
     property int expectedVolume: -1
@@ -92,17 +92,12 @@ PanelWindow {
     }
 
     function loadStatus(showLoading) {
+        // RPC loading is now deprecated in favor of IPC pushes to AudioState.
+        // We only keep this as a no-op/fallback for consistency.
         if (showLoading === undefined)
             showLoading = true;
-        loading = showLoading;
+        loading = false;
         errorMsg = "";
-
-        if (DaemonRpc.canUse()) {
-            statusProc.command = DaemonRpc.command("audio.devices", {});
-        } else {
-            statusProc.command = ["stratum-cli", "audio", "status", "--hover"];
-        }
-        statusProc.running = true;
     }
 
     function parseCliJson(raw) {
@@ -209,66 +204,7 @@ PanelWindow {
         actionProc.running = true;
     }
 
-    Process {
-        id: statusProc
-        command: ["stratum-cli", "audio", "status", "--hover"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                hoverMenu.loading = false;
-                const raw = this.text.trim();
-                if (!raw) {
-                    hoverMenu.outputDevices = [];
-                    hoverMenu.inputDevices = [];
-                    return;
-                }
-
-                let payload = hoverMenu.parseCliJson(raw);
-                if (payload && payload.result !== undefined) {
-                    payload = payload.result;
-                }
-
-                if (!payload || payload.ok !== true) {
-                    hoverMenu.errorMsg = payload && payload.error ? String(payload.error) : "Audio status unavailable";
-                    hoverMenu.outputDevices = [];
-                    hoverMenu.inputDevices = [];
-                    return;
-                }
-
-                // If the payload contains an 'audio' object (from the newer daemon logic), unwrap it
-                const data = payload.audio || payload;
-                const status = data.status || {};
-                const defaults = data.default || {};
-
-                hoverMenu.sliderSyncing = true;
-                hoverMenu.parseVolumeStatus(String(status.volume || "0%"), String(status.mute || "yes"));
-                hoverMenu.sliderSyncing = false;
-
-                hoverMenu.defaultOutput = String(defaults.sink || "");
-                hoverMenu.defaultInput = String(defaults.source || "");
-
-                const sinks = Array.isArray(data.sinks) ? data.sinks : [];
-                const sources = Array.isArray(data.sources) ? data.sources : [];
-
-                hoverMenu.outputDevices = sinks.filter(function (row) {
-                    return !!String(row.name || "").trim();
-                }).map(function (row) {
-                    return {
-                        name: String(row.name || "").trim(),
-                        description: String(row.description || "").trim()
-                    };
-                }).slice(0, 6);
-
-                hoverMenu.inputDevices = sources.filter(function (row) {
-                    return !!String(row.name || "").trim();
-                }).map(function (row) {
-                    return {
-                        name: String(row.name || "").trim(),
-                        description: String(row.description || "").trim()
-                    };
-                }).slice(0, 6);
-            }
-        }
-    }
+    // statusProc was removed as status is now pushed via IPC.
 
     Process {
         id: actionProc
@@ -341,17 +277,7 @@ PanelWindow {
 
     onVisibleChanged: {
         if (visible) {
-            outputDevices = [];
-            inputDevices = [];
-            errorMsg = "";
-            statusMsg = "";
-            currentVolume = 0;
-            currentMuted = false;
-            pendingVolume = -1;
-            expectedVolume = -1;
-            expectedVolumeMisses = 0;
-            AudioState.userAdjusting = false;
-            loadStatus();
+            // Initial data is already present via IPC/AudioState
         } else {
             hideTimer.stop();
             pendingVolume = -1;
