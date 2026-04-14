@@ -20,11 +20,12 @@ mod managers {
     pub mod net;
     pub mod wifi;
     pub mod battery;
+    pub mod polkit;
 }
 
 mod state;
 
-use state::{AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState};
+use state::{AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState};
 
 struct AppState {
     started_at: Instant,
@@ -35,6 +36,7 @@ struct AppState {
     bluetooth: BluetoothState,
     music: MusicState,
     dashboard: DashboardState,
+    polkit: PolkitState,
     qs_pid_cache: Mutex<Option<i64>>,
 }
 
@@ -352,6 +354,21 @@ fn spawn_battery_monitor(state: Arc<AppState>) {
     });
 }
 
+fn spawn_polkit_agent(state: Arc<AppState>) {
+    thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+            
+        rt.block_on(async {
+            if let Err(e) = managers::polkit::register_agent(state).await {
+                eprintln!("failed to register polkit agent: {}", e);
+            }
+        });
+    });
+}
+
 // --- Single broadcaster thread ---
 
 fn spawn_broadcaster(state: Arc<AppState>) {
@@ -424,6 +441,13 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.battery.take_if_dirty() {
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err() {
+                    any_failed = true;
+                }
+            }
+
+            if let Some(payload) = state.polkit.take_if_dirty() {
+                let payload_text = payload.to_string();
+                if send_shell_ipc_with_pid(pid, "daemon", "polkit", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -708,6 +732,31 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
                 "watched": false,
             }))
         }
+        "polkit.status" => Ok(json!({
+            "ok": true,
+            "polkit": state.polkit.snapshot(),
+        })),
+        "polkit.respond" => {
+            let user = param_string(_params, "user")?;
+            let password = param_string(_params, "password")?;
+            let cookie = param_string(_params, "cookie").unwrap_or_default();
+            let success = managers::polkit::verify_password(&user, &password);
+            
+            if success && !cookie.is_empty() {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| e.to_string())?;
+                let _ = rt.block_on(async {
+                    managers::polkit::notify_response(cookie, true).await
+                });
+            }
+            
+            Ok(json!({
+                "ok": true,
+                "success": success,
+            }))
+        }
         _ => Err(format!("unknown method '{}'", method)),
     }
 }
@@ -779,6 +828,7 @@ fn main() {
         battery: BatteryState::new(),
         music: MusicState::new(),
         dashboard: DashboardState::new(),
+        polkit: PolkitState::new(),
         qs_pid_cache: Mutex::new(None),
     });
 
@@ -792,6 +842,7 @@ fn main() {
     spawn_battery_monitor(Arc::clone(&state));
     spawn_music_monitor(Arc::clone(&state));
     spawn_dashboard_monitor(Arc::clone(&state));
+    spawn_polkit_agent(Arc::clone(&state));
 
     // Single broadcaster: checks dirty flags and pushes to Quickshell via IPC
     spawn_broadcaster(Arc::clone(&state));

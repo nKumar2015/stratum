@@ -109,5 +109,10 @@ Item {
         function dashboard(payloadText: string): void {
             DashboardState.applyDaemonSnapshot(payloadText);
         }
+
+        function polkit(payloadText: string): void {
+            const payload = GlobalState.parseDaemonPayload(payloadText);
+            if (payload) PolkitState.applyDaemonSnapshot(payload);
+        }
     }
 }

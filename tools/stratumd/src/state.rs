@@ -205,3 +205,37 @@ impl BatteryState {
         }
     }
 }
+
+pub struct PolkitState {
+    data: Mutex<Value>,
+    pub dirty: AtomicBool,
+}
+
+impl PolkitState {
+    pub fn new() -> Self {
+        Self {
+            data: Mutex::new(Value::Null),
+            dirty: AtomicBool::new(false),
+        }
+    }
+
+    pub fn update(&self, value: Value) {
+        let mut data = self.data.lock().unwrap();
+        if *data != value {
+            *data = value;
+            self.dirty.store(true, Ordering::Release);
+        }
+    }
+
+    pub fn snapshot(&self) -> Value {
+        self.data.lock().unwrap().clone()
+    }
+
+    pub fn take_if_dirty(&self) -> Option<Value> {
+        if self.dirty.swap(false, Ordering::AcqRel) {
+            Some(json!({"polkit": self.snapshot()}))
+        } else {
+            None
+        }
+    }
+}

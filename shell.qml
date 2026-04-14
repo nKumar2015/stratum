@@ -93,6 +93,13 @@ ShellRoot {
         }
     }
 
+    Connections {
+        target: PolkitState
+        function onActiveChanged() {
+            updateLoader(polkitLoader, PolkitState.active, "PolkitDialog.qml", GlobalState.popupMonitorName);
+        }
+    }
+
     function screenByName(name) {
         const target = String(name || "").trim();
         const screens = Quickshell.screens || [];
@@ -190,6 +197,11 @@ ShellRoot {
     Loader {
         id: screenshotLoader
         onLoaded: console.log("[Shell] ScreenshotViewer loaded")
+    }
+
+    Loader {
+        id: polkitLoader
+        onLoaded: console.log("[Shell] PolkitDialog loaded")
     }
 
     Variants {
