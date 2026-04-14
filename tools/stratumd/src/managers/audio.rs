@@ -106,9 +106,9 @@ struct EqConfig {
 #[derive(Clone, Debug)]
 struct EqApplyResult {
     applied: bool,
-    dry_run: bool,
+    _dry_run: bool,
     engine: String,
-    resolved_device: String,
+    _resolved_device: String,
     status: String,
 }
 
@@ -783,10 +783,8 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
 
     spawn_eq_module(&module_args).map_err(|err| format!("failed to spawn persistent EQ process ($pw-cli): {}", err))?;
 
-    let mut created_id = None;
     for _ in 0..30 {
-        created_id = find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK);
-        if created_id.is_some() {
+        if find_node_id_by_name(EQ_VIRTUAL_INPUT_SINK).is_some() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -811,9 +809,9 @@ fn apply_eq_bands_pipewire(device_id: &str, bands: &[EqBand], preamp_db: f64) ->
 
     Ok(EqApplyResult {
         applied: true,
-        dry_run: false,
+        _dry_run: false,
         engine: "pipewire-filter-chain".to_string(),
-        resolved_device,
+        _resolved_device: resolved_device,
         status: format!(
             "applied {} enabled bands via PipeWire filter-chain virtual sink",
             bands.iter().filter(|b| b.enabled).count()
