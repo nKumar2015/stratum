@@ -80,12 +80,12 @@ pub async fn register_agent(state: Arc<AppState>) -> zbus::Result<()> {
 }
 
 pub fn verify_password(user: &str, password: &str) -> bool {
-    let mut authenticator = match pam_auth::Authenticator::with_password("stratum-polkit") {
+    let mut authenticator = match pam::Authenticator::with_password("stratum-polkit") {
         Ok(a) => a,
         Err(_) => return false,
     };
     
-    authenticator.set_credentials(user, password);
+    authenticator.get_handler().set_credentials(user, password);
     authenticator.authenticate().is_ok()
 }
 
