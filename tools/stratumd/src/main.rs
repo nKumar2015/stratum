@@ -8,6 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use tracing::{debug, error, info, warn};
+
+mod logger;
+
 use chrono::Datelike;
 use serde_json::{json, Value};
 
@@ -177,6 +181,7 @@ fn send_shell_ipc_with_pid(
     function: &str,
     args: &[String],
 ) -> Result<(), String> {
+    debug!("IPC call: target={}, function={}, args={:?}", target, function, args);
     let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
 
     let mut command_args = vec![
@@ -240,18 +245,36 @@ fn maybe_launch_quickshell() {
     }
 
     let Some(shell_bin) = resolve_shell_binary() else {
-        eprintln!("failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
+        error!("failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
         return;
     };
 
+    let log_path = logger::get_shell_log_path();
+    let log_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path);
+
+    let (stdout, stderr) = match log_file {
+        Ok(f) => {
+            info!("Redirecting shell output to {}", log_path.display());
+            (Stdio::from(f.try_clone().unwrap()), Stdio::from(f))
+        }
+        Err(e) => {
+            warn!("Failed to open shell log file {}, using null: {}", log_path.display(), e);
+            (Stdio::null(), Stdio::null())
+        }
+    };
+
+    info!("Launching quickshell: {:?}", shell_bin);
     if let Err(err) = Command::new("setsid")
         .arg(shell_bin)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
         .spawn()
     {
-        eprintln!("failed to launch quickshell (detached): {}", err);
+        error!("failed to launch quickshell (detached): {}", err);
     }
 }
 
@@ -259,6 +282,7 @@ fn maybe_launch_quickshell() {
 
 fn spawn_audio_monitor(state: Arc<AppState>) {
     thread::spawn(move || {
+        info!("Starting audio monitor");
         let mut iteration = 0;
         // Initial refresh
         managers::audio::refresh_device_cache();
@@ -286,31 +310,41 @@ fn spawn_audio_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_net_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let snapshot = managers::net::status();
-        state.net.update(snapshot);
-        thread::sleep(Duration::from_secs(3));
+    thread::spawn(move || {
+        info!("Starting network monitor");
+        loop {
+            let snapshot = managers::net::status();
+            state.net.update(snapshot);
+            thread::sleep(Duration::from_secs(3));
+        }
     });
 }
 
 fn spawn_bluetooth_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let snapshot = managers::bluetooth::status();
-        state.bluetooth.update(snapshot);
-        thread::sleep(Duration::from_secs(3));
+    thread::spawn(move || {
+        info!("Starting bluetooth monitor");
+        loop {
+            let snapshot = managers::bluetooth::status();
+            state.bluetooth.update(snapshot);
+            thread::sleep(Duration::from_secs(3));
+        }
     });
 }
 
 fn spawn_music_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let snapshot = managers::music::status();
-        state.music.update(snapshot);
-        thread::sleep(Duration::from_secs(2));
+    thread::spawn(move || {
+        info!("Starting music monitor");
+        loop {
+            let snapshot = managers::music::status();
+            state.music.update(snapshot);
+            thread::sleep(Duration::from_secs(2));
+        }
     });
 }
 
 fn spawn_dashboard_monitor(state: Arc<AppState>) {
     thread::spawn(move || {
+        info!("Starting dashboard monitor");
         loop {
             let watched = state
                 .dashboard_watch
@@ -347,10 +381,13 @@ fn spawn_dashboard_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_battery_monitor(state: Arc<AppState>) {
-    thread::spawn(move || loop {
-        let snapshot = managers::battery::status();
-        state.battery.update(snapshot);
-        thread::sleep(Duration::from_secs(5));
+    thread::spawn(move || {
+        info!("Starting battery monitor");
+        loop {
+            let snapshot = managers::battery::status();
+            state.battery.update(snapshot);
+            thread::sleep(Duration::from_secs(5));
+        }
     });
 }
 
@@ -363,8 +400,10 @@ fn spawn_polkit_agent(state: Arc<AppState>) {
             
         rt.block_on(async {
             if let Err(e) = managers::polkit::register_agent(state).await {
-                eprintln!("[polkit] [error] failed to register authentication agent: {}", e);
-                eprintln!("[polkit] [hint] ensure the Polkit service is running (e.g., 'services.polkit.enable = true' on NixOS)");
+                error!("[polkit] failed to register authentication agent: {}", e);
+                warn!("[polkit] hint: ensure the Polkit service is running (e.g., 'services.polkit.enable = true' on NixOS)");
+            } else {
+                info!("[polkit] authentication agent registered successfully");
             }
         });
     });
@@ -374,6 +413,7 @@ fn spawn_polkit_agent(state: Arc<AppState>) {
 
 fn spawn_broadcaster(state: Arc<AppState>) {
     thread::spawn(move || {
+        info!("Starting broadcaster thread");
         // Wait for Quickshell to become available before first push
         for _ in 0..20 {
             if newest_quickshell_pid().is_ok() {
@@ -405,6 +445,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             let mut any_failed = false;
 
             if let Some(payload) = state.audio.take_if_dirty() {
+                debug!("Broadcasting audio update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "audio", &[payload_text]).is_err() {
                     any_failed = true;
@@ -412,6 +453,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.net.take_if_dirty() {
+                debug!("Broadcasting network update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "wifi", &[payload_text]).is_err() {
                     any_failed = true;
@@ -419,6 +461,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.bluetooth.take_if_dirty() {
+                debug!("Broadcasting bluetooth update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "bluetooth", &[payload_text]).is_err() {
                     any_failed = true;
@@ -426,6 +469,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.music.take_if_dirty() {
+                debug!("Broadcasting music update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "music", &[payload_text]).is_err() {
                     any_failed = true;
@@ -433,6 +477,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.dashboard.take_if_dirty() {
+                debug!("Broadcasting dashboard update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text]).is_err() {
                     any_failed = true;
@@ -440,6 +485,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.battery.take_if_dirty() {
+                debug!("Broadcasting battery update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err() {
                     any_failed = true;
@@ -447,6 +493,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             }
 
             if let Some(payload) = state.polkit.take_if_dirty() {
+                debug!("Broadcasting polkit update");
                 let payload_text = payload.to_string();
                 if send_shell_ipc_with_pid(pid, "daemon", "polkit", &[payload_text]).is_err() {
                     any_failed = true;
@@ -818,6 +865,9 @@ fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), Str
 }
 
 fn main() {
+    logger::init();
+    info!("Starting stratumd v{}", env!("CARGO_PKG_VERSION"));
+    
     maybe_launch_quickshell();
 
     let state = Arc::new(AppState {
@@ -854,9 +904,11 @@ fn main() {
     }
 
     let listener = UnixListener::bind(&path).unwrap_or_else(|err| {
-        eprintln!("failed to bind socket at {}: {}", path.display(), err);
+        error!("failed to bind socket at {}: {}", path.display(), err);
         std::process::exit(1);
     });
+
+    info!("Listening on unix socket: {}", path.display());
 
     for stream in listener.incoming() {
         match stream {
@@ -864,12 +916,12 @@ fn main() {
                 let state = Arc::clone(&state);
                 std::thread::spawn(move || {
                     if let Err(err) = handle_client(stream, state) {
-                        eprintln!("client handling error: {}", err);
+                        error!("client handling error: {}", err);
                     }
                 });
             }
             Err(err) => {
-                eprintln!("listener accept error: {}", err);
+                error!("listener accept error: {}", err);
             }
         }
     }
