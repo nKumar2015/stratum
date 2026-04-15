@@ -1,0 +1,4 @@
+[32m  INFO[0m: Launching config: "/home/nakul/stratum/scratch/test_output_writable.qml"
+[32m  INFO[0m: Shell ID: "9d527f81a0623a2679892e18e429cca5" Path ID "9d527f81a0623a2679892e18e429cca5"
+[32m  INFO[0m: Saving logs to "/run/user/1000/quickshell/by-id/mmft33kdt/log.qslog"
+[32m  INFO[0m: Configuration Loaded

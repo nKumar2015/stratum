@@ -34,12 +34,6 @@ Item {
     IpcHandler {
         target: "lockscreen"
         function lock(): void {
-            // Signal a lock request. Since WlSessionLock is sensitive, 
-            // the LockScreen component will listen for this but we drive it from state.
-            // For now, let's keep it direct if possible or use a GlobalState flag.
-            // Actually, LockScreen already has its own IpcHandler, but we move it here 
-            // to ensure it can be triggered before the UI is loaded.
-            // We'll use a signal or property for this.
             GlobalState.lockRequested();
         }
     }
@@ -113,7 +107,8 @@ Item {
         function polkit(payloadText: string): void {
             console.log("[IPC] Received Polkit update: " + payloadText);
             const payload = GlobalState.parseDaemonPayload(payloadText);
-            if (payload) PolkitState.applyDaemonSnapshot(payload);
+            if (payload)
+                PolkitState.applyDaemonSnapshot(payload);
         }
     }
 }

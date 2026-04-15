@@ -14,7 +14,7 @@ ShellRoot {
     IpcModule {}
 
     // Phase 1: Background Logic (Always Active)
-    LockScreen {} // UI is lazy-loaded internally
+    LockScreen {}
     SystemOsd {}
     NotificationListener {}
 
