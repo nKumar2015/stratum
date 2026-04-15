@@ -37,6 +37,9 @@ ShellRoot {
         function onShowPowerMenuChanged() {
             updateLoader(powerLoader, PowerState.showPowerMenu, "PowerMenu.qml", GlobalState.popupMonitorName);
         }
+        function onShowBatteryHoverMenuChanged() {
+            updateLoader(batteryHoverLoader, PowerState.showBatteryHoverMenu, "BatteryHoverMenu.qml", GlobalState.popupMonitorName);
+        }
     }
 
     Connections {
@@ -96,6 +99,7 @@ ShellRoot {
     Connections {
         target: PolkitState
         function onActiveChanged() {
+            console.log("[Shell] Polkit active status changed: " + PolkitState.active);
             updateLoader(polkitLoader, PolkitState.active, "PolkitDialog.qml", GlobalState.popupMonitorName);
         }
     }
@@ -118,7 +122,13 @@ ShellRoot {
     // Phase 3: Lazy-Loaded UI Components
     Loader {
         id: powerLoader
-        onLoaded: console.log("[Shell] PowerMenu loaded")
+        onLoaded: {
+            console.log("[Shell] PowerMenu loaded");
+            if (typeof item.initializeWindow === "function") {
+                item.initializeWindow();
+            }
+            item.requestActivate();
+        }
     }
 
     Loader {
@@ -166,16 +176,10 @@ ShellRoot {
         id: audioLoader
         onLoaded: {
             console.log("[Shell] AudioMenu successfully built in RAM.");
-
-            // 1. Run your background logic
             if (typeof item.initializeWindow === "function") {
                 item.initializeWindow();
             }
-
-            // 2. Explicitly request the OS to map the window
             item.show();
-
-            // 3. Force Wayland to focus it so it doesn't spawn behind things
             item.requestActivate();
         }
     }
@@ -196,7 +200,14 @@ ShellRoot {
 
     Loader {
         id: screenshotLoader
-        onLoaded: console.log("[Shell] ScreenshotViewer loaded")
+        onLoaded: {
+            console.log("[Shell] ScreenshotViewer loaded");
+            if (typeof item.initializeWindow === "function") {
+                item.initializeWindow();
+            }
+            item.show();
+            item.requestActivate();
+        }
     }
 
     Loader {

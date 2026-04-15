@@ -50,11 +50,13 @@ PanelWindow {
         anchors.centerIn: parent
         color: Theme.palette.bgMain
         radius: 16
-        border.color: isError ? Theme.palette.error : (dialogMouse.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive)
+        border.color: polkitWindow.isError ? Theme.palette.error : (dialogMouse.containsMouse ? Theme.palette.borderActive : Theme.palette.borderInactive)
         border.width: 1
 
         Behavior on border.color {
-            ColorAnimation { duration: 200 }
+            ColorAnimation {
+                duration: 200
+            }
         }
 
         MouseArea {
@@ -70,13 +72,13 @@ PanelWindow {
 
             RowLayout {
                 spacing: 20
-                
+
                 Text {
                     text: "󱗼"
                     font.pixelSize: 48
                     color: Theme.palette.primary
                 }
-                
+
                 ColumnLayout {
                     spacing: 4
                     Layout.fillWidth: true
@@ -107,7 +109,7 @@ PanelWindow {
             ColumnLayout {
                 spacing: 8
                 Layout.fillWidth: true
-                
+
                 RowLayout {
                     Layout.fillWidth: true
                     Text {
@@ -115,13 +117,17 @@ PanelWindow {
                         color: Theme.palette.textMuted
                         font.pixelSize: 12
                     }
-                    Item { Layout.fillWidth: true }
+                    Item {
+                        Layout.fillWidth: true
+                    }
                     Text {
                         visible: polkitWindow.isError
-                        text: "Incorrect Password"
+                        text: PolkitState.message || "Incorrect Password"
                         color: Theme.palette.error
                         font.pixelSize: 12
                         font.bold: true
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
                     }
                 }
 
@@ -131,14 +137,15 @@ PanelWindow {
                     placeholderText: "Enter password..."
                     echoMode: TextInput.Password
                     focus: true
-                    
+                    enabled: !PolkitState.verifying
+
                     background: Rectangle {
                         color: Theme.palette.bgWidget
                         radius: 8
                         border.color: passwordField.activeFocus ? Theme.palette.primary : Theme.palette.borderInactive
                         border.width: 1
                     }
-                    
+
                     color: Theme.palette.textMain
                     font.pixelSize: 14
 
@@ -149,12 +156,13 @@ PanelWindow {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 12
-                
+
                 Button {
                     id: cancelButton
                     text: "Cancel"
+                    enabled: !PolkitState.verifying
                     onClicked: PolkitState.cancel()
-                    
+
                     background: Rectangle {
                         implicitWidth: 80
                         implicitHeight: 36
@@ -163,30 +171,33 @@ PanelWindow {
                         border.color: Theme.palette.borderInactive
                         border.width: 1
                     }
-                    
+
                     contentItem: Text {
                         text: parent.text
-                        color: Theme.palette.textMain
+                        color: cancelButton.enabled ? Theme.palette.textMain : Theme.palette.textMuted
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
                 }
-                
+
                 Button {
                     id: authButton
-                    text: "Authenticate"
+                    text: PolkitState.verifying ? "Verifying..." : "Authenticate"
+                    enabled: !PolkitState.verifying
                     onClicked: PolkitState.respond(passwordField.text)
-                    
+
                     background: Rectangle {
                         implicitWidth: 120
                         implicitHeight: 36
-                        color: authButton.pressed ? Theme.palette.secondary : Theme.palette.primary
+                        color: !authButton.enabled ? Theme.palette.bgWidget : (authButton.pressed ? Theme.palette.secondary : Theme.palette.primary)
                         radius: 8
+                        border.width: !authButton.enabled ? 1 : 0
+                        border.color: Theme.palette.borderInactive
                     }
-                    
+
                     contentItem: Text {
                         text: parent.text
-                        color: Theme.palette.bgMain
+                        color: authButton.enabled ? Theme.palette.bgMain : Theme.palette.textMuted
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                         font.bold: true

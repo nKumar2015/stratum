@@ -58,6 +58,9 @@ PanelWindow {
     property string screenOnTime: "Unknown"
     property string chargingInfo: ""
     property string activeProfile: "balanced"
+    property string intendedProfile: ""
+    readonly property int statusGuardMs: 2000
+
 
     function parseCliJson(raw) {
         const text = String(raw || "").trim();
@@ -119,17 +122,31 @@ PanelWindow {
 
     function loadStatus() {
         loading = true;
+        statusProc.running = false;
         statusProc.running = true;
     }
 
     function setProfile(profileName) {
-        if (switching || !profileName || activeProfile === profileName)
+        if (!profileName || activeProfile === profileName)
             return;
 
+        // Allow rapid switching by interrupting current actions.
         switching = true;
+        activeProfile = profileName; // Immediate visual feedback.
+        intendedProfile = profileName; // Lock the intention.
+
         statusMsg = "Switching to " + profileLabel(profileName) + "...";
+        actionProc.running = false;
         actionProc.command = ["stratum-cli", "battery", "set-profile", profileName];
         actionProc.running = true;
+        
+        statusGuardTimer.restart();
+    }
+
+    Timer {
+        id: statusGuardTimer
+        interval: hoverMenu.statusGuardMs
+        repeat: false
     }
 
     Process {
@@ -137,31 +154,42 @@ PanelWindow {
         command: ["stratum-cli", "battery", "status"]
         stdout: StdioCollector {
             onStreamFinished: {
+                console.log("[BatteryMenu] Status finished. Raw: " + this.text.trim());
                 hoverMenu.loading = false;
-
+                
                 const raw = this.text.trim();
                 const payload = hoverMenu.parseCliJson(raw);
-                if (!payload) {
-                    hoverMenu.statusMsg = "Battery info unavailable";
-                    statusClearTimer.restart();
-                    return;
+                if (!payload) return;
+
+                if (payload.ok === true) {
+                    const battery = (payload.battery && typeof payload.battery === "object") ? payload.battery : {};
+                    const parsedPct = parseInt(String(battery.pct || "0"));
+                    hoverMenu.batteryPct = isNaN(parsedPct) ? 0 : Math.max(0, Math.min(100, parsedPct));
+                    hoverMenu.batteryState = String(battery.state || "unknown").trim();
+                    hoverMenu.projectedLife = String(battery.projected_text || "Unknown").trim();
+                    hoverMenu.screenOnTime = String(battery.screen_on_time || "Unknown").trim();
+                    hoverMenu.chargingInfo = String(payload.charging_info || "").trim();
+                    
+                    const systemProfile = String(payload.profile || "balanced").trim();
+                    console.log("[BatteryMenu] CLI says profile is: " + systemProfile + ". Current UI: " + hoverMenu.activeProfile + ". Intended: " + hoverMenu.intendedProfile);
+                    
+                    // The Guard Logic:
+                    // Only update activeProfile if:
+                    // 1. We aren't currently switching.
+                    // 2. The guard timer has expired.
+                    // 3. The system status actually matches our intended profile.
+                    if (!hoverMenu.switching && !statusGuardTimer.running) {
+                        hoverMenu.activeProfile = systemProfile;
+                        hoverMenu.intendedProfile = ""; 
+                    } else if (systemProfile === hoverMenu.intendedProfile) {
+                        // System caught up! We can clear the guard.
+                        hoverMenu.activeProfile = systemProfile;
+                        hoverMenu.intendedProfile = "";
+                        statusGuardTimer.stop();
+                    }
                 }
-
-                if (payload.ok !== true) {
-                    hoverMenu.statusMsg = String(payload.error || "Battery info unavailable");
-                    statusClearTimer.restart();
-                    return;
-                }
-
-                const battery = (payload.battery && typeof payload.battery === "object") ? payload.battery : {};
-                const parsedPct = parseInt(String(battery.pct || "0"));
-                hoverMenu.batteryPct = isNaN(parsedPct) ? 0 : Math.max(0, Math.min(100, parsedPct));
-                hoverMenu.batteryState = String(battery.state || "unknown").trim();
-                hoverMenu.projectedLife = String(battery.projected_text || "Unknown").trim();
-                hoverMenu.screenOnTime = String(battery.screen_on_time || "Unknown").trim();
-
-                hoverMenu.chargingInfo = String(payload.charging_info || "").trim();
-                hoverMenu.activeProfile = String(payload.profile || "balanced").trim();
+                
+                hoverMenu.switching = false;
             }
         }
     }
@@ -171,15 +199,15 @@ PanelWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 const result = this.text.trim();
-                hoverMenu.switching = false;
-
                 const payload = hoverMenu.parseCliJson(result);
-                if (!payload || payload.ok !== true) {
-                    hoverMenu.statusMsg = payload && payload.error ? String(payload.error) : "Profile switch failed";
-                    statusClearTimer.restart();
-                } else {
+                
+                if (payload && payload.ok === true) {
                     hoverMenu.statusMsg = "Power mode updated";
                     statusClearTimer.restart();
+                } else {
+                    hoverMenu.statusMsg = "Profile switch failed";
+                    statusClearTimer.restart();
+                    hoverMenu.switching = false;
                 }
 
                 hoverMenu.loadStatus();
@@ -430,13 +458,12 @@ PanelWindow {
                         id: powerOption
                         required property var modelData
                         property bool selected: hoverMenu.activeProfile === modelData.key
-                        property bool disabled: hoverMenu.switching
 
                         Layout.fillWidth: true
                         height: 30
                         radius: 6
-                        color: selected ? Theme.palette.bgWidget : (modeHover.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
-                        border.width: 1
+                        color: selected ? Theme.palette.bgHover : (modeHover.containsMouse ? Theme.palette.bgHover : Theme.palette.bgWidget)
+                        border.width: selected ? 2 : 1
                         border.color: selected ? Theme.palette.borderActive : Theme.palette.borderInactive
                         Text {
                             anchors.centerIn: parent
@@ -451,8 +478,7 @@ PanelWindow {
                             id: modeHover
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: powerOption.disabled ? Qt.ArrowCursor : Qt.PointingHandCursor
-                            enabled: !powerOption.disabled
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: hoverMenu.setProfile(powerOption.modelData.key)
                         }
                     }

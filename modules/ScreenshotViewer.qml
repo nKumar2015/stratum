@@ -12,7 +12,7 @@ import Quickshell.Io
 import "../globals"
 import "../components"
 
-Window {
+ApplicationWindow {
     id: viewer
 
     title: "Screenshot Viewer"
@@ -27,7 +27,14 @@ Window {
         viewer.closeViewer();
     }
 
-    property bool visibleState: false
+    function initializeWindow() {
+        viewer.openViewer(GlobalState.screenshotViewerPath, GlobalState.screenshotViewerMode);
+    }
+
+    function cleanupWindow() {
+        viewer.closeViewer();
+    }
+
     property string captureMode: "window"
     property string sourcePath: ""
     property color annotationColor: "#ff3b30"
@@ -53,14 +60,13 @@ Window {
     property real annotatedExportWidth: 0
     property real annotatedExportHeight: 0
     readonly property bool portalBusy: portalSaveAsProc.running
-    readonly property bool viewerInteractive: visibleState && !portalBusy
+    readonly property bool viewerInteractive: viewer.visible && !portalBusy
     readonly property bool saveAsVerboseLogs: false
     readonly property int portalSaveAsTimeoutMs: 35000
     readonly property int annotatedExportPollMs: 16
     readonly property int annotatedExportMaxRetries: 60
 
     color: "transparent"
-    visible: visibleState
 
     ScreenshotWorkflowHelper {
         id: workflow
@@ -125,7 +131,6 @@ Window {
         resolvedScreen = screenForMonitorName(GlobalState.popupMonitorName);
         sourcePath = toLocalPath(imagePath);
         captureMode = String(mode || "window");
-        visibleState = sourcePath.length > 0;
         statusMessage = "";
         statusError = false;
         annotationStrokes = [];
@@ -156,7 +161,6 @@ Window {
     }
 
     function closeViewer() {
-        visibleState = false;
         panActive = false;
         statusMessage = "";
         statusError = false;
@@ -166,6 +170,8 @@ Window {
         pendingAnnotatedTargetPath = "";
         if (!postProc.running)
             cleanupPostActionTempPath();
+
+        GlobalState.showScreenshotViewer = false;
     }
 
     function sourcePixelSize() {
@@ -428,13 +434,7 @@ Window {
         }
     }
 
-    Connections {
-        target: GlobalState
-
-        function onScreenshotViewerOpenRequested(imagePath, mode) {
-            viewer.openViewer(imagePath, mode);
-        }
-    }
+    // No internal connections needed; shell loader manages lifecycle via initializeWindow
 
     Process {
         id: tempCleanupProc
@@ -474,15 +474,14 @@ Window {
     Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (viewer.visibleState)
-                viewer.closeViewer();
+            viewer.closeViewer();
         }
     }
 
     Shortcut {
         sequence: "Ctrl+Z"
         onActivated: {
-            if (viewer.visibleState && !viewer.isWorking)
+            if (!viewer.isWorking)
                 viewer.undoLastAnnotation();
         }
     }
@@ -492,7 +491,6 @@ Window {
         anchors.fill: parent
         radius: 14
         color: Theme.palette.bgMain
-        visible: viewer.visibleState
 
         MouseArea {
             anchors.fill: parent
@@ -765,7 +763,7 @@ Window {
                     to: viewer.maxImageZoom
                     stepSize: 0.1
                     value: viewer.minImageZoom
-                    onMoved: viewer.setImageZoom(value, renderSurface.width / 2, renderSurface.height / 2) 
+                    onMoved: viewer.setImageZoom(value, renderSurface.width / 2, renderSurface.height / 2)
                     enabled: screenshotImage.status === Image.Ready
 
                     background: Rectangle {

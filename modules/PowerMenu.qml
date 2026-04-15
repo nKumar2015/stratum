@@ -25,10 +25,47 @@ PanelWindow {
     WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     property int selectedIndex: 0
     property var powerOptions: [
-        // ... (lines 28-57)
+        {
+            name: "Shutdown",
+            command: ["systemctl", "poweroff"],
+            icon: "../themes/icons/shutdown.svg"
+        },
+        {
+            name: "Reboot",
+            command: ["systemctl", "reboot"],
+            icon: "../themes/icons/reboot.svg"
+        },
+        {
+            name: "Suspend",
+            command: ["systemctl", "suspend"],
+            icon: "../themes/icons/suspend.svg"
+        },
+        {
+            name: "Logout",
+            command: ["hyprctl", "dispatch", "exit"],
+            icon: "../themes/icons/logout.svg"
+        },
+        {
+            name: "Reboot into Windows",
+            command: ["systemctl", "reboot", "--boot-loader-entry=windows.conf"],
+            icon: "../themes/icons/windows.svg"
+        },
+        {
+            name: "Reboot into BIOS",
+            command: ["systemctl", "reboot", "--firmware-setup"],
+            icon: "../themes/icons/bios.svg"
+        }
     ]
+    Process {
+        id: cmdRunner
+    }
 
-    // ... (lines 60-68)
+    function executeSelected() {
+        PowerState.showPowerMenu = false;
+        cmdRunner.command = powerOptions[selectedIndex].command;
+        cmdRunner.running = true;
+        target: "powermenu";
+    }
 
     Shortcut {
         sequence: "Escape"
@@ -37,13 +74,23 @@ PanelWindow {
         }
     }
 
-    // ... (lines 79-95)
-
-    MouseArea {
-        anchors.fill: parent
-        onClicked: {
-            PowerState.showPowerMenu = false;
+    Shortcut {
+        sequence: "Left"
+        onActivated: {
+            powerMenu.selectedIndex = (powerMenu.selectedIndex > 0) ? powerMenu.selectedIndex - 1 : powerMenu.powerOptions.length - 1;
         }
+    }
+
+    Shortcut {
+        sequence: "Right"
+        onActivated: {
+            powerMenu.selectedIndex = (powerMenu.selectedIndex < powerMenu.powerOptions.length - 1) ? powerMenu.selectedIndex + 1 : 0;
+        }
+    }
+
+    Shortcut {
+        sequence: "Return"
+        onActivated: powerMenu.executeSelected()
     }
 
     Rectangle {
