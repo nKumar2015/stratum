@@ -65,12 +65,5 @@ in {
         };
       };
     };
-
-    security.wrappers.polkit-agent-helper-1 = lib.mkIf cfg.setupPolkit {
-      source = "${pkgs.polkit.out}/lib/polkit-1/polkit-agent-helper-1";
-      owner = "root";
-      group = "root";
-      setuid = true;
-    };
   };
 }
