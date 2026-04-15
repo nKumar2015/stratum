@@ -11,7 +11,6 @@ in {
   options.programs.stratum = {
     enable = lib.mkEnableOption "A Quickshell config";
 
-
     prefer = lib.mkOption {
       type = lib.types.enum ["darkness" "light"];
       default = "darkness";
@@ -19,6 +18,8 @@ in {
     };
 
     installPortal = lib.mkEnableOption "Use preset xdg-desktp-portal-gtk setup";
+
+    setupPolkit = lib.mkEnableOption "set up polkit-agent-helper-1";
   };
 
   config = lib.mkIf cfg.enable {
@@ -28,7 +29,6 @@ in {
           source = inputs.stratum;
           recursive = true;
         };
-
       };
 
       packages = with pkgs;
@@ -64,6 +64,13 @@ in {
           };
         };
       };
+    };
+
+    security.wrappers.polkit-agent-helper-1 = lib.mkIf cfg.setupPolkit {
+      source = "${pkgs.polkit.out}/lib/polkit-1/polkit-agent-helper-1";
+      owner = "root";
+      group = "root";
+      setuid = true;
     };
   };
 }
