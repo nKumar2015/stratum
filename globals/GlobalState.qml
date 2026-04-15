@@ -10,8 +10,13 @@ QtObject {
     property string screenshotViewerPath: ""
     property string screenshotViewerMode: ""
 
+    function screenshotViewerOpenRequested(path, mode) {
+        screenshotViewerPath = String(path || "");
+        screenshotViewerMode = String(mode || "fullscreen");
+        showScreenshotViewer = true;
+    }
+
     signal lockRequested()
-    signal screenshotViewerOpenRequested(string imagePath, string mode)
 
     function setPopupMonitorName(name) {
         popupMonitorName = String(name || "");

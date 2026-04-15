@@ -33,7 +33,9 @@ function command(method, params, timeoutSec) {
         method: String(method || ""),
         params: params || {}
     });
-    const waitSec = Math.max(1, Math.round(Number(timeoutSec) || 1));
-    const cmd = "printf '%s\\n' " + shellSingleQuote(request) + " | nc -U -w " + String(waitSec) + " \"$XDG_RUNTIME_DIR/stratumd.sock\"";
-    return ["sh", "-lc", cmd];
+    
+    // Use sh -c instead of -lc to avoid the lag of loading login profiles.
+    // Use nc -N to shutdown the socket after EOF on stdin, ensuring prompt exit.
+    const cmd = "printf '%s\\n' " + shellSingleQuote(request) + " | nc -U -N \"$XDG_RUNTIME_DIR/stratumd.sock\"";
+    return ["sh", "-c", cmd];
 }

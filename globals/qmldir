@@ -7,4 +7,5 @@ singleton BluetoothState 1.0 BluetoothState.qml
 singleton NotificationState 1.0 NotificationState.qml
 singleton DashboardState 1.0 DashboardState.qml
 singleton PowerState 1.0 PowerState.qml
+singleton PolkitState 1.0 PolkitState.qml
 IpcModule 1.0 IpcModule.qml

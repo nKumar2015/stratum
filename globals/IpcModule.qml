@@ -111,6 +111,7 @@ Item {
         }
 
         function polkit(payloadText: string): void {
+            console.log("[IPC] Received Polkit update: " + payloadText);
             const payload = GlobalState.parseDaemonPayload(payloadText);
             if (payload) PolkitState.applyDaemonSnapshot(payload);
         }
