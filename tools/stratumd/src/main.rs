@@ -1,12 +1,15 @@
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::oneshot;
 
 use tracing::{debug, error, info, warn};
 
@@ -14,22 +17,30 @@ mod logger;
 
 use chrono::Datelike;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 mod managers {
     pub mod audio;
+    pub mod battery;
     pub mod bluetooth;
     pub mod common;
     pub mod dashboard;
     pub mod music;
     pub mod net;
-    pub mod wifi;
-    pub mod battery;
     pub mod polkit;
+    pub mod wifi;
 }
 
+mod ipc;
 mod state;
 
-use state::{AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState};
+use state::{
+    AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState,
+};
+struct AuthSession {
+    tx: oneshot::Sender<bool>,
+    attempts: u32,
+}
 
 struct AppState {
     started_at: Instant,
@@ -41,7 +52,8 @@ struct AppState {
     music: MusicState,
     dashboard: DashboardState,
     polkit: PolkitState,
-    qs_pid_cache: Mutex<Option<i64>>,
+    qs_pid_cache: Mutex<Option<u32>>,
+    pending_auths: Mutex<HashMap<String, AuthSession>>,
 }
 
 fn socket_path() -> PathBuf {
@@ -58,7 +70,7 @@ fn unique_push(list: &mut Vec<PathBuf>, path: PathBuf) {
 fn binary_in_path(binary: &str) -> Option<PathBuf> {
     let path_var = env::var("PATH").ok()?;
     for segment in path_var.split(':') {
-        if segment.trim().is_empty() {
+        if segment.is_empty() {
             continue;
         }
         let candidate = Path::new(segment).join(binary);
@@ -112,109 +124,6 @@ fn resolve_shell_binary() -> Option<PathBuf> {
     None
 }
 
-fn newest_quickshell_pid() -> Result<i64, String> {
-    let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
-    let list_raw = Command::new(qs_bin)
-        .args(["list", "--all", "--json"])
-        .output()
-        .map_err(|err| format!("failed to run qs list: {}", err))?;
-
-    if !list_raw.status.success() {
-        let stderr = String::from_utf8_lossy(&list_raw.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&list_raw.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit code {}", list_raw.status)
-        };
-        return Err(format!("qs list failed: {}", detail));
-    }
-
-    let parsed: Value = serde_json::from_slice(&list_raw.stdout)
-        .map_err(|err| format!("failed to parse qs list output: {}", err))?;
-    let list = parsed
-        .as_array()
-        .ok_or_else(|| "qs list returned non-array json".to_string())?;
-
-    let mut selected: Option<(String, i64)> = None;
-
-    for entry in list {
-        let Some(obj) = entry.as_object() else {
-            continue;
-        };
-
-        let pid = obj
-            .get("pid")
-            .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok())))
-            .unwrap_or(-1);
-
-        if pid <= 0 {
-            continue;
-        }
-
-        let launch_time = obj
-            .get("launch_time")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-
-        match &selected {
-            None => selected = Some((launch_time, pid)),
-            Some((best_launch, best_pid)) => {
-                if launch_time > *best_launch || (launch_time == *best_launch && pid > *best_pid) {
-                    selected = Some((launch_time, pid));
-                }
-            }
-        }
-    }
-
-    selected
-        .map(|(_, pid)| pid)
-        .ok_or_else(|| "no running quickshell instances found".to_string())
-}
-
-fn send_shell_ipc_with_pid(
-    pid: i64,
-    target: &str,
-    function: &str,
-    args: &[String],
-) -> Result<(), String> {
-    debug!("IPC call: target={}, function={}, args={:?}", target, function, args);
-    let qs_bin = resolve_qs_binary().ok_or_else(|| "qs binary not found".to_string())?;
-
-    let mut command_args = vec![
-        "ipc".to_string(),
-        "--pid".to_string(),
-        pid.to_string(),
-        "call".to_string(),
-        target.to_string(),
-        function.to_string(),
-    ];
-    command_args.extend(args.iter().cloned());
-
-    let output = Command::new(qs_bin)
-        .args(&command_args)
-        .output()
-        .map_err(|err| format!("failed to run qs ipc: {}", err))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit code {}", output.status)
-        };
-        return Err(format!("qs ipc failed: {}", detail));
-    }
-
-    Ok(())
-}
-
 fn quickshell_already_running() -> bool {
     let Some(qs_bin) = resolve_qs_binary() else {
         return false;
@@ -261,7 +170,11 @@ fn maybe_launch_quickshell() {
             (Stdio::from(f.try_clone().unwrap()), Stdio::from(f))
         }
         Err(e) => {
-            warn!("Failed to open shell log file {}, using null: {}", log_path.display(), e);
+            warn!(
+                "Failed to open shell log file {}, using null: {}",
+                log_path.display(),
+                e
+            );
             (Stdio::null(), Stdio::null())
         }
     };
@@ -281,36 +194,36 @@ fn maybe_launch_quickshell() {
 // --- Monitor threads ---
 
 fn spawn_audio_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting audio monitor");
         let mut iteration = 0;
         // Initial refresh
         managers::audio::refresh_device_cache();
-        
+
         loop {
             let snapshot = managers::audio::status();
-            
+
             // Auto-restore EQ when the hardware output shifts
             if let Some(sink) = snapshot.get("default_sink").and_then(Value::as_str) {
                 managers::audio::notify_default_sink_changed(sink);
             }
 
             state.audio.update(snapshot);
-            
+
             // Refresh device list every 10 seconds (5 * 2s)
             iteration += 1;
             if iteration >= 5 {
                 managers::audio::refresh_device_cache();
                 iteration = 0;
             }
-            
+
             thread::sleep(Duration::from_secs(2));
         }
     });
 }
 
 fn spawn_net_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting network monitor");
         loop {
             let snapshot = managers::net::status();
@@ -321,7 +234,7 @@ fn spawn_net_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_bluetooth_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting bluetooth monitor");
         loop {
             let snapshot = managers::bluetooth::status();
@@ -332,7 +245,7 @@ fn spawn_bluetooth_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_music_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting music monitor");
         loop {
             let snapshot = managers::music::status();
@@ -343,14 +256,10 @@ fn spawn_music_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_dashboard_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting dashboard monitor");
         loop {
-            let watched = state
-                .dashboard_watch
-                .lock()
-                .ok()
-                .and_then(|guard| *guard);
+            let watched = state.dashboard_watch.lock().ok().and_then(|guard| *guard);
 
             let (center_year, center_month) = if let Some((y, m)) = watched {
                 (y, m)
@@ -362,7 +271,7 @@ fn spawn_dashboard_monitor(state: Arc<AppState>) {
             // Maintain a 7-month sliding window [-3..+3]
             for delta in -3..=3 {
                 let (y, m) = managers::dashboard::adjust_month(center_year, center_month, delta);
-                
+
                 // Only refresh the center month's performance data every 2s
                 // Side months (calendar only) don't need frequent refreshes
                 if delta == 0 {
@@ -381,7 +290,7 @@ fn spawn_dashboard_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_battery_monitor(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting battery monitor");
         loop {
             let snapshot = managers::battery::status();
@@ -392,31 +301,23 @@ fn spawn_battery_monitor(state: Arc<AppState>) {
 }
 
 fn spawn_polkit_agent(state: Arc<AppState>) {
-    thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-            
-        rt.block_on(async {
-            if let Err(e) = managers::polkit::register_agent(state).await {
-                error!("[polkit] failed to register authentication agent: {}", e);
-                warn!("[polkit] hint: ensure the Polkit service is running (e.g., 'services.polkit.enable = true' on NixOS)");
-            } else {
-                info!("[polkit] authentication agent registered successfully");
-            }
-        });
+    tokio::spawn(async move {
+        if let Err(e) = managers::polkit::register_agent(state).await {
+            error!("[polkit] failed to register authentication agent: {}", e);
+        } else {
+            info!("[polkit] authentication agent registered successfully");
+        }
     });
 }
 
 // --- Single broadcaster thread ---
 
 fn spawn_broadcaster(state: Arc<AppState>) {
-    thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         info!("Starting broadcaster thread");
         // Wait for Quickshell to become available before first push
         for _ in 0..20 {
-            if newest_quickshell_pid().is_ok() {
+            if ipc::newest_quickshell_pid().is_ok() {
                 break;
             }
             thread::sleep(Duration::from_millis(500));
@@ -427,7 +328,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 let cached = state.qs_pid_cache.lock().ok().and_then(|g| *g);
                 match cached {
                     Some(pid) => pid,
-                    None => match newest_quickshell_pid() {
+                    None => match ipc::newest_quickshell_pid() {
                         Ok(pid) => {
                             if let Ok(mut cache) = state.qs_pid_cache.lock() {
                                 *cache = Some(pid);
@@ -447,7 +348,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.audio.take_if_dirty() {
                 debug!("Broadcasting audio update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "audio", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "audio", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -455,7 +356,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.net.take_if_dirty() {
                 debug!("Broadcasting network update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "wifi", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "wifi", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -463,7 +364,9 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.bluetooth.take_if_dirty() {
                 debug!("Broadcasting bluetooth update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "bluetooth", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "bluetooth", &[payload_text])
+                    .is_err()
+                {
                     any_failed = true;
                 }
             }
@@ -471,7 +374,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.music.take_if_dirty() {
                 debug!("Broadcasting music update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "music", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "music", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -479,7 +382,9 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.dashboard.take_if_dirty() {
                 debug!("Broadcasting dashboard update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text])
+                    .is_err()
+                {
                     any_failed = true;
                 }
             }
@@ -487,15 +392,16 @@ fn spawn_broadcaster(state: Arc<AppState>) {
             if let Some(payload) = state.battery.take_if_dirty() {
                 debug!("Broadcasting battery update");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err()
+                {
                     any_failed = true;
                 }
             }
 
             if let Some(payload) = state.polkit.take_if_dirty() {
-                debug!("Broadcasting polkit update");
+                info!("[polkit] Broadcasting update to shell");
                 let payload_text = payload.to_string();
-                if send_shell_ipc_with_pid(pid, "daemon", "polkit", &[payload_text]).is_err() {
+                if ipc::send_shell_ipc_with_pid(pid, "daemon", "polkit", &[payload_text]).is_err() {
                     any_failed = true;
                 }
             }
@@ -507,7 +413,8 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            thread::sleep(Duration::from_millis(200));
+            // Sleep 50ms between broadcast ticks for higher responsiveness (especially for Polkit)
+            thread::sleep(Duration::from_millis(50));
         }
     });
 }
@@ -534,17 +441,13 @@ fn jsonrpc_error(id: Value, code: i64, message: &str) -> Value {
 }
 
 fn param_string(params: Option<&Value>, key: &str) -> Result<String, String> {
-    let Some(params) = params else {
-        return Err(format!("missing params.{}", key));
+    // We chain the Options. If any step returns None, the 'else' block triggers.
+    let Some(value) = params.and_then(|p| p.get(key)).and_then(Value::as_str) else {
+        return Err(format!("missing or invalid string params.{}", key));
     };
-    let Some(value) = params.get(key).and_then(Value::as_str) else {
-        return Err(format!("missing string params.{}", key));
-    };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(format!("empty params.{}", key));
-    }
-    Ok(trimmed.to_string())
+
+    // No .trim() here! We need the raw string for PAM.
+    Ok(value.to_string())
 }
 
 fn param_i64(params: Option<&Value>, key: &str, default: i64) -> i64 {
@@ -562,10 +465,7 @@ fn param_f64(params: Option<&Value>, key: &str, default: f64) -> f64 {
 }
 
 fn param_value_or_default(params: Option<&Value>, key: &str, default: Value) -> Value {
-    params
-        .and_then(|p| p.get(key))
-        .cloned()
-        .unwrap_or(default)
+    params.and_then(|p| p.get(key)).cloned().unwrap_or(default)
 }
 
 fn chrono_like_now() -> (i32, i32) {
@@ -574,7 +474,7 @@ fn chrono_like_now() -> (i32, i32) {
     (datetime.year(), datetime.month() as i32)
 }
 
-fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Result<Value, String> {
+async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Result<Value, String> {
     match method {
         "health.ping" => Ok(json!({
             "ok": true,
@@ -626,7 +526,9 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             let device = param_string(_params, "device")?;
             let bands = param_value_or_default(_params, "bands", Value::Array(Vec::new()));
             let preamp_db = param_f64(_params, "preamp_db", 0.0);
-            Ok(managers::audio::eq_apply_parametric(&device, &bands, preamp_db))
+            Ok(managers::audio::eq_apply_parametric(
+                &device, &bands, preamp_db,
+            ))
         }
         "audio.eq_save_preset_parametric" => {
             let device = param_string(_params, "device")?;
@@ -743,8 +645,9 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             // Fast-track: if requesting current year/month, try to return cached state first
             let snapshot = state.dashboard.snapshot();
             if let Some(cal) = snapshot.get("calendar") {
-                if cal.get("year").and_then(Value::as_i64) == Some(year as i64) &&
-                   cal.get("month").and_then(Value::as_i64) == Some(month as i64) {
+                if cal.get("year").and_then(Value::as_i64) == Some(year as i64)
+                    && cal.get("month").and_then(Value::as_i64) == Some(month as i64)
+                {
                     return Ok(snapshot);
                 }
             }
@@ -788,37 +691,91 @@ fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Res
             let user = param_string(_params, "user")?;
             let password = param_string(_params, "password")?;
             let cookie = param_string(_params, "cookie").unwrap_or_default();
-            let success = managers::polkit::verify_password(&user, &password);
-            
-            if success && !cookie.is_empty() {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| e.to_string())?;
-                let _ = rt.block_on(async {
-                    managers::polkit::notify_response(cookie, true).await
-                });
+
+            info!("[polkit] received response for cookie: {}", cookie);
+
+            let success = managers::polkit::verify_password_and_notify(
+                &user, &password, &cookie,
+            ).await;
+
+            if let Ok(mut pending) = state.pending_auths.lock() {
+                if let Some(session) = pending.get_mut(&cookie) {
+                    if success {
+                        info!("[polkit] auth success for cookie: {}", cookie);
+                        let session = pending.remove(&cookie).unwrap();
+                        let _ = session.tx.send(true);
+                        
+                        // Broadcast final success
+                        let final_payload = json!({
+                            "polkit": {
+                                "active": false,
+                                "success": true,
+                                "cookie": cookie.clone(),
+                                "message": "Authentication successful."
+                            }
+                        });
+                        state.polkit.update(final_payload["polkit"].clone());
+                        ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
+                        
+                        return Ok(json!({"ok": true, "success": true}));
+                    } else {
+                        session.attempts += 1;
+                        let remaining = 3_u32.saturating_sub(session.attempts);
+                        
+                        if remaining > 0 {
+                            info!("[polkit] auth failed for cookie: {}, {} attempts remaining", cookie, remaining);
+                            
+                            // Broadcast intermediate failure
+                            let retry_payload = json!({
+                                "polkit": {
+                                    "active": true,
+                                    "success": false,
+                                    "cookie": cookie.clone(),
+                                    "message": format!("Incorrect password. {} attempts remaining.", remaining)
+                                }
+                            });
+                            state.polkit.update(retry_payload["polkit"].clone());
+                            ipc::broadcast_polkit_update(&state.qs_pid_cache, &retry_payload);
+                            
+                            return Ok(json!({"ok": true, "success": false, "retry": true, "remaining": remaining}));
+                        } else {
+                            info!("[polkit] auth failed (max attempts) for cookie: {}", cookie);
+                            let session = pending.remove(&cookie).unwrap();
+                            let _ = session.tx.send(false);
+                            
+                            // Broadcast final failure
+                            let final_payload = json!({
+                                "polkit": {
+                                    "active": false,
+                                    "success": false,
+                                    "cookie": cookie.clone(),
+                                    "message": "Authentication failed. Too many attempts."
+                                }
+                            });
+                            state.polkit.update(final_payload["polkit"].clone());
+                            ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
+                            
+                            return Ok(json!({"ok": true, "success": false, "retry": false}));
+                        }
+                    }
+                }
             }
-            
-            Ok(json!({
-                "ok": true,
-                "success": success,
-            }))
+
+            Err("no pending authentication session found for this cookie".to_string())
         }
         _ => Err(format!("unknown method '{}'", method)),
     }
 }
 
-fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), String> {
-    let reader_stream = stream
-        .try_clone()
-        .map_err(|err| format!("failed to clone client stream: {}", err))?;
+async fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), String> {
+    let (reader_stream, mut writer) = stream.split();
     let mut reader = BufReader::new(reader_stream);
 
     loop {
         let mut line = String::new();
         let read = reader
             .read_line(&mut line)
+            .await
             .map_err(|err| format!("failed to read client line: {}", err))?;
 
         if read == 0 {
@@ -833,10 +790,9 @@ fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), Str
         let request: Value = match serde_json::from_str(trimmed) {
             Ok(value) => value,
             Err(err) => {
-                let response =
-                    jsonrpc_error(Value::Null, -32700, &format!("parse error: {}", err));
+                let response = jsonrpc_error(Value::Null, -32700, &format!("parse error: {}", err));
                 let payload = format!("{}\n", response);
-                let _ = stream.write_all(payload.as_bytes());
+                let _ = writer.write_all(payload.as_bytes()).await;
                 continue;
             }
         };
@@ -851,23 +807,25 @@ fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(), Str
         let response = if method.is_empty() {
             jsonrpc_error(id, -32600, "missing method")
         } else {
-            match handle_method(&state, method, params) {
+            match handle_method(&state, method, params).await {
                 Ok(result) => jsonrpc_success(id, result),
                 Err(err) => jsonrpc_error(id, -32601, &err),
             }
         };
 
         let payload = format!("{}\n", response);
-        stream
+        writer
             .write_all(payload.as_bytes())
+            .await
             .map_err(|err| format!("failed to write client response: {}", err))?;
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     logger::init();
     info!("Starting stratumd v{}", env!("CARGO_PKG_VERSION"));
-    
+
     maybe_launch_quickshell();
 
     let state = Arc::new(AppState {
@@ -881,6 +839,7 @@ fn main() {
         dashboard: DashboardState::new(),
         polkit: PolkitState::new(),
         qs_pid_cache: Mutex::new(None),
+        pending_auths: Mutex::new(HashMap::new()),
     });
 
     // Initialize managers (restore state, etc)
@@ -900,7 +859,7 @@ fn main() {
 
     let path = socket_path();
     if path.exists() {
-        let _ = fs::remove_file(&path);
+        let _ = std::fs::remove_file(&path);
     }
 
     let listener = UnixListener::bind(&path).unwrap_or_else(|err| {
@@ -910,12 +869,12 @@ fn main() {
 
     info!("Listening on unix socket: {}", path.display());
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
                 let state = Arc::clone(&state);
-                std::thread::spawn(move || {
-                    if let Err(err) = handle_client(stream, state) {
+                tokio::spawn(async move {
+                    if let Err(err) = handle_client(stream, state).await {
                         error!("client handling error: {}", err);
                     }
                 });
