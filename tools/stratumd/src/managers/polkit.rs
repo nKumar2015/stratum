@@ -2,12 +2,11 @@ use crate::AppState;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tracing::{error, info};
+use tracing::info;
 use zbus::zvariant;
 use zbus::{dbus_interface, Connection};
 
@@ -80,10 +79,7 @@ impl PolkitAgent {
         let (tx, rx) = tokio::sync::oneshot::channel();
         {
             let mut pending = self.state.pending_auths.lock().unwrap();
-            pending.insert(cookie.clone(), crate::AuthSession { 
-                tx, 
-                attempts: 0 
-            });
+            pending.insert(cookie.clone(), crate::AuthSession { tx, attempts: 0 });
         }
 
         let payload = json!({
@@ -114,10 +110,10 @@ impl PolkitAgent {
                 "active": false,
                 "success": success,
                 "cookie": cookie.clone(),
-                "message": if success { 
-                    "Authentication successful." 
-                } else { 
-                    "Authentication failed. Please check your password." 
+                "message": if success {
+                    "Authentication successful."
+                } else {
+                    "Authentication failed. Please check your password."
                 }
             }
         });

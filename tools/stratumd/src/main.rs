@@ -1,9 +1,7 @@
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -37,6 +35,7 @@ mod state;
 use state::{
     AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState,
 };
+
 struct AuthSession {
     tx: oneshot::Sender<bool>,
     attempts: u32,
@@ -154,7 +153,7 @@ fn maybe_launch_quickshell() {
     }
 
     let Some(shell_bin) = resolve_shell_binary() else {
-        error!("failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
+        error!("[stratumd] [launch] Failed to launch quickshell: neither 'qs' nor 'quickshell' could be resolved");
         return;
     };
 
@@ -166,12 +165,15 @@ fn maybe_launch_quickshell() {
 
     let (stdout, stderr) = match log_file {
         Ok(f) => {
-            info!("Redirecting shell output to {}", log_path.display());
+            info!(
+                "[stratumd] [launch] Redirecting shell output to {}",
+                log_path.display()
+            );
             (Stdio::from(f.try_clone().unwrap()), Stdio::from(f))
         }
         Err(e) => {
             warn!(
-                "Failed to open shell log file {}, using null: {}",
+                "[stratumd] [launch] Failed to open shell log file {}, using null: {}",
                 log_path.display(),
                 e
             );
@@ -179,7 +181,7 @@ fn maybe_launch_quickshell() {
         }
     };
 
-    info!("Launching quickshell: {:?}", shell_bin);
+    info!("[stratumd] [launch] Launching quickshell: {:?}", shell_bin);
     if let Err(err) = Command::new("setsid")
         .arg(shell_bin)
         .stdin(Stdio::null())
@@ -187,39 +189,11 @@ fn maybe_launch_quickshell() {
         .stderr(stderr)
         .spawn()
     {
-        error!("failed to launch quickshell (detached): {}", err);
+        error!(
+            "[stratumd] [launch] failed to launch quickshell (detached): {}",
+            err
+        );
     }
-}
-
-// --- Monitor threads ---
-
-fn spawn_audio_monitor(state: Arc<AppState>) {
-    tokio::task::spawn_blocking(move || {
-        info!("Starting audio monitor");
-        let mut iteration = 0;
-        // Initial refresh
-        managers::audio::refresh_device_cache();
-
-        loop {
-            let snapshot = managers::audio::status();
-
-            // Auto-restore EQ when the hardware output shifts
-            if let Some(sink) = snapshot.get("default_sink").and_then(Value::as_str) {
-                managers::audio::notify_default_sink_changed(sink);
-            }
-
-            state.audio.update(snapshot);
-
-            // Refresh device list every 10 seconds (5 * 2s)
-            iteration += 1;
-            if iteration >= 5 {
-                managers::audio::refresh_device_cache();
-                iteration = 0;
-            }
-
-            thread::sleep(Duration::from_secs(2));
-        }
-    });
 }
 
 fn spawn_net_monitor(state: Arc<AppState>) {
@@ -474,7 +448,11 @@ fn chrono_like_now() -> (i32, i32) {
     (datetime.year(), datetime.month() as i32)
 }
 
-async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) -> Result<Value, String> {
+async fn handle_method(
+    state: &AppState,
+    method: &str,
+    _params: Option<&Value>,
+) -> Result<Value, String> {
     match method {
         "health.ping" => Ok(json!({
             "ok": true,
@@ -694,9 +672,8 @@ async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) 
 
             info!("[polkit] received response for cookie: {}", cookie);
 
-            let success = managers::polkit::verify_password_and_notify(
-                &user, &password, &cookie,
-            ).await;
+            let success =
+                managers::polkit::verify_password_and_notify(&user, &password, &cookie).await;
 
             if let Ok(mut pending) = state.pending_auths.lock() {
                 if let Some(session) = pending.get_mut(&cookie) {
@@ -704,7 +681,7 @@ async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) 
                         info!("[polkit] auth success for cookie: {}", cookie);
                         let session = pending.remove(&cookie).unwrap();
                         let _ = session.tx.send(true);
-                        
+
                         // Broadcast final success
                         let final_payload = json!({
                             "polkit": {
@@ -716,15 +693,18 @@ async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) 
                         });
                         state.polkit.update(final_payload["polkit"].clone());
                         ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
-                        
+
                         return Ok(json!({"ok": true, "success": true}));
                     } else {
                         session.attempts += 1;
                         let remaining = 3_u32.saturating_sub(session.attempts);
-                        
+
                         if remaining > 0 {
-                            info!("[polkit] auth failed for cookie: {}, {} attempts remaining", cookie, remaining);
-                            
+                            info!(
+                                "[polkit] auth failed for cookie: {}, {} attempts remaining",
+                                cookie, remaining
+                            );
+
                             // Broadcast intermediate failure
                             let retry_payload = json!({
                                 "polkit": {
@@ -736,13 +716,15 @@ async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) 
                             });
                             state.polkit.update(retry_payload["polkit"].clone());
                             ipc::broadcast_polkit_update(&state.qs_pid_cache, &retry_payload);
-                            
-                            return Ok(json!({"ok": true, "success": false, "retry": true, "remaining": remaining}));
+
+                            return Ok(
+                                json!({"ok": true, "success": false, "retry": true, "remaining": remaining}),
+                            );
                         } else {
                             info!("[polkit] auth failed (max attempts) for cookie: {}", cookie);
                             let session = pending.remove(&cookie).unwrap();
                             let _ = session.tx.send(false);
-                            
+
                             // Broadcast final failure
                             let final_payload = json!({
                                 "polkit": {
@@ -754,7 +736,7 @@ async fn handle_method(state: &AppState, method: &str, _params: Option<&Value>) 
                             });
                             state.polkit.update(final_payload["polkit"].clone());
                             ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
-                            
+
                             return Ok(json!({"ok": true, "success": false, "retry": false}));
                         }
                     }
@@ -824,7 +806,10 @@ async fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(
 #[tokio::main]
 async fn main() {
     logger::init();
-    info!("Starting stratumd v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "[stratumd] [launch] Starting stratumd v{}",
+        env!("CARGO_PKG_VERSION")
+    );
 
     maybe_launch_quickshell();
 
@@ -846,7 +831,7 @@ async fn main() {
     managers::audio::initialize();
 
     // Spawn per-domain monitor threads (poll system tools, update in-memory state)
-    spawn_audio_monitor(Arc::clone(&state));
+    managers::audio::spawn_monitor(Arc::clone(&state));
     spawn_net_monitor(Arc::clone(&state));
     spawn_bluetooth_monitor(Arc::clone(&state));
     spawn_battery_monitor(Arc::clone(&state));
