@@ -61,10 +61,9 @@ PanelWindow {
     }
 
     function executeSelected() {
-        PowerState.showPowerMenu = false;
         cmdRunner.command = powerOptions[selectedIndex].command;
-        cmdRunner.running = true;
-        target: "powermenu";
+        cmdRunner.startDetached();
+        PowerState.showPowerMenu = false;
     }
 
     Shortcut {
