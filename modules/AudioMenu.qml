@@ -62,10 +62,11 @@ ApplicationWindow {
     // UI state
     property bool loading: false
     property string errorMsg: ""
-    property var outputDevices: []
-    property var inputDevices: []
-    property string defaultOutputName: ""
-    property string defaultInputName: ""
+    // Use AudioState for device lists and defaults
+    property var outputDevices: AudioState.outputDevices
+    property var inputDevices: AudioState.inputDevices
+    property string defaultOutputName: AudioState.defaultOutput
+    property string defaultInputName: AudioState.defaultInput
     property bool routeSwitching: false
     property string routeSwitchKind: ""
     property string routeStatusMsg: ""
@@ -581,24 +582,13 @@ ApplicationWindow {
                     AudioState.daemonAvailable = true;
                 }
 
-                const sinks = Array.isArray(source.sinks) ? source.sinks : [];
-                const sources = Array.isArray(source.sources) ? source.sources : [];
-                const defaults = source.default || {};
+                // Instead of setting our own device lists, update AudioState
+                if (typeof AudioState.applyDaemonSnapshot === "function") {
+                    AudioState.applyDaemonSnapshot(source);
+                }
 
-                audioMenu.outputDevices = sinks.filter(s => String(s.name || "").trim()).map(s => ({
-                            name: String(s.name || "").trim(),
-                            description: String(s.description || "").trim()
-                        }));
-
-                audioMenu.inputDevices = sources.filter(s => String(s.name || "").trim()).map(s => ({
-                            name: String(s.name || "").trim(),
-                            description: String(s.description || "").trim()
-                        }));
-
-                audioMenu.defaultOutputName = String(defaults.sink || "");
-                audioMenu.defaultInputName = String(defaults.source || "");
-
-                const defaultSink = audioMenu.outputDevices.find(d => d.name === audioMenu.defaultOutputName);
+                // Keep currentDevice and currentDeviceLabel in sync for EQ, etc.
+                const defaultSink = AudioState.outputDevices.find(d => d.name === AudioState.defaultOutput);
                 let deviceChanged = false;
                 if (defaultSink) {
                     if (audioMenu.currentDevice !== defaultSink.name) {

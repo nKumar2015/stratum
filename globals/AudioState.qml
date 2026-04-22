@@ -58,7 +58,21 @@ QtObject {
             }).slice(0, 6);
         }
 
-        defaultOutput = String(audio.default_sink || "");
-        defaultInput = String(audio.default_source || "");
+        // Support both top-level and nested default sink/source
+        if (typeof audio.default_sink === "string" && audio.default_sink.length > 0) {
+            defaultOutput = String(audio.default_sink);
+        } else if (audio.default && typeof audio.default.sink === "string") {
+            defaultOutput = String(audio.default.sink);
+        } else {
+            defaultOutput = "";
+        }
+
+        if (typeof audio.default_source === "string" && audio.default_source.length > 0) {
+            defaultInput = String(audio.default_source);
+        } else if (audio.default && typeof audio.default.source === "string") {
+            defaultInput = String(audio.default.source);
+        } else {
+            defaultInput = "";
+        }
     }
 }
