@@ -53,15 +53,10 @@ PanelWindow {
     readonly property color hoverBorder: Theme.palette.outlineVariant || Qt.rgba(1, 1, 1, 0.14)
 
     property bool loading: false
-    property var outputDevices: AudioState.outputDevices
-    property var inputDevices: AudioState.inputDevices
-    property string defaultOutput: AudioState.defaultOutput
-    property string defaultInput: AudioState.defaultInput
     property string errorMsg: ""
     property string statusMsg: ""
     property bool switching: false
-    property int currentVolume: AudioState.volumePercent
-    property bool currentMuted: AudioState.muted
+    property bool devicesFallbackTried: false
     property bool sliderSyncing: false
     property int pendingVolume: -1
     property int expectedVolume: -1
@@ -114,10 +109,8 @@ PanelWindow {
 
     function previewVolume(value) {
         const clamped = Math.max(0, Math.min(volumeMaxPercent, Math.round(value)));
-        currentVolume = clamped;
-        currentMuted = clamped === 0;
         AudioState.volumePercent = clamped;
-        AudioState.muted = currentMuted;
+        AudioState.muted = clamped === 0;
     }
 
     function queueVolumeCommit(value) {
@@ -160,14 +153,12 @@ PanelWindow {
             expectedVolumeMisses = 0;
         }
 
-        currentVolume = statusVolume;
-        currentMuted = statusMuted;
-        AudioState.volumePercent = currentVolume;
-        AudioState.muted = currentMuted;
+        AudioState.volumePercent = statusVolume;
+        AudioState.muted = statusMuted;
 
         if (!volumeSlider.pressed) {
             sliderSyncing = true;
-            volumeSlider.value = currentVolume;
+            volumeSlider.value = AudioState.volumePercent;
             sliderSyncing = false;
         }
     }
@@ -204,7 +195,52 @@ PanelWindow {
         actionProc.running = true;
     }
 
+    function loadDevices() {
+        loading = true;
+        errorMsg = "";
+        devicesFallbackTried = false;
+        if (DaemonRpc.canUse())
+            devicesProc.command = DaemonRpc.command("audio.devices", {});
+        else
+            devicesProc.command = ["stratum-cli", "audio", "status", "--hover"];
+        devicesProc.running = true;
+    }
+
     // statusProc was removed as status is now pushed via IPC.
+
+    Process {
+        id: devicesProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                hoverMenu.loading = false;
+
+                const payload = hoverMenu.parseCliJson(this.text.trim());
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result && payload.result.ok === true && payload.result.audio) ? payload.result.audio : payload;
+
+                if (!source || source.ok !== true) {
+                    if (payload && payload.jsonrpc === "2.0" && !hoverMenu.devicesFallbackTried) {
+                        DaemonRpc.recordFailure();
+                        AudioState.daemonAvailable = false;
+                        hoverMenu.devicesFallbackTried = true;
+                        devicesProc.command = ["stratum-cli", "audio", "status", "--hover"];
+                        devicesProc.running = true;
+                        return;
+                    }
+
+                    hoverMenu.errorMsg = source?.error || payload?.error || "Failed to load audio devices";
+                    return;
+                }
+
+                if (payload && payload.jsonrpc === "2.0") {
+                    DaemonRpc.recordSuccess();
+                    AudioState.daemonAvailable = true;
+                }
+
+                if (typeof AudioState.applyDaemonSnapshot === "function")
+                    AudioState.applyDaemonSnapshot(source);
+            }
+        }
+    }
 
     Process {
         id: actionProc
@@ -277,7 +313,8 @@ PanelWindow {
 
     onVisibleChanged: {
         if (visible) {
-            // Initial data is already present via IPC/AudioState
+            if (!devicesProc.running)
+                loadDevices();
         } else {
             hideTimer.stop();
             pendingVolume = -1;
@@ -405,7 +442,7 @@ PanelWindow {
                     spacing: 8
 
                     Text {
-                        text: hoverMenu.volumeIconFor(hoverMenu.currentVolume, hoverMenu.currentMuted)
+                        text: hoverMenu.volumeIconFor(AudioState.volumePercent, AudioState.muted)
                         color: Theme.palette.textMain
                         font.family: Theme.palette.font
                         font.pixelSize: 13
@@ -415,7 +452,7 @@ PanelWindow {
                         id: volumeSlider
                         from: 0
                         to: hoverMenu.volumeMaxPercent
-                        value: hoverMenu.currentVolume
+                        value: AudioState.volumePercent
                         enabled: !hoverMenu.switching
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
@@ -486,7 +523,7 @@ PanelWindow {
             }
 
             Text {
-                visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.outputDevices.length === 0
+                visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && AudioState.outputDevices.length === 0
                 text: "No output devices"
                 color: Theme.palette.textMain
                 font.pixelSize: 11
@@ -494,7 +531,7 @@ PanelWindow {
             }
 
             Repeater {
-                model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? hoverMenu.outputDevices : []
+                model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? AudioState.outputDevices : []
 
                 delegate: Rectangle {
                     id: outputItem
@@ -504,7 +541,7 @@ PanelWindow {
                     Layout.topMargin: -6
                     height: 30
                     radius: 6
-                    property bool selected: modelData.name === hoverMenu.defaultOutput
+                    property bool selected: modelData.name === AudioState.defaultOutput
                     color: outputHover.containsMouse ? Theme.palette.bgHover : "transparent"
                     border.color: outputHover.containsMouse ? Theme.palette.borderActive : "transparent"
                     border.width: 1
@@ -557,7 +594,7 @@ PanelWindow {
             }
 
             Text {
-                visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && hoverMenu.inputDevices.length === 0
+                visible: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 && AudioState.inputDevices.length === 0
                 text: "No input devices"
                 color: Theme.palette.textMain
                 font.pixelSize: 11
@@ -565,7 +602,7 @@ PanelWindow {
             }
 
             Repeater {
-                model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? hoverMenu.inputDevices : []
+                model: !hoverMenu.loading && hoverMenu.errorMsg.length === 0 ? AudioState.inputDevices : []
 
                 delegate: Rectangle {
                     id: inputItem
@@ -575,7 +612,7 @@ PanelWindow {
                     Layout.topMargin: -6
                     height: 30
                     radius: 6
-                    property bool selected: modelData.name === hoverMenu.defaultInput
+                    property bool selected: modelData.name === AudioState.defaultInput
                     color: inputHover.containsMouse ? Theme.palette.bgHover : "transparent"
                     border.color: inputHover.containsMouse ? Theme.palette.borderActive : "transparent"
                     border.width: 1

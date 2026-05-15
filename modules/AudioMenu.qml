@@ -62,11 +62,6 @@ ApplicationWindow {
     // UI state
     property bool loading: false
     property string errorMsg: ""
-    // Use AudioState for device lists and defaults
-    property var outputDevices: AudioState.outputDevices
-    property var inputDevices: AudioState.inputDevices
-    property string defaultOutputName: AudioState.defaultOutput
-    property string defaultInputName: AudioState.defaultInput
     property bool routeSwitching: false
     property string routeSwitchKind: ""
     property string routeStatusMsg: ""
@@ -507,7 +502,7 @@ ApplicationWindow {
 
     function switchInput(deviceName) {
         const target = String(deviceName || "").trim();
-        if (!target.length || routeSwitching || target === defaultInputName)
+        if (!target.length || routeSwitching || target === AudioState.defaultInput)
             return;
 
         routeSwitching = true;
@@ -526,7 +521,7 @@ ApplicationWindow {
 
     function switchOutputRoute(deviceName) {
         const target = String(deviceName || "").trim();
-        if (!target.length || routeSwitching || target === defaultOutputName)
+        if (!target.length || routeSwitching || target === AudioState.defaultOutput)
             return;
 
         routeSwitching = true;
@@ -991,8 +986,8 @@ ApplicationWindow {
                                     ThemedComboBox {
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
-                                        items: audioMenu.inputDevices
-                                        selectedName: audioMenu.defaultInputName
+                                        items: AudioState.inputDevices
+                                        selectedName: AudioState.defaultInput
                                         placeholderText: "Select input device"
                                         labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
                                         onItemChosen: item => audioMenu.switchInput(item?.name)
@@ -1016,8 +1011,8 @@ ApplicationWindow {
                                     ThemedComboBox {
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
-                                        items: audioMenu.outputDevices
-                                        selectedName: audioMenu.defaultOutputName
+                                        items: AudioState.outputDevices
+                                        selectedName: AudioState.defaultOutput
                                         placeholderText: "Select output device"
                                         labelProvider: item => audioMenu.deviceLabel(item?.name, item?.description)
                                         onItemChosen: item => audioMenu.switchOutputRoute(item?.name)

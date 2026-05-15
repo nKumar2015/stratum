@@ -25,7 +25,7 @@ Item {
         id: fallbackPollingTimer
         interval: 2500
         repeat: true
-        running: consumerCount > 0
+        running: musicProvider.consumerCount > 0
         onTriggered: musicProvider.refreshStatusFromDaemon()
     }
 
@@ -62,13 +62,11 @@ Item {
         if (!musicPayload || typeof musicPayload !== "object")
             return;
 
-        // If it's an empty object, it's likely a generic 'ok' response from the daemon 
+        // If it's an empty object, it's likely a generic 'ok' response from the daemon
         // without music data. We should skip this to avoid flickering to "Nothing playing".
         // However, if we explicitly have a status or title, we should apply it.
-        const hasData = musicPayload.hasOwnProperty("title") || 
-                        musicPayload.hasOwnProperty("status") || 
-                        musicPayload.hasOwnProperty("player");
-        
+        const hasData = musicPayload.hasOwnProperty("title") || musicPayload.hasOwnProperty("status") || musicPayload.hasOwnProperty("player");
+
         if (!hasData)
             return;
 
@@ -83,7 +81,7 @@ Item {
 
         const posSec = Number(music.position_sec ?? music.positionSec ?? music.position);
         const lenSec = Number(music.length_sec ?? music.lengthSec ?? music.length);
-        
+
         musicPositionSec = isNaN(posSec) ? parseTimeToSeconds(music.position || "0:00") : Math.max(0, Math.round(posSec));
         musicLengthSec = isNaN(lenSec) ? parseTimeToSeconds(music.length || "0:00") : Math.max(0, Math.round(lenSec));
 
@@ -92,7 +90,8 @@ Item {
 
     function applyDaemonMusicSnapshot(payloadText) {
         const payload = parseCliJson(payloadText);
-        if (!payload) return;
+        if (!payload)
+            return;
 
         // Extract from JSON-RPC wrapper if present
         let music = null;
@@ -110,8 +109,9 @@ Item {
     }
 
     function refreshStatusFromDaemon() {
-        if (!DaemonRpc.canUse()) return;
-        
+        if (!DaemonRpc.canUse())
+            return;
+
         refreshProc.command = DaemonRpc.command("audio.media_info");
         refreshProc.running = true;
     }

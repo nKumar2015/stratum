@@ -1,7 +1,10 @@
 pragma Singleton
 import QtQuick
+import Quickshell.Io
 
-QtObject {
+Item {
+    id: audioState
+
     property bool showHoverMenu: false
     property bool showMenu: false
     property real iconY: 0
@@ -32,16 +35,24 @@ QtObject {
         if (!audio || typeof audio !== "object")
             return;
 
+        const status = (audio.status && typeof audio.status === "object") ? audio.status : null;
+
         if (!userAdjusting) {
-            const parsedVolume = parseInt(String(audio.volume || "0").replace("%", ""));
+            const volumeValue = status && status.volume !== undefined ? status.volume : audio.volume;
+            const parsedVolume = parseInt(String(volumeValue || "0").replace("%", ""));
             volumePercent = isNaN(parsedVolume) ? 0 : Math.max(0, Math.min(150, parsedVolume));
-            muted = String(audio.mute || "yes").trim().toLowerCase() === "yes";
+
+            const muteValue = status && status.mute !== undefined ? status.mute : audio.mute;
+            if (typeof muteValue === "boolean")
+                muted = muteValue;
+            else
+                muted = String(muteValue || "yes").trim().toLowerCase() === "yes";
         }
         headphonesOutput = String(audio.headphones || "no").trim().toLowerCase() === "yes";
 
         // Device lists
         if (Array.isArray(audio.sinks)) {
-            outputDevices = audio.sinks.map(function(row) {
+            outputDevices = audio.sinks.map(function (row) {
                 return {
                     name: String(row.name || "").trim(),
                     description: String(row.description || String(row.name || "")).trim()
@@ -50,7 +61,7 @@ QtObject {
         }
 
         if (Array.isArray(audio.sources)) {
-            inputDevices = audio.sources.map(function(row) {
+            inputDevices = audio.sources.map(function (row) {
                 return {
                     name: String(row.name || "").trim(),
                     description: String(row.description || String(row.name || "")).trim()
