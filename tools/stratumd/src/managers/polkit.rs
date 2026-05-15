@@ -8,7 +8,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tracing::info;
 use zbus::zvariant;
-use zbus::{dbus_interface, Connection};
+use zbus::Connection;
 
 fn get_session_id() -> Option<String> {
     if let Ok(id) = std::env::var("XDG_SESSION_ID") {
@@ -32,7 +32,7 @@ pub struct PolkitAgent {
     state: Arc<AppState>,
 }
 
-#[dbus_interface(name = "org.freedesktop.PolicyKit1.AuthenticationAgent")]
+#[zbus::interface(name = "org.freedesktop.PolicyKit1.AuthenticationAgent")]
 impl PolkitAgent {
     async fn begin_authentication(
         &self,
@@ -54,9 +54,9 @@ impl PolkitAgent {
                 if kind == "unix-user" {
                     details.get("uid").and_then(|v| {
                         v.downcast_ref::<u32>()
-                            .copied()
-                            .or_else(|| v.downcast_ref::<u16>().map(|&v| v as u32))
-                            .or_else(|| v.downcast_ref::<i32>().map(|&v| v as u32))
+                            .ok()
+                            .or_else(|| v.downcast_ref::<u16>().ok().map(|v| v as u32))
+                            .or_else(|| v.downcast_ref::<i32>().ok().map(|v| v as u32))
                     })
                 } else {
                     None

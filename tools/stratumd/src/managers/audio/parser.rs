@@ -1,13 +1,6 @@
-use super::config;
-use crate::managers::common::run_command_capture;
+use super::{config, engine};
+use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use serde_json::{json, Value};
-
-#[derive(Clone, Debug)]
-struct AudioDeviceRow {
-    name: String,
-    description: String,
-    block: String,
-}
 
 pub(crate) fn extract_first_percent(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
@@ -28,87 +21,6 @@ pub(crate) fn extract_first_percent(text: &str) -> Option<String> {
     None
 }
 
-fn extract_mute_state(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let _key = parts.next();
-        if let Some(value) = parts.next() {
-            return Some(value.trim().to_lowercase());
-        }
-    }
-    None
-}
-
-fn parse_pactl_device_rows(
-    output: &str,
-    block_prefix: &str,
-    skip_monitor_sources: bool,
-) -> Vec<AudioDeviceRow> {
-    let mut rows: Vec<AudioDeviceRow> = Vec::new();
-    let mut name = String::new();
-    let mut description = String::new();
-    let mut block = String::new();
-    let mut in_block = false;
-
-    for line in output.lines() {
-        if line.starts_with(block_prefix) {
-            if !name.is_empty() && (!skip_monitor_sources || !name.ends_with(".monitor")) {
-                rows.push(AudioDeviceRow {
-                    name: name.clone(),
-                    description: description.clone(),
-                    block: block.clone(),
-                });
-            }
-
-            name.clear();
-            description.clear();
-            block.clear();
-            in_block = true;
-        }
-
-        if !in_block {
-            continue;
-        }
-
-        if !block.is_empty() {
-            block.push('\n');
-        }
-        block.push_str(line);
-
-        let trimmed = line.trim_start();
-        if let Some(value) = trimmed.strip_prefix("Name: ") {
-            name = value.trim().to_string();
-        } else if let Some(value) = trimmed.strip_prefix("Description: ") {
-            description = value.trim().to_string();
-        }
-    }
-
-    if !name.is_empty() && (!skip_monitor_sources || !name.ends_with(".monitor")) {
-        rows.push(AudioDeviceRow {
-            name,
-            description,
-            block,
-        });
-    }
-    rows
-}
-
-fn parse_pw_info_property(info: &str, property: &str) -> Option<String> {
-    for line in info.lines() {
-        let trimmed = line.trim();
-        if (trimmed.starts_with(property)
-            || (trimmed.starts_with('*') && trimmed.contains(property)))
-            && trimmed.contains('=')
-        {
-            let parts: Vec<&str> = trimmed.split('=').collect();
-            if parts.len() > 1 {
-                return Some(parts[1].trim().trim_matches('"').to_string());
-            }
-        }
-    }
-    None
-}
-
 pub(crate) fn resolve_effective_default_sink(default_sink: &str) -> String {
     let raw = default_sink.trim();
     if raw.is_empty() {
@@ -119,17 +31,11 @@ pub(crate) fn resolve_effective_default_sink(default_sink: &str) -> String {
         return raw.to_string();
     }
 
-    // If we are currently on the EQ sink, find out where its output is pointing
-    let Ok(info) = run_command_capture("pw-cli", &["info", config::EQ_VIRTUAL_OUTPUT_NODE]) else {
-        return raw.to_string();
-    };
+    let resolved = engine::current_eq_target_sink().unwrap_or_default();
 
-    let resolved =
-        parse_pw_info_property(&info, "target.object").unwrap_or_else(|| raw.to_string());
-
-    // Safety check: if it resolved back to the virtual sink (rare/buggy state), don't return it
-    if resolved == config::EQ_VIRTUAL_INPUT_SINK || resolved == config::EQ_VIRTUAL_OUTPUT_NODE {
-        return String::new(); // Caller should handle empty as "unknown/lost"
+    // If this daemon instance does not have an EQ target in memory yet, keep value unknown.
+    if resolved.is_empty() {
+        return String::new();
     }
 
     resolved
@@ -140,28 +46,32 @@ pub(crate) fn is_headphone_default_sink(default_sink: &str) -> String {
         return "no".to_string();
     }
 
-    let sink_output = match run_command_capture("pactl", &["list", "sinks"]) {
-        Ok(output) => output,
+    let mut sink_ctrl = match SinkController::create() {
+        Ok(ctrl) => ctrl,
         Err(_) => return "no".to_string(),
     };
 
-    let sinks = parse_pactl_device_rows(&sink_output, "Sink #", false);
-    let Some(default_row) = sinks.iter().find(|row| row.name == default_sink) else {
+    let sinks = match sink_ctrl.list_devices() {
+        Ok(list) => list,
+        Err(_) => return "no".to_string(),
+    };
+
+    let Some(default_row) = sinks
+        .iter()
+        .find(|row| row.name.as_deref().unwrap_or_default() == default_sink)
+    else {
         return "no".to_string();
     };
 
-    let block = default_row.block.to_lowercase();
-    if block.contains("device.form_factor = \"headset\"")
-        || block.contains("device.form_factor = \"headphone\"")
-        || block.contains("device.icon_name = \"audio-headset")
-        || block.contains("active port: headset")
-        || block.contains("active port: headphone")
-        || block.contains("api.bluez5.icon = \"audio-headset\"")
-    {
-        return "yes".to_string();
-    }
+    let name = default_row.name.as_deref().unwrap_or_default();
+    let description = default_row.description.as_deref().unwrap_or_default();
+    let active_port = default_row
+        .active_port
+        .as_ref()
+        .and_then(|p| p.description.as_deref())
+        .unwrap_or_default();
 
-    let probe = format!("{} {}", default_sink, default_row.description).to_lowercase();
+    let probe = format!("{} {} {}", name, description, active_port).to_lowercase();
     if probe.contains("bluez_output.")
         || probe.contains("headphone")
         || probe.contains("headset")
@@ -242,51 +152,80 @@ pub(crate) fn parse_eq_bands(value: &Value) -> Option<(Vec<config::EqBand>, bool
 }
 
 pub(crate) fn fetch_current_audio_status() -> Value {
-    let default_sink_raw = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
-    let default_sink = resolve_effective_default_sink(&default_sink_raw);
-    let default_source = run_command_capture("pactl", &["get-default-source"]).unwrap_or_default();
+    let mut sink_ctrl = match SinkController::create() {
+        Ok(ctrl) => ctrl,
+        Err(_) => {
+            return json!({"ok": false, "error": "failed to connect sink controller"});
+        }
+    };
+    let mut source_ctrl = match SourceController::create() {
+        Ok(ctrl) => ctrl,
+        Err(_) => {
+            return json!({"ok": false, "error": "failed to connect source controller"});
+        }
+    };
 
-    let volume = run_command_capture("pactl", &["get-sink-volume", "@DEFAULT_SINK@"])
-        .ok()
-        .and_then(|out| extract_first_percent(&out))
+    let server_info = match sink_ctrl.get_server_info() {
+        Ok(info) => info,
+        Err(_) => return json!({"ok": false, "error": "failed to query server info"}),
+    };
+
+    let default_sink_raw = server_info.default_sink_name.unwrap_or_default();
+    let default_source = server_info.default_source_name.unwrap_or_default();
+    let default_sink = resolve_effective_default_sink(&default_sink_raw);
+
+    let sink_devices = sink_ctrl.list_devices().unwrap_or_default();
+    let default_sink_dev = sink_devices
+        .iter()
+        .find(|dev| dev.name.as_deref().unwrap_or_default() == default_sink_raw)
+        .cloned();
+
+    let volume = default_sink_dev
+        .as_ref()
+        .and_then(|dev| extract_first_percent(&dev.volume.print()))
         .unwrap_or_else(|| "0%".to_string());
 
-    let mute = run_command_capture("pactl", &["get-sink-mute", "@DEFAULT_SINK@"])
-        .ok()
-        .and_then(|out| extract_mute_state(&out))
-        .unwrap_or_else(|| "yes".to_string());
+    let mute = if default_sink_dev.as_ref().map(|dev| dev.mute).unwrap_or(true) {
+        "yes".to_string()
+    } else {
+        "no".to_string()
+    };
 
-    let sink_rows = run_command_capture("pactl", &["list", "sinks"])
-        .map(|out| parse_pactl_device_rows(&out, "Sink #", false))
-        .unwrap_or_default();
-
-    let sinks = sink_rows
+    let sinks = sink_devices
         .iter()
-        .filter(|row| {
-            row.name != config::EQ_VIRTUAL_INPUT_SINK && row.name != config::EQ_VIRTUAL_OUTPUT_NODE
-        })
-        .map(|row| {
-            json!({
-                "name": row.name,
-                "description": row.description,
-            })
+        .filter_map(|dev| {
+            let name = dev.name.clone().unwrap_or_default();
+            if name.is_empty()
+                || name == config::EQ_VIRTUAL_INPUT_SINK
+                || name == config::EQ_VIRTUAL_OUTPUT_NODE
+            {
+                return None;
+            }
+            let description = dev.description.clone().unwrap_or_else(|| name.clone());
+            Some(json!({
+                "name": name,
+                "description": description,
+            }))
         })
         .collect::<Vec<_>>();
 
-    let source_rows = run_command_capture("pactl", &["list", "sources"])
-        .map(|out| parse_pactl_device_rows(&out, "Source #", true))
-        .unwrap_or_default();
-
-    let sources = source_rows
+    let source_devices = source_ctrl.list_devices().unwrap_or_default();
+    let sources = source_devices
         .iter()
-        .filter(|row| {
-            row.name != config::EQ_VIRTUAL_INPUT_SINK && row.name != config::EQ_VIRTUAL_OUTPUT_NODE
-        })
-        .map(|row| {
-            json!({
-                "name": row.name,
-                "description": row.description,
-            })
+        .filter_map(|dev| {
+            let name = dev.name.clone().unwrap_or_default();
+            if name.is_empty()
+                || name.ends_with(".monitor")
+                || name == config::EQ_VIRTUAL_INPUT_SINK
+                || name == config::EQ_VIRTUAL_OUTPUT_NODE
+            {
+                return None;
+            }
+            let description = dev.description.clone().unwrap_or_else(|| name.clone());
+            Some(json!({
+                "name": name,
+                "description": description,
+            }))
         })
         .collect::<Vec<_>>();
 

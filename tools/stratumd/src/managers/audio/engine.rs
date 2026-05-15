@@ -2,9 +2,9 @@ use super::{config, parser};
 
 use crate::managers::common::{command_available, run_command_capture};
 use lazy_static::lazy_static;
+use pulsectl::controllers::{AppControl, SinkController};
 use serde_json::{json, Value};
-use std::io::Write;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio, Child};
 use std::sync::Mutex;
 
 #[derive(Clone, Debug)]
@@ -18,6 +18,7 @@ pub(crate) struct EqApplyResult {
 
 lazy_static! {
     static ref EQ_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+    static ref EQ_TARGET_SINK: Mutex<Option<String>> = Mutex::new(None);
     static ref GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
     pub(crate) static ref DEVICE_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 }
@@ -46,12 +47,19 @@ fn apply_eq_bands_pipewire(
     }
 
     let resolved_device = if device_id == "@DEFAULT_SINK@" {
-        let def = run_command_capture("pactl", &["get-default-sink"])
-            .unwrap_or_else(|_| device_id.to_string());
+        let def = SinkController::create()
+            .ok()
+            .and_then(|mut ctrl| ctrl.get_server_info().ok())
+            .and_then(|info| info.default_sink_name)
+            .unwrap_or_else(|| device_id.to_string());
         parser::resolve_effective_default_sink(def.trim())
     } else {
         device_id.to_string()
     };
+
+    let _lifecycle_guard = GLOBAL_EQ_LOCK.lock().unwrap();
+    destroy_eq_module();
+    std::thread::sleep(std::time::Duration::from_millis(150));
 
     let mut filter_specs = Vec::new();
     if preamp_db.abs() > 0.01 {
@@ -72,10 +80,6 @@ fn apply_eq_bands_pipewire(
     if filter_specs.is_empty() {
         filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
     }
-
-    let _lifecycle_guard = GLOBAL_EQ_LOCK.lock().unwrap();
-    destroy_eq_module();
-    std::thread::sleep(std::time::Duration::from_millis(150));
 
     let graph = builds_filter_graph_string(&filter_specs);
 
@@ -99,8 +103,7 @@ fn apply_eq_bands_pipewire(
         resolved_device.replace('\\', "\\\\").replace('"', "\\\"")
     );
 
-    spawn_eq_module(&module_args)
-        .map_err(|err| format!("failed to spawn persistent EQ process ($pw-cli): {}", err))?;
+    spawn_eq_module(&module_args)?;
 
     for _ in 0..30 {
         if find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK).is_some() {
@@ -109,12 +112,13 @@ fn apply_eq_bands_pipewire(
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    let current_default = run_command_capture("pactl", &["get-default-sink"]).unwrap_or_default();
+    let current_default = SinkController::create()
+        .ok()
+        .and_then(|mut ctrl| ctrl.get_server_info().ok())
+        .and_then(|info| info.default_sink_name)
+        .unwrap_or_default();
     if current_default.trim() != config::EQ_VIRTUAL_INPUT_SINK {
-        let _ = run_command_capture(
-            "pactl",
-            &["set-default-sink", config::EQ_VIRTUAL_INPUT_SINK],
-        );
+        let _ = run_command_capture("pactl", &["set-default-sink", config::EQ_VIRTUAL_INPUT_SINK]);
     }
     move_active_streams_to_eq(config::EQ_VIRTUAL_INPUT_SINK);
 
@@ -123,21 +127,13 @@ fn apply_eq_bands_pipewire(
         std::thread::sleep(std::time::Duration::from_millis(400));
         purge_eq_output_links();
         println!("[audio] [info] ensuring manual link: EQ -> {}", target);
-        let _ = run_command_capture(
-            "pw-link",
-            &[
-                "effect_output.stratum_eq:output_FL",
-                &format!("{}:playback_FL", target),
-            ],
-        );
-        let _ = run_command_capture(
-            "pw-link",
-            &[
-                "effect_output.stratum_eq:output_FR",
-                &format!("{}:playback_FR", target),
-            ],
-        );
+        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FL", &format!("{}:playback_FL", target)]);
+        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FR", &format!("{}:playback_FR", target)]);
     });
+
+    if let Ok(mut target) = EQ_TARGET_SINK.lock() {
+        *target = Some(resolved_device.clone());
+    }
 
     Ok(EqApplyResult {
         applied: true,
@@ -151,22 +147,23 @@ fn apply_eq_bands_pipewire(
     })
 }
 
-fn spawn_eq_module(module_args: &str) -> std::io::Result<()> {
+fn spawn_eq_module(module_args: &str) -> Result<(), String> {
     destroy_eq_module();
 
     let mut child = Command::new("pw-cli")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?;
+        .spawn()
+        .map_err(|err| format!("failed to spawn pw-cli: {}", err))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let cmd = format!(
-            "load-module libpipewire-module-filter-chain {}\n",
-            module_args
-        );
-        stdin.write_all(cmd.as_bytes())?;
-        stdin.flush()?;
+        let cmd = format!("load-module libpipewire-module-filter-chain {}\n", module_args);
+        use std::io::Write;
+        stdin.write_all(cmd.as_bytes())
+            .map_err(|err| format!("failed to write to pw-cli stdin: {}", err))?;
+        stdin.flush()
+            .map_err(|err| format!("failed to flush pw-cli stdin: {}", err))?;
     }
 
     let mut lock = EQ_PROCESS.lock().unwrap();
@@ -185,7 +182,16 @@ pub(crate) fn destroy_eq_module() {
     if let Some(id) = find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK) {
         let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
     }
+
+    if let Ok(mut target) = EQ_TARGET_SINK.lock() {
+        *target = None;
+    }
 }
+
+pub(crate) fn current_eq_target_sink() -> Option<String> {
+    EQ_TARGET_SINK.lock().ok().and_then(|target| target.clone())
+}
+
 
 fn find_node_id_by_name(node_name: &str) -> Option<u32> {
     let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
@@ -228,18 +234,10 @@ fn purge_eq_output_links() {
     for line in output.lines() {
         let trimmed = line.trim();
         if (line.starts_with(' ') || line.starts_with('\t')) && !trimmed.is_empty() {
-            if (current_source == "effect_output.stratum_eq:output_FL"
-                || current_source == "effect_output.stratum_eq:output_FR")
-                && trimmed.starts_with("|->")
-            {
+            if (current_source == "effect_output.stratum_eq:output_FL" || current_source == "effect_output.stratum_eq:output_FR") && trimmed.starts_with("|->") {
                 let target_port = trimmed.replacen("|->", "", 1).trim().to_string();
-                println!(
-                    "[audio] [info] purging incorrect EQ link: {} -> {}",
-                    current_source, target_port
-                );
-                let _ = Command::new("pw-link")
-                    .args(["-d", &current_source, &target_port])
-                    .status();
+                println!("[audio] [info] purging incorrect EQ link: {} -> {}", current_source, target_port);
+                let _ = Command::new("pw-link").args(&["-d", &current_source, &target_port]).status();
             }
         } else if !trimmed.is_empty() {
             current_source = trimmed.trim_end_matches(':').to_string();
@@ -248,28 +246,17 @@ fn purge_eq_output_links() {
 }
 
 fn move_active_streams_to_eq(target_sink: &str) {
-    let Ok(output) = run_command_capture("pactl", &["list", "short", "sink-inputs"]) else {
+    let Ok(mut sink_ctrl) = SinkController::create() else {
         return;
     };
 
-    for line in output.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if !parts.is_empty() {
-            let id = parts[0];
-            let _ = Command::new("pactl")
-                .args(["move-sink-input", id, target_sink])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
-}
+    let Ok(apps) = sink_ctrl.list_applications() else {
+        return;
+    };
 
-fn builds_filter_graph_string(filter_specs: &[String]) -> String {
-    format!(
-        "{{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }}",
-        filter_specs.join(" ")
-    )
+    for app in apps {
+        let _ = sink_ctrl.move_app_by_name(app.index, target_sink);
+    }
 }
 
 fn map_filter_type_for_pipewire(filter_type: &str) -> &'static str {
@@ -282,6 +269,13 @@ fn map_filter_type_for_pipewire(filter_type: &str) -> &'static str {
         "band_pass" => "bq_bandpass",
         _ => "bq_peaking",
     }
+}
+
+fn builds_filter_graph_string(filter_specs: &[String]) -> String {
+    format!(
+        "{{ nodes = [ {{ type = builtin name = eq label = param_eq config = {{ filters = [ {} ] }} }} ] inputs = [ \"eq:In 1\" \"eq:In 2\" ] outputs = [ \"eq:Out 1\" \"eq:Out 2\" ] }}",
+        filter_specs.join(" ")
+    )
 }
 
 pub(crate) fn eq_capabilities_json() -> Value {
@@ -304,8 +298,8 @@ pub(crate) fn eq_capabilities_json() -> Value {
             "wpctl_status_ok": wpctl_status_ok,
         },
         "parametric": {
-            "supported": wpctl_available && pw_cli_available,
-            "apply_mode": if wpctl_available && pw_cli_available { "pipewire-filter-chain" } else { "dry-run" },
+            "supported": pw_cli_available,
+            "apply_mode": if pw_cli_available { "pipewire-filter-chain" } else { "dry-run" },
             "max_bands": config::EQ_MAX_BANDS,
             "gain_range_db": [config::EQ_MIN_GAIN_DB, config::EQ_MAX_GAIN_DB],
             "freq_range_hz": [config::EQ_MIN_FREQ_HZ, config::EQ_MAX_FREQ_HZ],

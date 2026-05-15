@@ -1,6 +1,6 @@
 use crate::managers::common::{run_capture_optional, run_command_capture};
+use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use serde_json::{json, Value};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
@@ -21,9 +21,11 @@ pub fn spawn_monitor(state: Arc<AppState>) {
 
 pub fn initialize() {
     cleanup_orphans();
-    let default_sink_raw =
-        crate::managers::common::run_command_capture("pactl", &["get-default-sink"])
-            .unwrap_or_default();
+    let default_sink_raw = SinkController::create()
+        .ok()
+        .and_then(|mut ctrl| ctrl.get_server_info().ok())
+        .and_then(|info| info.default_sink_name)
+        .unwrap_or_default();
     let effective = parser::resolve_effective_default_sink(default_sink_raw.trim());
 
     println!(
@@ -36,15 +38,17 @@ pub fn initialize() {
     }
 
     if !engine::is_eq_virtual_sink_name(&effective) && !effective.is_empty() {
+        monitor::update_last_synced_state(&effective);
+    }
+
+    if !engine::is_eq_virtual_sink_name(&effective) && !effective.is_empty() {
         let _ = engine::auto_apply_preset_for_device(&effective);
     }
 }
 
 pub fn cleanup_orphans() {
-    println!("[audio] [info] cleaning up orphaned EQ processes");
-    let _ = Command::new("pkill")
-        .args(["-f", "pw-cli.*stratum_eq"])
-        .status();
+    println!("[audio] [info] cleaning up lingering EQ graph objects");
+    engine::destroy_eq_module();
 }
 
 pub(crate) fn refresh_device_cache() -> Value {
@@ -57,17 +61,54 @@ pub(crate) fn refresh_device_cache() -> Value {
 }
 
 pub fn set_volume(percent: i64) -> Value {
-    let p = percent.clamp(0, 150).to_string();
-    let _ = crate::managers::common::run_command_capture(
-        "pactl",
-        &["set-sink-volume", "@DEFAULT_SINK@", &format!("{}%", p)],
-    );
+    let target = percent.clamp(0, 150) as f64;
+    let mut sink_ctrl = match SinkController::create() {
+        Ok(ctrl) => ctrl,
+        Err(err) => {
+            return json!({"ok": false, "error": format!("sink controller unavailable: {}", err)});
+        }
+    };
+
+    let default_device = match sink_ctrl.get_default_device() {
+        Ok(device) => device,
+        Err(err) => {
+            return json!({"ok": false, "error": format!("failed to query default sink: {}", err)});
+        }
+    };
+
+    let current = parser::extract_first_percent(&default_device.volume.print())
+        .and_then(|v| v.trim_end_matches('%').parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    let delta = (target - current).abs() / 100.0;
+    if target > current {
+        sink_ctrl.increase_device_volume_by_percent(default_device.index, delta);
+    } else if target < current {
+        sink_ctrl.decrease_device_volume_by_percent(default_device.index, delta);
+    }
+
     refresh_device_cache();
-    serde_json::json!({"ok": true, "volume": p})
+    serde_json::json!({"ok": true, "volume": target.round() as i64})
 }
 
 pub fn set_input(target: &str) -> Value {
-    let _ = run_command_capture("pactl", &["set-default-source", target]);
+    let mut source_ctrl = match SourceController::create() {
+        Ok(ctrl) => ctrl,
+        Err(err) => {
+            return json!({"ok": false, "error": format!("source controller unavailable: {}", err)});
+        }
+    };
+
+    match source_ctrl.set_default_device(target) {
+        Ok(true) => {}
+        Ok(false) => {
+            return json!({"ok": false, "error": format!("source '{}' not accepted", target)});
+        }
+        Err(err) => {
+            return json!({"ok": false, "error": format!("failed to set default source: {}", err)});
+        }
+    }
+
     refresh_device_cache();
     json!({"ok": true, "source": target})
 }
@@ -78,10 +119,74 @@ pub fn set_output(target: &str) -> Value {
         return serde_json::json!({"ok": false, "error": "missing target sink"});
     }
 
-    info!("[stratumd] [audio] switching output to: {}", target);
-    let res = engine::auto_apply_preset_for_device(target);
+    // Skip if we're already on this device
+    if let Ok(mut ctrl) = SinkController::create() {
+        if let Ok(current_device) = ctrl.get_default_device() {
+            if let Some(current_name) = &current_device.name {
+                if current_name == target {
+                    return json!({"ok": true, "sink": target, "note": "already on target device"});
+                }
+            }
+        }
+    }
 
-    monitor::update_last_synced_state(target);
+    // Prevent monitor from triggering auto-restore while we're switching output
+    // Keep the lock active for 3+ seconds to let PulseAudio settle
+    {
+        let mut guard = monitor::IS_RESTORING.lock().unwrap();
+        *guard = true;
+    }
+
+    info!("[stratumd] [audio] switching output to: {}", target);
+    let mut res = engine::auto_apply_preset_for_device(target);
+    if !res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        match SinkController::create()
+            .ok()
+            .map(|mut ctrl| ctrl.set_default_device(target))
+        {
+            Some(Ok(true)) => {
+                res = json!({
+                    "ok": true,
+                    "sink": target,
+                    "warning": "output switched but EQ apply failed",
+                    "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
+                });
+            }
+            Some(Ok(false)) => {
+                res = json!({
+                    "ok": false,
+                    "error": format!("failed to switch sink and apply EQ: sink '{}' rejected", target),
+                    "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
+                });
+            }
+            Some(Err(err)) => {
+                res = json!({
+                    "ok": false,
+                    "error": format!("failed to switch sink and apply EQ: {}", err),
+                    "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
+                });
+            }
+            None => {
+                res = json!({
+                    "ok": false,
+                    "error": "failed to switch sink and apply EQ: sink controller unavailable",
+                    "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
+                });
+            }
+        }
+    }
+
+    if res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        monitor::update_last_synced_state(target);
+    }
+
+    // Re-enable auto-restore after 3 seconds to let PulseAudio fully settle
+    let _ = std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if let Ok(mut guard) = monitor::IS_RESTORING.lock() {
+            *guard = false;
+        }
+    });
 
     refresh_device_cache();
     res
@@ -133,22 +238,23 @@ pub fn eq_apply_preset(device_id: &str, preset_name: &str) -> Value {
     if let Some(preset) = preset {
         let apply_result = engine::apply_eq_bands(device_id, &preset.bands, preset.preamp_db);
 
-        config
-            .device_last_preset
-            .insert(device_id.to_string(), preset_name.to_string());
-        let _ = config::save_eq_config(&config);
-
         match apply_result {
-            Ok(res) => json!({
-                "ok": true,
-                "device_id": device_id,
-                "preset": preset_name,
-                "applied": res.applied,
-                "engine": res.engine,
-                "status": res.status,
-                "parametric_bands": preset.bands,
-                "preamp_db": preset.preamp_db,
-            }),
+            Ok(res) => {
+                config
+                    .device_last_preset
+                    .insert(device_id.to_string(), preset_name.to_string());
+                let _ = config::save_eq_config(&config);
+                json!({
+                    "ok": true,
+                    "device_id": device_id,
+                    "preset": preset_name,
+                    "applied": res.applied,
+                    "engine": res.engine,
+                    "status": res.status,
+                    "parametric_bands": preset.bands,
+                    "preamp_db": preset.preamp_db,
+                })
+            }
             Err(err) => json!({
                 "ok": false,
                 "error": err,
@@ -258,12 +364,7 @@ pub fn media_seek(position_sec: i64) -> Value {
 }
 
 pub fn devices() -> Value {
-    let cache = engine::DEVICE_CACHE.lock().unwrap();
-    if let Some(data) = &*cache {
-        return data.clone();
-    }
-
-    // Fallback if cache is empty (usually only on first boot)
-    drop(cache);
+    // Always read live state for device listings so UI views cannot regress to stale cache.
+    // The refresh helper keeps DEVICE_CACHE in sync for other call sites.
     refresh_device_cache()
 }
