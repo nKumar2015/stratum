@@ -80,10 +80,7 @@
     };
 
     # Optional NixOS module that installs the CLI system-wide.
-    nixosModules.default = {
-      pkgs,
-      ...
-    }: let
+    nixosModules.default = {pkgs, ...}: let
       hostSystem = pkgs.stdenv.hostPlatform.system;
     in {
       environment.systemPackages = [
@@ -106,8 +103,12 @@
           glib
           openssl
           pam
+          clang
+          libpulseaudio
+          pipewire
         ];
 
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
         shellHook = ''
           echo "Rust dev shell ready (cargo/rustc/clippy/rustfmt + dbus tooling)."
         '';
