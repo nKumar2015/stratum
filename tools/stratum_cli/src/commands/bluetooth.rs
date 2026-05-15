@@ -110,7 +110,7 @@ fn bluetooth_required() {
 }
 
 fn cmd_state() {
-    let (_ok, show_output) = run_program_combined("bluetoothctl", &["show"], None);
+    let (_ok, show_output) = run_program_combined("bluetoothctl", &[], Some("show\nquit\n"));
     let powered = parse_bool_field(&show_output, "Powered:", "no");
     emit_json(json!({
         "ok": true,
@@ -121,9 +121,9 @@ fn cmd_state() {
 }
 
 fn device_rows(include_paired: bool) -> Vec<(String, String)> {
-    let (_ok_devices, devices_output) = run_program_combined("bluetoothctl", &["devices"], None);
+    let (_ok_devices, devices_output) = run_program_combined("bluetoothctl", &[], Some("devices\nquit\n"));
     let (_ok_paired, paired_output) = if include_paired {
-        run_program_combined("bluetoothctl", &["devices", "Paired"], None)
+        run_program_combined("bluetoothctl", &[], Some("devices Paired\nquit\n"))
     } else {
         (true, String::new())
     };
@@ -166,7 +166,7 @@ fn cmd_list(hover: bool) {
     }
 
     let rows = if hover {
-        let (_ok, paired_output) = run_program_combined("bluetoothctl", &["devices", "Paired"], None);
+        let (_ok, paired_output) = run_program_combined("bluetoothctl", &[], Some("devices Paired\nquit\n"));
         let mut parsed = Vec::new();
 
         for line in paired_output.lines() {
@@ -184,7 +184,8 @@ fn cmd_list(hover: bool) {
     let mut devices = Vec::new();
 
     for (mac, name) in rows {
-        let (_ok, info) = run_program_combined("bluetoothctl", &["info", &mac], None);
+        let info_cmd = format!("info {}\nquit\n", mac);
+        let (_ok, info) = run_program_combined("bluetoothctl", &[], Some(&info_cmd));
         if hover {
             devices.push(json!({
                 "mac": mac,
@@ -217,7 +218,8 @@ fn cmd_connect(mac: &str, hover: bool) {
         return;
     }
 
-    let (_trust_ok, trust_output) = run_program_combined("bluetoothctl", &["trust", mac], None);
+    let trust_cmd = format!("trust {}\nquit\n", mac);
+    let (_trust_ok, trust_output) = run_program_combined("bluetoothctl", &[], Some(&trust_cmd));
 
     let stdin_script = format!("agent on\ndefault-agent\nconnect {}\n", mac);
     let (_connect_ok, connect_output) = run_program_combined("timeout", &["12", "bluetoothctl"], Some(&stdin_script));
@@ -249,8 +251,10 @@ fn cmd_connect(mac: &str, hover: bool) {
 }
 
 fn cmd_pair(mac: &str, hover: bool) {
-    let (_pair_ok, pair_output) = run_program_combined("bluetoothctl", &["pair", mac], None);
-    let (_trust_ok, trust_output) = run_program_combined("bluetoothctl", &["trust", mac], None);
+    let pair_cmd = format!("pair {}\nquit\n", mac);
+    let (_pair_ok, pair_output) = run_program_combined("bluetoothctl", &[], Some(&pair_cmd));
+    let trust_cmd = format!("trust {}\nquit\n", mac);
+    let (_trust_ok, trust_output) = run_program_combined("bluetoothctl", &[], Some(&trust_cmd));
 
     let mut parts = Vec::new();
     if !pair_output.is_empty() {
@@ -272,7 +276,9 @@ fn cmd_pair(mac: &str, hover: bool) {
 }
 
 fn cmd_simple_action(subcommand: &str, args: &[&str], hover: bool) {
-    let (_ok, output) = run_program_combined("bluetoothctl", args, None);
+    let cmd = args.join(" ");
+    let stdin = format!("{}\nquit\n", cmd);
+    let (_ok, output) = run_program_combined("bluetoothctl", &[], Some(&stdin));
     emit_json(json!({
         "ok": true,
         "command": "bluetooth",
@@ -353,7 +359,7 @@ fn cmd_check() {
 
     // Fallback to direct bluetoothctl
     if command_available("bluetoothctl") {
-        let (_ok, show_output) = run_program_combined("bluetoothctl", &["show"], None);
+        let (_ok, show_output) = run_program_combined("bluetoothctl", &[], Some("show\nquit\n"));
         let powered = parse_bool_field(&show_output, "Powered:", "no");
         if powered != "yes" {
             emit_json(json!({
@@ -365,7 +371,7 @@ fn cmd_check() {
             return;
         }
 
-        let (_ok_connected, connected_output) = run_program_combined("bluetoothctl", &["devices", "Connected"], None);
+        let (_ok_connected, connected_output) = run_program_combined("bluetoothctl", &[], Some("devices Connected\nquit\n"));
         let state = if connected_output.lines().any(|line| !line.trim().is_empty()) {
             "connected"
         } else {
@@ -448,11 +454,19 @@ pub fn handle(args: &[String]) {
         "power" => {
             bluetooth_required();
             let target = args.get(1).map(String::as_str).unwrap_or("");
-            cmd_simple_action("power", &["--timeout", "4", "power", target], false);
+            cmd_simple_action("power", &["power", target], false);
         }
         "scan" => {
             bluetooth_required();
-            cmd_simple_action("scan", &["--timeout", "5", "scan", "on"], false);
+            let (_ok, output) = run_program_combined("sh", &["-c", "(echo 'scan on'; sleep 5) | bluetoothctl"], None);
+            emit_json(json!({
+                "ok": true,
+                "command": "bluetooth",
+                "subcommand": "scan",
+                "hover": false,
+                "output": output,
+                "successful": !message_indicates_failure(&output),
+            }));
         }
         _ => fail("unknown bluetooth command"),
     }
