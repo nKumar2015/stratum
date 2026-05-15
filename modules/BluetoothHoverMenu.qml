@@ -6,6 +6,8 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 
+import "../globals/DaemonRpc.js" as DaemonRpc
+
 import "../globals"
 import "../components"
 
@@ -59,6 +61,10 @@ PanelWindow {
 
     function loadDevices() {
         loading = true;
+        if (DaemonRpc.canUse())
+            devProc.command = DaemonRpc.command("bluetooth.list", {});
+        else
+            devProc.command = ["stratum-cli", "bluetooth", "list", "--hover"];
         devProc.running = true;
     }
 
@@ -77,14 +83,20 @@ PanelWindow {
     function connectDevice(mac, name) {
         pendingMac = mac;
         statusMsg = "Connecting to " + name + "...";
-        actionProc.command = ["stratum-cli", "bluetooth", "connect", mac, "--hover"];
+        if (DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.connect", { mac: mac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "connect", mac, "--hover"];
         actionProc.running = true;
     }
 
     function disconnectDevice(mac, name) {
         pendingMac = mac;
         statusMsg = "Disconnecting " + name + "...";
-        actionProc.command = ["stratum-cli", "bluetooth", "disconnect", mac, "--hover"];
+        if (DaemonRpc.canUse())
+            actionProc.command = DaemonRpc.command("bluetooth.disconnect", { mac: mac }, 15);
+        else
+            actionProc.command = ["stratum-cli", "bluetooth", "disconnect", mac, "--hover"];
         actionProc.running = true;
     }
 
@@ -101,14 +113,26 @@ PanelWindow {
                 }
 
                 const payload = hoverMenu.parseCliJson(text);
-                if (!payload || payload.ok !== true) {
+                
+                // Track daemon success/failure if we used RPC
+                if (payload && payload.jsonrpc === "2.0") {
+                    if (payload.result && payload.result.ok === true) {
+                        DaemonRpc.recordSuccess();
+                    } else if (!payload.result || payload.result.ok !== true) {
+                        DaemonRpc.recordFailure();
+                    }
+                }
+                
+                const source = (payload && payload.jsonrpc === "2.0" && payload.result) ? payload.result : payload;
+
+                if (!source || source.ok !== true) {
                     hoverMenu.devices = [];
-                    hoverMenu.statusMsg = payload && payload.error ? String(payload.error) : "bluetoothctl not found";
+                    hoverMenu.statusMsg = source && source.error ? String(source.error) : "bluetoothctl not found";
                     statusClearTimer.restart();
                     return;
                 }
 
-                const rows = Array.isArray(payload.devices) ? payload.devices : [];
+                const rows = Array.isArray(source.devices) ? source.devices : [];
                 const parsed = [];
 
                 for (let i = 0; i < rows.length; i++) {
@@ -140,7 +164,17 @@ PanelWindow {
             onStreamFinished: {
                 const result = this.text.trim();
                 hoverMenu.pendingMac = "";
-                const payload = hoverMenu.parseCliJson(result);
+                let payload = hoverMenu.parseCliJson(result);
+                
+                if (payload && payload.jsonrpc === "2.0") {
+                    if (payload.result && payload.result.ok === true) {
+                        DaemonRpc.recordSuccess();
+                    } else {
+                        DaemonRpc.recordFailure();
+                    }
+                    payload = payload.result;
+                }
+                
                 const message = payload ? String(payload.output || payload.error || "") : result;
                 if (!payload || payload.ok !== true || message.toLowerCase().indexOf("failed") !== -1 || message.toLowerCase().indexOf("error") !== -1) {
                     hoverMenu.statusMsg = "Action failed";

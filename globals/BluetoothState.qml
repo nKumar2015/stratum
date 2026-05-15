@@ -16,7 +16,9 @@ QtObject {
             return;
 
         const raw = String(bluetooth.state || "off").trim().toLowerCase();
-        powered = raw === "connected" || raw === "on";
+        const pwr = String(bluetooth.powered || "no").trim().toLowerCase();
+        
+        powered = (pwr === "yes") || (raw === "connected" || raw === "on");
         connected = raw === "connected";
         scanning = String(bluetooth.scanning || "no").trim().toLowerCase() === "yes";
     }

@@ -420,8 +420,11 @@ ApplicationWindow {
                 }
                 bluetoothMenu.btStateFallbackTried = false;
 
-                bluetoothMenu.bluetoothEnabled = String(source.powered || "no") === "yes";
-                BluetoothState.powered = bluetoothMenu.bluetoothEnabled;
+                if (typeof BluetoothState.applyDaemonSnapshot === "function") {
+                    BluetoothState.applyDaemonSnapshot(source);
+                }
+
+                bluetoothMenu.bluetoothEnabled = BluetoothState.powered;
 
                 if (bluetoothMenu.pendingPowerSyncTarget) {
                     const expectedOn = bluetoothMenu.pendingPowerSyncTarget === "on";
