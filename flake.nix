@@ -54,9 +54,10 @@
 
         nativeBuildInputs = with pkgs; [pkg-config clang];
         buildInputs = with pkgs; [pam dbus pipewire libpulseaudio];
+
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
 
-      LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
     });
 
