@@ -53,7 +53,7 @@
         cargoLock.lockFile = ./tools/stratumd/Cargo.lock;
 
         nativeBuildInputs = with pkgs; [pkg-config];
-        buildInputs = with pkgs; [pam dbus];
+        buildInputs = with pkgs; [pam dbus pipewire libpulseaudio];
       };
 
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
@@ -104,6 +104,7 @@
           openssl
           pam
           clang
+
           libpulseaudio
           pipewire
         ];
