@@ -44,7 +44,7 @@ impl PolkitAgent {
         identities: Vec<(String, HashMap<String, zvariant::OwnedValue>)>,
     ) -> zbus::fdo::Result<()> {
         info!(
-            "[polkit] BEGIN_AUTHENTICATION: action={}, cookie={}",
+            "BEGIN_AUTHENTICATION: action={}, cookie={}",
             action_id, cookie
         );
 
@@ -93,7 +93,7 @@ impl PolkitAgent {
             }
         });
 
-        info!("[polkit] broadcasting UI request for cookie: {}", cookie);
+        info!("broadcasting UI request for cookie: {}", cookie);
         crate::ipc::broadcast_polkit_update(&self.state.qs_pid_cache, &payload);
         self.state.polkit.update(payload["polkit"].clone());
 
@@ -101,7 +101,7 @@ impl PolkitAgent {
         let success = rx.await.unwrap_or(false);
 
         info!(
-            "[polkit] authentication result for cookie {}: {}",
+            "authentication result for cookie {}: {}",
             cookie, success
         );
 
@@ -125,7 +125,7 @@ impl PolkitAgent {
     }
 
     async fn cancel_authentication(&self, cookie: String) {
-        info!("[polkit] CANCEL_AUTHENTICATION: cookie={}", cookie);
+        info!("CANCEL_AUTHENTICATION: cookie={}", cookie);
         let payload = json!({ "active": false, "cookie": cookie.clone() });
         self.state.polkit.update(payload);
 
@@ -170,7 +170,7 @@ pub async fn register_agent(state: Arc<AppState>) -> zbus::Result<()> {
         )
         .await?;
 
-    info!("[polkit] agent registered for session {}", session_id);
+    info!("agent registered for session {}", session_id);
     std::future::pending::<()>().await;
     Ok(())
 }
@@ -180,7 +180,7 @@ pub async fn verify_password_and_notify(user: &str, password: &str, cookie: &str
     let clean_password = password.trim_matches(&['\r', '\n', ' '][..]);
     let payload = format!("{}\n{}\n", cookie, clean_password);
 
-    tracing::info!("[polkit] spawning async helper for user: {}...", user);
+    tracing::info!("spawning async helper for user: {}...", user);
 
     let mut child = Command::new("/run/wrappers/bin/polkit-agent-helper-1")
         .arg(user)
@@ -201,7 +201,7 @@ pub async fn verify_password_and_notify(user: &str, password: &str, cookie: &str
     let status = child.wait().await.expect("Failed to wait for helper");
 
     tracing::info!(
-        "[polkit] verification finished. Success: {}",
+        "verification finished. Success: {}",
         status.success()
     );
 

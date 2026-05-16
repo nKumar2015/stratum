@@ -3,23 +3,28 @@ use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 pub(crate) mod config;
 pub(crate) mod engine;
 pub(crate) mod monitor;
+pub(crate) mod native_eq;
 pub(crate) mod parser;
 
 use crate::AppState;
 
 pub fn spawn_monitor(state: Arc<AppState>) {
     tokio::spawn(async move {
-        info!("[stratumd] [audio:monitor] starting audio monitor");
+        info!("starting audio monitor");
         monitor::run_monitor(state).await;
     });
 }
 
 pub fn initialize() {
+    // Initialize native PipeWire backend (non-fatal if it fails; pw-cli fallback is used).
+    if let Err(e) = native_eq::init() {
+        warn!("native PipeWire init failed (will use pw-cli fallback): {}", e);
+    }
     engine::warm_pw_cli_availability_cache();
     cleanup_orphans();
     let default_sink_raw = SinkController::create()
@@ -29,8 +34,8 @@ pub fn initialize() {
         .unwrap_or_default();
     let effective = parser::resolve_effective_default_sink(default_sink_raw.trim());
 
-    println!(
-        "[audio] [info] initializing audio manager with effective sink: {}",
+    info!(
+        "initializing audio manager with effective sink: {}",
         effective
     );
 
@@ -48,7 +53,7 @@ pub fn initialize() {
 }
 
 pub fn cleanup_orphans() {
-    println!("[audio] [info] cleaning up lingering EQ graph objects");
+    info!("cleaning up lingering EQ graph objects");
     engine::destroy_eq_module();
 }
 
@@ -138,7 +143,7 @@ pub fn set_output(target: &str) -> Value {
         *guard = true;
     }
 
-    info!("[stratumd] [audio] switching output to: {}", target);
+    info!("switching output to: {}", target);
     let mut res = engine::auto_apply_preset_for_device(target);
     if !res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         match SinkController::create()

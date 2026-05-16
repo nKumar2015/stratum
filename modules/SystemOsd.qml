@@ -9,10 +9,10 @@ import "../globals"
 PanelWindow {
     id: osd
 
-    anchors.top: true
     anchors.bottom: true
-    anchors.left: true
-    anchors.right: true
+    implicitWidth: 320
+    implicitHeight: 94
+    margins.bottom: 72
 
     color: "transparent"
     visible: osdOpacity > 0.01
@@ -223,11 +223,7 @@ PanelWindow {
     }
 
     Rectangle {
-        width: 320
-        height: 94
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 72
+        anchors.fill: parent
         opacity: osd.osdOpacity
         radius: 12
         color: Qt.rgba(0.07, 0.07, 0.11, 0.95)

@@ -1,4 +1,5 @@
-use super::{config, parser};
+use super::{config, native_eq, parser};
+use tracing::{info, warn};
 
 use crate::managers::common::{command_available, run_command_capture};
 use lazy_static::lazy_static;
@@ -39,11 +40,11 @@ pub(crate) fn apply_eq_bands(
 ) -> Result<EqApplyResult, String> {
     config::validate_parametric_bands(bands)?;
 
-    if pw_cli_available() {
+    if native_eq::is_available() || pw_cli_available() {
         return apply_eq_bands_pipewire(device_id, bands, preamp_db);
     }
 
-    Err("no supported audio processing engine found (requires pw-cli)".to_string())
+    Err("no supported audio processing engine found (requires pw-cli or native PipeWire)".to_string())
 }
 
 fn apply_eq_bands_pipewire(
@@ -93,15 +94,15 @@ fn apply_eq_bands_pipewire(
     let graph = builds_filter_graph_string(&filter_specs);
 
     if is_eq_virtual_sink_name(&resolved_device) || resolved_device.is_empty() {
-        println!(
-            "[audio] [warn] resolved_device for EQ is invalid ('{}'), aborting load",
+        warn!(
+            "resolved_device for EQ is invalid ('{}'), aborting load",
             resolved_device
         );
         return Err("invalid hardware target for EQ".to_string());
     }
 
-    println!(
-        "[audio] [info] loading EQ module targeting device: {}",
+    info!(
+        "loading EQ module targeting device: {}",
         resolved_device
     );
 
@@ -135,9 +136,8 @@ fn apply_eq_bands_pipewire(
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(400));
         purge_eq_output_links();
-        println!("[audio] [info] ensuring manual link: EQ -> {}", target);
-        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FL", &format!("{}:playback_FL", target)]);
-        let _ = run_command_capture("pw-link", &["effect_output.stratum_eq:output_FR", &format!("{}:playback_FR", target)]);
+        info!("ensuring manual link: EQ -> {}", target);
+        ensure_eq_output_links(&target);
     });
 
     if let Ok(mut target) = EQ_TARGET_SINK.lock() {
@@ -158,6 +158,30 @@ fn apply_eq_bands_pipewire(
 
 fn spawn_eq_module(module_args: &str) -> Result<(), String> {
     destroy_eq_module();
+
+    // Try native PipeWire API first.
+    if native_eq::is_available() {
+        match native_eq::load_filter_chain(module_args) {
+            Ok(id) => {
+                info!(
+                    "native: loaded filter-chain module (id={})",
+                    id
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                warn!(
+                    "native module load failed, falling back to pw-cli: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    // Fallback: pw-cli subprocess.
+    if !pw_cli_available() {
+        return Err("neither native PipeWire nor pw-cli available".to_string());
+    }
 
     let mut child = Command::new("pw-cli")
         .stdin(Stdio::piped())
@@ -187,7 +211,17 @@ fn spawn_eq_module(module_args: &str) -> Result<(), String> {
 
 pub(crate) fn destroy_eq_module() {
     if let Some(id) = find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK) {
-        let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
+        // Try native destroy first.
+        if native_eq::is_available() {
+            if native_eq::destroy_global(id).is_ok() {
+                info!("native: destroyed EQ module (id={})", id);
+            } else {
+                // Fallback to pw-cli.
+                let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
+            }
+        } else {
+            let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
+        }
     }
 
     if let Ok(mut target) = EQ_TARGET_SINK.lock() {
@@ -201,6 +235,16 @@ pub(crate) fn current_eq_target_sink() -> Option<String> {
 
 
 fn find_node_id_by_name(node_name: &str) -> Option<u32> {
+    if native_eq::is_available() {
+        if let Some(id) = native_eq::find_node_by_name(node_name) {
+            return Some(id);
+        }
+    }
+
+    if !pw_cli_available() {
+        return None;
+    }
+
     let output = run_command_capture("pw-cli", &["ls", "Node"]).ok()?;
     let mut current_id: Option<u32> = None;
 
@@ -232,6 +276,20 @@ fn find_node_id_by_name(node_name: &str) -> Option<u32> {
 }
 
 fn purge_eq_output_links() {
+    if native_eq::is_available() {
+        let links = native_eq::list_eq_output_links();
+        for link in &links {
+            info!(
+                "native: purging EQ link id={} ({}:{} -> {}:{})",
+                link.id, link.output_node, link.output_port, link.input_node, link.input_port
+            );
+            let _ = native_eq::destroy_global(link.id);
+        }
+        if !links.is_empty() {
+            return;
+        }
+    }
+
     let output = match Command::new("pw-link").arg("-l").output() {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(_) => return,
@@ -241,15 +299,51 @@ fn purge_eq_output_links() {
     for line in output.lines() {
         let trimmed = line.trim();
         if (line.starts_with(' ') || line.starts_with('\t')) && !trimmed.is_empty() {
-            if (current_source == "effect_output.stratum_eq:output_FL" || current_source == "effect_output.stratum_eq:output_FR") && trimmed.starts_with("|->") {
-                let target_port = trimmed.replacen("|->", "", 1).trim().to_string();
-                println!("[audio] [info] purging incorrect EQ link: {} -> {}", current_source, target_port);
+            if (current_source == "effect_output.stratum_eq:output_FL" || current_source == "effect_output.stratum_eq:output_FR") && trimmed.starts_with("|-> ") {
+                let target_port = trimmed.replacen("|-> ", "", 1).trim().to_string();
+                info!("purging incorrect EQ link: {} -> {}", current_source, target_port);
                 let _ = Command::new("pw-link").args(&["-d", &current_source, &target_port]).status();
             }
         } else if !trimmed.is_empty() {
             current_source = trimmed.trim_end_matches(':').to_string();
         }
     }
+}
+
+fn ensure_eq_output_links(target: &str) {
+    if native_eq::is_available() {
+        let fl_ok = native_eq::create_link(
+            "effect_output.stratum_eq",
+            "output_FL",
+            target,
+            "playback_FL",
+        );
+        let fr_ok = native_eq::create_link(
+            "effect_output.stratum_eq",
+            "output_FR",
+            target,
+            "playback_FR",
+        );
+        if fl_ok.is_ok() && fr_ok.is_ok() {
+            return;
+        }
+        warn!("native link creation failed, falling back to pw-link");
+    }
+
+    let _ = run_command_capture(
+        "pw-link",
+        &[
+            "effect_output.stratum_eq:output_FL",
+            &format!("{}:playback_FL", target),
+        ],
+    );
+    let _ = run_command_capture(
+        "pw-link",
+        &[
+            "effect_output.stratum_eq:output_FR",
+            &format!("{}:playback_FR", target),
+        ],
+    );
 }
 
 fn move_active_streams_to_eq(target_sink: &str) {
@@ -287,8 +381,10 @@ fn builds_filter_graph_string(filter_specs: &[String]) -> String {
 
 pub(crate) fn eq_capabilities_json() -> Value {
     let wpctl_available = command_available("wpctl");
-    let pw_cli_available = pw_cli_available();
+    let pw_cli_avail = pw_cli_available();
     let pactl_available = command_available("pactl");
+    let native_pw = native_eq::is_available();
+    let has_engine = native_pw || pw_cli_avail;
 
     let wpctl_status_ok = if wpctl_available {
         run_command_capture("wpctl", &["status"]).is_ok()
@@ -301,12 +397,13 @@ pub(crate) fn eq_capabilities_json() -> Value {
         "tools": {
             "pactl": pactl_available,
             "wpctl": wpctl_available,
-            "pw_cli": pw_cli_available,
+            "pw_cli": pw_cli_avail,
+            "native_pipewire": native_pw,
             "wpctl_status_ok": wpctl_status_ok,
         },
         "parametric": {
-            "supported": pw_cli_available,
-            "apply_mode": if pw_cli_available { "pipewire-filter-chain" } else { "dry-run" },
+            "supported": has_engine,
+            "apply_mode": if native_pw { "native-pipewire" } else if pw_cli_avail { "pipewire-filter-chain" } else { "dry-run" },
             "max_bands": config::EQ_MAX_BANDS,
             "gain_range_db": [config::EQ_MIN_GAIN_DB, config::EQ_MAX_GAIN_DB],
             "freq_range_hz": [config::EQ_MIN_FREQ_HZ, config::EQ_MAX_FREQ_HZ],

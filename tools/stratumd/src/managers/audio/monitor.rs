@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 lazy_static! {
     pub static ref LAST_SYNCED_STATE: Mutex<(String, Instant)> =
@@ -30,17 +30,17 @@ pub(crate) async fn run_monitor(state: Arc<AppState>) {
 
     match event_result {
         Ok(Ok(())) => {
-            warn!("[audio:monitor] pipewire event loop exited unexpectedly; falling back to polling");
+            warn!("pipewire event loop exited unexpectedly; falling back to polling");
         }
         Ok(Err(err)) => {
-            warn!("[audio:monitor] failed to start pipewire event loop: {}; falling back to polling", err);
+            warn!("failed to start pipewire event loop: {}; falling back to polling", err);
         }
         Err(err) => {
-            warn!("[audio:monitor] pipewire event worker join error: {}; falling back to polling", err);
+            warn!("pipewire event worker join error: {}; falling back to polling", err);
         }
     }
 
-    info!("[audio:monitor] polling PipeWire/Pulse state (fallback mode)");
+    info!("polling PipeWire/Pulse state (fallback mode)");
 
     loop {
         if let Some(snapshot) = fetch_current_status() {
@@ -66,7 +66,7 @@ fn run_pipewire_event_loop(state: Arc<AppState>) -> Result<(), String> {
         .get_registry()
         .map_err(|err| format!("failed to get pipewire registry: {}", err))?;
 
-    info!("[audio:monitor] listening for PipeWire registry events");
+    info!("listening for PipeWire registry events");
 
     let global_state = Arc::clone(&state);
     let remove_state = Arc::clone(&state);
@@ -238,8 +238,8 @@ fn notify_default_sink_changed(new_sink_raw: &str) {
     }
 
     if *last_sink != effective {
-        println!(
-            "[audio] [info] hardware output changed to {}, restoring device EQ profile",
+        info!(
+            "hardware output changed to {}, restoring device EQ profile",
             effective
         );
         *lock = (effective.clone(), Instant::now());
@@ -255,8 +255,8 @@ fn notify_default_sink_changed(new_sink_raw: &str) {
             let res = engine::auto_apply_preset_for_device(&target);
 
             if !res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                println!(
-                    "[audio] [error] auto-restore failed for {}: {:?}",
+                error!(
+                    "auto-restore failed for {}: {:?}",
                     target,
                     res.get("error")
                 );

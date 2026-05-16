@@ -508,6 +508,7 @@ ApplicationWindow {
         routeSwitching = true;
         routeSwitchKind = "input";
         routeStatusMsg = "Switching input...";
+        AudioState.setOptimisticInput(target);
         routeFallbackCommand = ["stratum-cli", "audio", "set-input", target];
         routeFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())
@@ -527,6 +528,7 @@ ApplicationWindow {
         routeSwitching = true;
         routeSwitchKind = "output";
         routeStatusMsg = "Switching output...";
+        AudioState.setOptimisticOutput(target);
         routeFallbackCommand = ["stratum-cli", "audio", "set-output", target];
         routeFallbackTried = false;
         if (daemonPreferred && DaemonRpc.canUse())

@@ -167,7 +167,7 @@ PanelWindow {
         if (!name || switching)
             return;
         switching = true;
-        statusMsg = "Switching output...";
+        AudioState.setOptimisticOutput(name);
 
         if (DaemonRpc.canUse()) {
             actionProc.command = DaemonRpc.command("audio.set_output", {
@@ -183,7 +183,7 @@ PanelWindow {
         if (!name || switching)
             return;
         switching = true;
-        statusMsg = "Switching input...";
+        AudioState.setOptimisticInput(name);
 
         if (DaemonRpc.canUse()) {
             actionProc.command = DaemonRpc.command("audio.set_input", {
@@ -255,9 +255,6 @@ PanelWindow {
 
                 if (!payload || payload.ok !== true) {
                     hoverMenu.statusMsg = "Switch failed";
-                    statusClearTimer.restart();
-                } else {
-                    hoverMenu.statusMsg = "Switched";
                     statusClearTimer.restart();
                 }
                 hoverMenu.loadStatus(false);
