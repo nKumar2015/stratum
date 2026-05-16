@@ -881,10 +881,13 @@ async fn handle_client(mut stream: UnixStream, state: Arc<AppState>) -> Result<(
         };
 
         let payload = format!("{}\n", response);
-        writer
-            .write_all(payload.as_bytes())
-            .await
-            .map_err(|err| format!("failed to write client response: {}", err))?;
+        if let Err(err) = writer.write_all(payload.as_bytes()).await {
+            if err.kind() == std::io::ErrorKind::BrokenPipe {
+                warn!("client disconnected before response could be sent (Broken pipe)");
+            } else {
+                return Err(format!("failed to write client response: {}", err));
+            }
+        }
     }
 }
 
