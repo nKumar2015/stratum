@@ -826,6 +826,46 @@ async fn main() {
         qs_pid_cache: Mutex::new(None),
         pending_auths: Mutex::new(HashMap::new()),
     });
+    // Initialize the RPC listener early so clients can connect even if
+    // some managers (e.g. audio) take time during initialization.
+    let path = socket_path();
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+    }
+
+    let listener = match UnixListener::bind(&path) {
+        Ok(l) => l,
+        Err(err) => {
+            error!("failed to bind socket at {}: {}", path.display(), err);
+            std::process::exit(1);
+        }
+    };
+
+    info!("Listening on unix socket: {}", path.display());
+
+    // Spawn accept loop in background so initialization can continue.
+    {
+        let state_accept = Arc::clone(&state);
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => {
+                        let state = Arc::clone(&state_accept);
+                        tokio::spawn(async move {
+                            if let Err(err) = handle_client(stream, state).await {
+                                error!("client handling error: {}", err);
+                            }
+                        });
+                    }
+                    Err(err) => {
+                        error!("listener accept error: {}", err);
+                        // small backoff to avoid busy-loop on persistent errors
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                }
+            }
+        });
+    }
 
     // Initialize managers (restore state, etc)
     managers::audio::initialize();
