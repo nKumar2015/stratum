@@ -39,15 +39,48 @@ Item {
         onTriggered: audioState._pendingInput = ""
     }
 
+    Timer {
+        id: pendingHeadphonesTimer
+        interval: 3000
+        repeat: false
+    }
+
+    function isDeviceHeadphone(name, isOutput) {
+        if (!name) return false;
+        
+        let desc = "";
+        const list = isOutput ? outputDevices : inputDevices;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i] && list[i].name === name) {
+                desc = list[i].description || "";
+                break;
+            }
+        }
+        
+        const probe = String(name + " " + desc).toLowerCase();
+        return probe.includes("bluez") || 
+               probe.includes("headphone") || 
+               probe.includes("headset") || 
+               probe.includes("buds") || 
+               probe.includes("airpods") || 
+               probe.includes("earbud");
+    }
+
     function setOptimisticOutput(name) {
         defaultOutput = name;
         _pendingOutput = name;
+        headphonesOutput = isDeviceHeadphone(name, true);
         pendingOutputTimer.restart();
+        pendingHeadphonesTimer.restart();
     }
 
     function setOptimisticInput(name) {
         defaultInput = name;
         _pendingInput = name;
+        if (isDeviceHeadphone(name, false)) {
+            headphonesOutput = true;
+            pendingHeadphonesTimer.restart();
+        }
         pendingInputTimer.restart();
     }
 
@@ -93,7 +126,10 @@ Item {
             else
                 muted = String(muteValue || "yes").trim().toLowerCase() === "yes";
         }
-        headphonesOutput = String(audio.headphones || "no").trim().toLowerCase() === "yes";
+        const incomingHeadphones = String(audio.headphones || "no").trim().toLowerCase() === "yes";
+        if (!pendingHeadphonesTimer.running) {
+            headphonesOutput = incomingHeadphones;
+        }
 
         // Device lists — only replace if content actually changed to avoid
         // QML Repeater/ComboBox teardown flicker during EQ graph rebuilds.

@@ -16,7 +16,7 @@ Item {
     readonly property int volumeMidThreshold: 67
     readonly property int iconFadeMs: 150
 
-    property string icon: "󰖀"
+    property string icon: "󰖁"
     property int volumePercent: 0
     property bool muted: false
     property bool headphonesOutput: false

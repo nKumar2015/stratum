@@ -229,8 +229,11 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         })
         .collect::<Vec<_>>();
 
+    let headphones = is_headphone_default_sink(&default_sink);
+
     json!({
         "ok": true,
+        "headphones": headphones,
         "status": {
             "volume": volume,
             "mute": mute,

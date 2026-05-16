@@ -201,7 +201,11 @@ fn fetch_current_status() -> Option<Value> {
     let sinks = fresh.get("sinks").cloned().unwrap_or_else(|| json!([]));
     let sources = fresh.get("sources").cloned().unwrap_or_else(|| json!([]));
 
-    let headphones = parser::is_headphone_default_sink(&effective_sink);
+    let headphones = fresh
+        .get("headphones")
+        .and_then(Value::as_str)
+        .unwrap_or("no")
+        .to_string();
 
     Some(json!({
         "default_sink": effective_sink,
