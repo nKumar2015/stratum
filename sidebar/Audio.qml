@@ -31,7 +31,7 @@ Item {
             icon = "󰕿";
         else if (volumePercent < volumeMidThreshold)
             icon = "󰖀";
-        else if (volumePercent >= 100)
+        else if (volumePercent >= volumeMidThreshold)
             icon = "󰕾";
         else
             icon = "󰝞";

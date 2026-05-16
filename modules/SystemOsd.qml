@@ -68,7 +68,7 @@ PanelWindow {
             return "󰕿";
         if (value < 67)
             return "󰖀";
-        if (value <= 100)
+        if (value >= 67)
             return "󰕾";
         return "󰝞";
     }
