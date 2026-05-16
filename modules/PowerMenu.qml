@@ -42,7 +42,7 @@ PanelWindow {
         },
         {
             name: "Logout",
-            command: ["hyprctl", "dispatch", "exit"],
+            command: ["hyprctl", "dispatch", "hl.dsp.exit()"],
             icon: "../themes/icons/logout.svg"
         },
         {
