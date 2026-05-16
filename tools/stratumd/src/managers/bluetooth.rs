@@ -97,20 +97,24 @@ async fn status_from_bluer_async(include_unpaired: bool) -> Result<Value, String
 }
 
 pub fn status() -> Value {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(runtime) => runtime,
-        Err(e) => return json!({ "ok": false, "error": e.to_string(), "state": "off", "scanning": "no", "devices": [] }),
-    };
+    std::thread::spawn(|| {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(e) => return json!({ "ok": false, "error": e.to_string(), "state": "off", "scanning": "no", "devices": [] }),
+        };
 
-    let result = runtime.block_on(async {
-        tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(false)).await
-    });
+        let result = runtime.block_on(async {
+            tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(false)).await
+        });
 
-    match result {
-        Ok(Ok(snapshot)) => snapshot,
-        Ok(Err(error)) => json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [] }),
-        Err(elapsed) => json!({ "ok": false, "error": elapsed.to_string(), "state": "off", "scanning": "no", "devices": [] }),
-    }
+        match result {
+            Ok(Ok(snapshot)) => snapshot,
+            Ok(Err(error)) => json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [] }),
+            Err(elapsed) => json!({ "ok": false, "error": elapsed.to_string(), "state": "off", "scanning": "no", "devices": [] }),
+        }
+    })
+    .join()
+    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "state": "off", "scanning": "no", "devices": [] }))
 }
 
 pub fn state() -> Value {
@@ -130,72 +134,87 @@ pub fn state() -> Value {
 }
 
 pub fn list() -> Value {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(runtime) => runtime,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
+    std::thread::spawn(|| {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+        };
 
-    let result = runtime.block_on(async {
-        tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(true)).await
-    });
+        let result = runtime.block_on(async {
+            tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(true)).await
+        });
 
-    match result {
-        Ok(Ok(mut snapshot)) => {
-            if let Some(obj) = snapshot.as_object_mut() {
-                let devices = obj.get("devices").cloned().unwrap_or(json!([]));
-                return json!({
-                    "ok": true,
-                    "command": "bluetooth",
-                    "subcommand": "list",
-                    "hover": false,
-                    "devices": devices,
-                });
+        match result {
+            Ok(Ok(mut snapshot)) => {
+                if let Some(obj) = snapshot.as_object_mut() {
+                    let devices = obj.get("devices").cloned().unwrap_or(json!([]));
+                    return json!({
+                        "ok": true,
+                        "command": "bluetooth",
+                        "subcommand": "list",
+                        "hover": false,
+                        "devices": devices,
+                    });
+                }
+                json!({"ok": false, "error": "malformed snapshot"})
             }
-            json!({"ok": false, "error": "malformed snapshot"})
+            Ok(Err(e)) => json!({"ok": false, "error": e}),
+            Err(e) => json!({"ok": false, "error": e.to_string()}),
         }
-        Ok(Err(e)) => json!({"ok": false, "error": e}),
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
-    }
+    })
+    .join()
+    .unwrap_or_else(|_| json!({"ok": false, "error": "thread panicked"}))
 }
 
 pub fn power(target: &str) -> Value {
     let target_bool = target == "on";
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
+    let target_str = target.to_string();
+    std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+        };
 
-    let result = runtime.block_on(async {
-        let session = Session::new().await.map_err(|e| e.to_string())?;
-        let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-        adapter.set_powered(target_bool).await.map_err(|e| e.to_string())?;
-        Ok::<(), String>(())
-    });
+        let result = runtime.block_on(async {
+            let session = Session::new().await.map_err(|e| e.to_string())?;
+            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
+            adapter.set_powered(target_bool).await.map_err(|e| e.to_string())?;
+            Ok::<(), String>(())
+        });
 
-    match result {
-        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "power", "successful": true, "output": format!("Powered {}", target) }),
-        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "power", "successful": false }),
-    }
+        match result {
+            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "power", "successful": true, "output": format!("Powered {}", target_str) }),
+            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "power", "successful": false }),
+        }
+    })
+    .join()
+    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "power", "successful": false }))
 }
 
 pub fn scan() -> Value {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
+    std::thread::spawn(|| {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return json!({ "ok": false, "error": e.to_string(), "command": "bluetooth", "subcommand": "scan", "successful": false }),
+        };
 
-    let result = runtime.block_on(async {
-        let session = Session::new().await.map_err(|e| e.to_string())?;
-        let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-        let _discovery = adapter.discover_devices().await.map_err(|e| e.to_string())?;
-        tokio::time::sleep(Duration::from_secs(8)).await;
-        Ok::<(), String>(())
-    });
+        let result = runtime.block_on(async {
+            let session = Session::new().await.map_err(|e| e.to_string())?;
+            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
 
-    match result {
-        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "scan", "successful": true, "output": "Scan complete" }),
-        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "scan", "successful": false }),
-    }
+            let _discover = adapter.discover_devices().await.map_err(|e| e.to_string())?;
+            tokio::time::sleep(BT_TIMEOUT).await;
+
+            Ok::<(), String>(())
+        });
+
+        match result {
+            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "scan", "successful": true, "output": "Discovery finished" }),
+            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "scan", "successful": false }),
+        }
+    })
+    .join()
+    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "scan", "successful": false }))
 }
 
 async fn with_device<F, Fut>(mac: &str, f: F) -> Result<(), String>
@@ -212,23 +231,30 @@ where
 
 fn execute_device_action<F, Fut>(subcommand: &str, mac: &str, f: F) -> Value
 where
-    F: FnOnce(bluer::Device) -> Fut,
-    Fut: std::future::Future<Output = Result<(), bluer::Error>>,
+    F: FnOnce(bluer::Device) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(), bluer::Error>> + Send + 'static,
 {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
+    let mac_str = mac.to_string();
+    let subcmd = subcommand.to_string();
+    
+    std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+        };
 
-    let result = runtime.block_on(async {
-        tokio::time::timeout(Duration::from_secs(12), with_device(mac, f)).await
-    });
+        let result = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(12), with_device(&mac_str, f)).await
+        });
 
-    match result {
-        Ok(Ok(_)) => json!({ "ok": true, "command": "bluetooth", "subcommand": subcommand, "successful": true, "output": format!("{} succeeded", subcommand) }),
-        Ok(Err(e)) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": subcommand, "successful": false }),
-        Err(_) => json!({ "ok": false, "error": "timeout", "command": "bluetooth", "subcommand": subcommand, "successful": false }),
-    }
+        match result {
+            Ok(Ok(_)) => json!({ "ok": true, "command": "bluetooth", "subcommand": subcmd, "successful": true, "output": format!("{} succeeded", subcmd) }),
+            Ok(Err(e)) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": subcmd, "successful": false }),
+            Err(_) => json!({ "ok": false, "error": "timeout", "command": "bluetooth", "subcommand": subcmd, "successful": false }),
+        }
+    })
+    .join()
+    .unwrap_or_else(move |_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": subcommand, "successful": false }))
 }
 
 pub fn pair(mac: &str) -> Value {
@@ -260,22 +286,27 @@ pub fn disconnect(mac: &str) -> Value {
 }
 
 pub fn forget(mac: &str) -> Value {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
+    let mac_str = mac.to_string();
+    std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
+        };
 
-    let result = runtime.block_on(async {
-        let addr: Address = mac.parse().map_err(|_| format!("Invalid MAC address: {}", mac))?;
-        let session = Session::new().await.map_err(|e| e.to_string())?;
-        let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-        adapter.remove_device(addr).await.map_err(|e| e.to_string())
-    });
+        let result = runtime.block_on(async {
+            let addr: Address = mac_str.parse().map_err(|_| format!("Invalid MAC address: {}", mac_str))?;
+            let session = Session::new().await.map_err(|e| e.to_string())?;
+            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
+            adapter.remove_device(addr).await.map_err(|e| e.to_string())
+        });
 
-    match result {
-        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "forget", "successful": true, "output": "forgotten" }),
-        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "forget", "successful": false }),
-    }
+        match result {
+            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "forget", "successful": true, "output": "forgotten" }),
+            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "forget", "successful": false }),
+        }
+    })
+    .join()
+    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "forget", "successful": false }))
 }
 
 pub fn trust(mac: &str) -> Value {

@@ -140,6 +140,10 @@ PanelWindow {
                     const mac = String(row.mac || "").trim();
                     if (!mac)
                         continue;
+                        
+                    if (row.paired !== undefined && row.paired !== "yes")
+                        continue;
+
                     parsed.push({
                         mac: mac,
                         name: String(row.name || "").trim() || mac,
