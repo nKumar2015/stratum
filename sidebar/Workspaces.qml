@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
+import Quickshell.Io
 
 import "../globals"
 
@@ -12,7 +13,7 @@ Item {
 
     property int itemHeight: 20
     property int itemSpacing: 3
-
+    property int wsTarget: 0
     implicitWidth: 40
     implicitHeight: 115
     clip: true
@@ -101,7 +102,7 @@ Item {
 
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: Hyprland.dispatch("workspace " + wsText.wsId)
+                    onClicked: Hyprland.dispatch("hl.dsp.focus({ workspace = \"" + wsText.wsId + "\" })")
                     onWheel: wheel => {
                         const ids = wsRoot.workspaceIds;
                         const currentIndex = ids.indexOf(wsRoot.activeWsId);

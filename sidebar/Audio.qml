@@ -40,16 +40,16 @@ Item {
     Connections {
         target: AudioState
         function onVolumePercentChanged() {
-            volumePercent = Math.max(0, Math.min(volumeMaxPercent, AudioState.volumePercent));
-            applyIconState();
+            root.volumePercent = Math.max(0, Math.min(root.volumeMaxPercent, AudioState.volumePercent));
+            root.applyIconState();
         }
         function onMutedChanged() {
-            muted = AudioState.muted;
-            applyIconState();
+            root.muted = AudioState.muted;
+            root.applyIconState();
         }
         function onHeadphonesOutputChanged() {
-            headphonesOutput = AudioState.headphonesOutput;
-            applyIconState();
+            root.headphonesOutput = AudioState.headphonesOutput;
+            root.applyIconState();
         }
     }
 
