@@ -755,7 +755,7 @@ async fn handle_method(
             let password = param_string(_params, "password")?;
             let cookie = param_string(_params, "cookie").unwrap_or_default();
 
-            info!("[polkit] received response for cookie: {}", cookie);
+            info!("received response for cookie: {}", cookie);
 
             let success =
                 managers::polkit::verify_password_and_notify(&user, &password, &cookie).await;
@@ -763,7 +763,7 @@ async fn handle_method(
             if let Ok(mut pending) = state.pending_auths.lock() {
                 if let Some(session) = pending.get_mut(&cookie) {
                     if success {
-                        info!("[polkit] auth success for cookie: {}", cookie);
+                        info!("auth success for cookie: {}", cookie);
                         let session = pending.remove(&cookie).unwrap();
                         let _ = session.tx.send(true);
 
@@ -786,7 +786,7 @@ async fn handle_method(
 
                         if remaining > 0 {
                             info!(
-                                "[polkit] auth failed for cookie: {}, {} attempts remaining",
+                                "auth failed for cookie: {}, {} attempts remaining",
                                 cookie, remaining
                             );
 
@@ -806,7 +806,7 @@ async fn handle_method(
                                 json!({"ok": true, "success": false, "retry": true, "remaining": remaining}),
                             );
                         } else {
-                            info!("[polkit] auth failed (max attempts) for cookie: {}", cookie);
+                            info!("auth failed (max attempts) for cookie: {}", cookie);
                             let session = pending.remove(&cookie).unwrap();
                             let _ = session.tx.send(false);
 
