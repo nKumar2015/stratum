@@ -4,8 +4,8 @@ use crate::managers::common::{command_available, run_command_capture};
 use lazy_static::lazy_static;
 use pulsectl::controllers::{AppControl, SinkController};
 use serde_json::{json, Value};
-use std::process::{Command, Stdio, Child};
-use std::sync::Mutex;
+use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EqApplyResult {
@@ -17,10 +17,19 @@ pub(crate) struct EqApplyResult {
 }
 
 lazy_static! {
-    static ref EQ_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
     static ref EQ_TARGET_SINK: Mutex<Option<String>> = Mutex::new(None);
     static ref GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
     pub(crate) static ref DEVICE_CACHE: Mutex<Option<Value>> = Mutex::new(None);
+}
+
+static PW_CLI_AVAILABLE: OnceLock<bool> = OnceLock::new();
+
+pub(crate) fn warm_pw_cli_availability_cache() {
+    let _ = pw_cli_available();
+}
+
+pub(crate) fn pw_cli_available() -> bool {
+    *PW_CLI_AVAILABLE.get_or_init(|| command_available("pw-cli"))
 }
 
 pub(crate) fn apply_eq_bands(
@@ -30,7 +39,7 @@ pub(crate) fn apply_eq_bands(
 ) -> Result<EqApplyResult, String> {
     config::validate_parametric_bands(bands)?;
 
-    if command_available("pw-cli") {
+    if pw_cli_available() {
         return apply_eq_bands_pipewire(device_id, bands, preamp_db);
     }
 
@@ -42,7 +51,7 @@ fn apply_eq_bands_pipewire(
     bands: &[config::EqBand],
     preamp_db: f64,
 ) -> Result<EqApplyResult, String> {
-    if !command_available("pw-cli") {
+    if !pw_cli_available() {
         return Err("pw-cli not found - EQ not applied".to_string());
     }
 
@@ -166,19 +175,17 @@ fn spawn_eq_module(module_args: &str) -> Result<(), String> {
             .map_err(|err| format!("failed to flush pw-cli stdin: {}", err))?;
     }
 
-    let mut lock = EQ_PROCESS.lock().unwrap();
-    *lock = Some(child);
+    let status = child
+        .wait()
+        .map_err(|err| format!("failed to wait for pw-cli: {}", err))?;
+    if !status.success() {
+        return Err(format!("pw-cli exited with {} after loading EQ module", status));
+    }
 
     Ok(())
 }
 
 pub(crate) fn destroy_eq_module() {
-    let mut lock = EQ_PROCESS.lock().unwrap();
-    if let Some(mut child) = lock.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-
     if let Some(id) = find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK) {
         let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
     }
@@ -280,7 +287,7 @@ fn builds_filter_graph_string(filter_specs: &[String]) -> String {
 
 pub(crate) fn eq_capabilities_json() -> Value {
     let wpctl_available = command_available("wpctl");
-    let pw_cli_available = command_available("pw-cli");
+    let pw_cli_available = pw_cli_available();
     let pactl_available = command_available("pactl");
 
     let wpctl_status_ok = if wpctl_available {

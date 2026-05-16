@@ -20,6 +20,7 @@ pub fn spawn_monitor(state: Arc<AppState>) {
 }
 
 pub fn initialize() {
+    engine::warm_pw_cli_availability_cache();
     cleanup_orphans();
     let default_sink_raw = SinkController::create()
         .ok()
