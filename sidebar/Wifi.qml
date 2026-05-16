@@ -24,7 +24,9 @@ Item {
 
     function syncIconFromGlobalState() {
         const state = String(WifiState.state || "disconnected").trim().toLowerCase();
-        if (state === "ethernet") {
+        // Prefer the explicit ethernet flag from the global state (covers
+        // cases where the textual `state` may not be exactly "ethernet").
+        if (WifiState.ethernet || state === "ethernet") {
             icon = "\udb80\ude00";
             return;
         }
