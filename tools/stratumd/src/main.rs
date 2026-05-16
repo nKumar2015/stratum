@@ -475,59 +475,84 @@ async fn handle_method(
             "ok": true,
             "audio": state.audio.snapshot(),
         })),
-        "audio.devices" => Ok(json!({
-            "ok": true,
-            "audio": managers::audio::devices(),
-        })),
+        "audio.devices" => {
+            Ok(tokio::task::spawn_blocking(|| {
+                json!({
+                    "ok": true,
+                    "audio": managers::audio::devices(),
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?)
+        }
         "audio.set_output" => {
             let target = param_string(_params, "target")?;
-            Ok(managers::audio::set_output(&target))
+            Ok(tokio::task::spawn_blocking(move || managers::audio::set_output(&target))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "audio.set_input" => {
             let target = param_string(_params, "target")?;
-            Ok(managers::audio::set_input(&target))
+            Ok(tokio::task::spawn_blocking(move || managers::audio::set_input(&target))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "audio.set_volume" => {
             let percent = param_i64(_params, "percent", 0);
-            Ok(managers::audio::set_volume(percent))
+            Ok(tokio::task::spawn_blocking(move || managers::audio::set_volume(percent))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "audio.eq_list_presets" => {
             let device = param_string(_params, "device")?;
-            Ok(managers::audio::eq_list_presets(&device))
+            Ok(tokio::task::spawn_blocking(move || managers::audio::eq_list_presets(&device))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "audio.eq_apply_preset" => {
             let device = param_string(_params, "device")?;
             let preset_name = param_string(_params, "preset_name")?;
-            Ok(managers::audio::eq_apply_preset(&device, &preset_name))
+            Ok(tokio::task::spawn_blocking(move || {
+                managers::audio::eq_apply_preset(&device, &preset_name)
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "audio.eq_apply_parametric" => {
             let device = param_string(_params, "device")?;
             let bands = param_value_or_default(_params, "bands", Value::Array(Vec::new()));
             let preamp_db = param_f64(_params, "preamp_db", 0.0);
-            Ok(managers::audio::eq_apply_parametric(
-                &device, &bands, preamp_db,
-            ))
+            Ok(tokio::task::spawn_blocking(move || {
+                managers::audio::eq_apply_parametric(&device, &bands, preamp_db)
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "audio.eq_save_preset_parametric" => {
             let device = param_string(_params, "device")?;
             let preset_name = param_string(_params, "preset_name")?;
             let bands = param_value_or_default(_params, "bands", Value::Array(Vec::new()));
             let preamp_db = param_f64(_params, "preamp_db", 0.0);
-            Ok(managers::audio::eq_save_preset_parametric(
-                &device,
-                &preset_name,
-                &bands,
-                preamp_db,
-            ))
+            Ok(tokio::task::spawn_blocking(move || {
+                managers::audio::eq_save_preset_parametric(&device, &preset_name, &bands, preamp_db)
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "audio.eq_delete_preset" => {
             let device = param_string(_params, "device")?;
             let preset_name = param_string(_params, "preset_name")?;
-            Ok(managers::audio::eq_delete_preset(&device, &preset_name))
+            Ok(tokio::task::spawn_blocking(move || {
+                managers::audio::eq_delete_preset(&device, &preset_name)
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "audio.media_seek" => {
             let position_sec = param_i64(_params, "position_sec", 0);
-            Ok(managers::audio::media_seek(position_sec))
+            Ok(tokio::task::spawn_blocking(move || managers::audio::media_seek(position_sec))
+                .await
+                .map_err(|e| e.to_string())?)
         }
 
         // Read from in-memory state
@@ -535,13 +560,31 @@ async fn handle_method(
             "ok": true,
             "net": state.net.snapshot(),
         })),
-        "wifi.state" => Ok(managers::wifi::state()),
-        "wifi.device_status" => Ok(managers::wifi::device_status()),
-        "wifi.known_connections" => Ok(managers::wifi::known_connections()),
-        "wifi.list" => Ok(managers::wifi::list()),
+        "wifi.state" => {
+            Ok(tokio::task::spawn_blocking(|| managers::wifi::state())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
+        "wifi.device_status" => {
+            Ok(tokio::task::spawn_blocking(|| managers::wifi::device_status())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
+        "wifi.known_connections" => {
+            Ok(tokio::task::spawn_blocking(|| managers::wifi::known_connections())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
+        "wifi.list" => {
+            Ok(tokio::task::spawn_blocking(|| managers::wifi::list())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
         "wifi.active_info" => {
             let device = param_string(_params, "device")?;
-            Ok(managers::wifi::active_info(&device))
+            Ok(tokio::task::spawn_blocking(move || managers::wifi::active_info(&device))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "wifi.connect" => {
             let ssid = param_string(_params, "ssid")?;
@@ -549,19 +592,29 @@ async fn handle_method(
                 .and_then(|p| p.get("password"))
                 .and_then(Value::as_str)
                 .map(|v| v.to_string());
-            Ok(managers::wifi::connect(&ssid, password.as_deref()))
+            Ok(tokio::task::spawn_blocking(move || {
+                managers::wifi::connect(&ssid, password.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "wifi.disconnect" => {
             let device = param_string(_params, "device")?;
-            Ok(managers::wifi::disconnect(&device))
+            Ok(tokio::task::spawn_blocking(move || managers::wifi::disconnect(&device))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "wifi.forget" => {
             let ssid = param_string(_params, "ssid")?;
-            Ok(managers::wifi::forget(&ssid))
+            Ok(tokio::task::spawn_blocking(move || managers::wifi::forget(&ssid))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "wifi.toggle" => {
             let target = param_string(_params, "target")?;
-            Ok(managers::wifi::toggle(&target))
+            Ok(tokio::task::spawn_blocking(move || managers::wifi::toggle(&target))
+                .await
+                .map_err(|e| e.to_string())?)
         }
 
         // Read from in-memory state
@@ -569,37 +622,63 @@ async fn handle_method(
             "ok": true,
             "bluetooth": state.bluetooth.snapshot(),
         })),
-        "bluetooth.state" => Ok(managers::bluetooth::state()),
-        "bluetooth.list" => Ok(managers::bluetooth::list()),
+        "bluetooth.state" => {
+            Ok(tokio::task::spawn_blocking(|| managers::bluetooth::state())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
+        "bluetooth.list" => {
+            Ok(tokio::task::spawn_blocking(|| managers::bluetooth::list())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
         "bluetooth.pair" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::pair(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::pair(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.connect" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::connect(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::connect(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.disconnect" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::disconnect(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::disconnect(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.forget" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::forget(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::forget(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.trust" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::trust(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::trust(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.untrust" => {
             let mac = param_string(_params, "mac")?;
-            Ok(managers::bluetooth::untrust(&mac))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::untrust(&mac))
+                .await
+                .map_err(|e| e.to_string())?)
         }
         "bluetooth.power" => {
             let target = param_string(_params, "target")?;
-            Ok(managers::bluetooth::power(&target))
+            Ok(tokio::task::spawn_blocking(move || managers::bluetooth::power(&target))
+                .await
+                .map_err(|e| e.to_string())?)
         }
-        "bluetooth.scan" => Ok(managers::bluetooth::scan()),
+        "bluetooth.scan" => {
+            Ok(tokio::task::spawn_blocking(|| managers::bluetooth::scan())
+                .await
+                .map_err(|e| e.to_string())?)
+        }
 
         // Read from in-memory state
         "music.status" | "audio.media_info" => Ok(json!({
@@ -611,10 +690,14 @@ async fn handle_method(
             let now = chrono_like_now();
             let year = param_i64(_params, "year", now.0 as i64) as i32;
             let month = param_i64(_params, "month", now.1 as i64) as i32;
-            Ok(json!({
-                "ok": true,
-                "dashboard": managers::dashboard::status(year, month),
-            }))
+            Ok(tokio::task::spawn_blocking(move || {
+                json!({
+                    "ok": true,
+                    "dashboard": managers::dashboard::status(year, month),
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?)
         }
         "dashboard.all" => {
             let year = param_i64(_params, "year", 0) as i32;
@@ -630,7 +713,9 @@ async fn handle_method(
                 }
             }
 
-            Ok(managers::dashboard::status(year, month))
+            Ok(tokio::task::spawn_blocking(move || managers::dashboard::status(year, month))
+                .await
+                .map_err(|e| e.to_string())?)
         }
 
         "dashboard.watch" => {
