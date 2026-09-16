@@ -280,7 +280,7 @@ ShellRoot {
                     }
 
                     Workspaces {
-                        monitor: panelWindow.monitor
+                        monitorName: panelWindow.modelData.name
                         Layout.alignment: Qt.AlignHCenter
                     }
 

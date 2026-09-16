@@ -1,5 +1,4 @@
 pragma ComponentBehavior: Bound
-import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Io
@@ -9,7 +8,7 @@ import "../globals"
 Item {
     id: wsRoot
 
-    required property var monitor
+    required property string monitorName
 
     property int itemHeight: 20
     property int itemSpacing: 3
@@ -18,30 +17,78 @@ Item {
     implicitHeight: 115
     clip: true
 
-    readonly property var workspaceIds: {
-        const ids = [];
-        const targetMonitor = wsRoot.monitor;
-        const allWorkspaces = Hyprland.workspaces.values || [];
+    property int cliActiveWorkspaceId: -1
+    property var cliOccupiedWorkspaceIds: []
 
-        for (let index = 0; index < allWorkspaces.length; index++) {
-            const workspace = allWorkspaces[index];
-            if (!workspace || workspace.id <= 0)
-                continue;
-            if (workspace.monitor !== targetMonitor)
-                continue;
-            ids.push(workspace.id);
+    function parseMonitors(text) {
+        try {
+            const monitors = JSON.parse(text);
+            for (let index = 0; index < monitors.length; index++) {
+                if (monitors[index].name === wsRoot.monitorName) {
+                    const activeWorkspace = monitors[index].activeWorkspace || {};
+                    wsRoot.cliActiveWorkspaceId = activeWorkspace.id || Number(activeWorkspace.name) || -1;
+                    return;
+                }
+            }
+            wsRoot.cliActiveWorkspaceId = -1;
+        } catch (error) {
+            console.warn("[Workspaces] Unable to parse hyprctl monitors:", error);
         }
+    }
 
-        ids.sort((left, right) => left - right);
+    function parseClients(text) {
+        try {
+            const clients = JSON.parse(text);
+            const ids = [];
+            for (let index = 0; index < clients.length; index++) {
+                const workspace = clients[index].workspace || {};
+                const workspaceId = workspace.id || Number(workspace.name) || -1;
+                if (workspaceId > 0 && ids.indexOf(workspaceId) === -1)
+                    ids.push(workspaceId);
+            }
+            wsRoot.cliOccupiedWorkspaceIds = ids;
+        } catch (error) {
+            console.warn("[Workspaces] Unable to parse hyprctl clients:", error);
+        }
+    }
 
-        const activeWorkspaceId = targetMonitor?.activeWorkspace?.id || -1;
-        if (activeWorkspaceId > 0 && ids.indexOf(activeWorkspaceId) === -1)
-            ids.push(activeWorkspaceId);
+    Process {
+        id: monitorProcess
+        command: ["hyprctl", "monitors", "-j"]
+        running: true
+        onRunningChanged: if (!running) running = true
+        stdout: StdioCollector {
+            onStreamFinished: wsRoot.parseMonitors(text)
+        }
+    }
 
-        ids.sort((left, right) => left - right);
+    Process {
+        id: clientsProcess
+        command: ["hyprctl", "clients", "-j"]
+        running: true
+        onRunningChanged: if (!running) running = true
+        stdout: StdioCollector {
+            onStreamFinished: wsRoot.parseClients(text)
+        }
+    }
+
+    Process {
+        id: dispatchProcess
+    }
+
+    readonly property var workspaceIds: {
+        const activeWorkspaceId = wsRoot.cliActiveWorkspaceId;
+        if (activeWorkspaceId <= 0)
+            return [];
+
+        const rangeStart = Math.floor((activeWorkspaceId - 1) / 10) * 10 + 1;
+        const ids = [];
+        for (let offset = 0; offset < 10; offset++)
+            ids.push(rangeStart + offset);
+
         return ids;
     }
-    property int activeWsId: monitor?.activeWorkspace?.id || workspaceIds[0] || 1
+    property int activeWsId: cliActiveWorkspaceId || workspaceIds[0] || 1
     property int startIdx: {
         const ids = workspaceIds;
         const activeIndex = Math.max(0, ids.indexOf(activeWsId));
@@ -70,9 +117,8 @@ Item {
                 id: wsText
                 required property var modelData
                 property int wsId: Number(modelData)
-                property var ws: Hyprland.workspaces.values.find(w => w.id === wsId)
-                property bool isActive: wsRoot.monitor?.activeWorkspace?.id === wsId
-                property bool hasOpenWindows: (ws?.toplevels?.values?.length || 0) > 0
+                property bool isActive: wsRoot.activeWsId === wsId
+                property bool hasOpenWindows: wsRoot.cliOccupiedWorkspaceIds.indexOf(wsId) !== -1
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredHeight: 20
 
@@ -102,7 +148,7 @@ Item {
 
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: Hyprland.dispatch("hl.dsp.focus({ workspace = \"" + wsText.wsId + "\" })")
+                    onClicked: dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(wsText.wsId)])
                     onWheel: wheel => {
                         const ids = wsRoot.workspaceIds;
                         const currentIndex = ids.indexOf(wsRoot.activeWsId);
@@ -110,9 +156,9 @@ Item {
                             return;
 
                         if (wheel.angleDelta.y > 0) {
-                            Hyprland.dispatch("workspace " + ids[Math.max(0, currentIndex - 1)]);
+                            dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(ids[Math.max(0, currentIndex - 1)])]);
                         } else {
-                            Hyprland.dispatch("workspace " + ids[Math.min(ids.length - 1, currentIndex + 1)]);
+                            dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(ids[Math.min(ids.length - 1, currentIndex + 1)])]);
                         }
                     }
                 }

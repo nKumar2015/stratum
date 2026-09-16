@@ -59,7 +59,7 @@ PanelWindow {
             }
 
             Workspaces {
-                monitor: sidebarWindow.monitor
+                monitorName: sidebarWindow.modelData.name
                 Layout.alignment: Qt.AlignHCenter
             }
 
