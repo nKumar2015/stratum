@@ -1,4 +1,6 @@
 //@ pragma UseQApplication
+//@ pragma IconTheme Papirus
+
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io

@@ -76,6 +76,13 @@ Item {
         id: dispatchProcess
     }
 
+    function switchToWorkspace(workspaceId) {
+        if (workspaceId === undefined || workspaceId === null || workspaceId === "")
+            return;
+        dispatchProcess.exec(["hyprctl", "dispatch",
+            'hl.dsp.focus({ workspace = "' + String(workspaceId) + '" })']);
+    }
+
     readonly property var workspaceIds: {
         const activeWorkspaceId = wsRoot.cliActiveWorkspaceId;
         if (activeWorkspaceId <= 0)
@@ -148,7 +155,7 @@ Item {
 
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(wsText.wsId)])
+                    onClicked: wsRoot.switchToWorkspace(wsText.wsId)
                     onWheel: wheel => {
                         const ids = wsRoot.workspaceIds;
                         const currentIndex = ids.indexOf(wsRoot.activeWsId);
@@ -156,9 +163,9 @@ Item {
                             return;
 
                         if (wheel.angleDelta.y > 0) {
-                            dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(ids[Math.max(0, currentIndex - 1)])]);
+                            wsRoot.switchToWorkspace(ids[Math.max(0, currentIndex - 1)]);
                         } else {
-                            dispatchProcess.exec(["hyprctl", "dispatch", "workspace", String(ids[Math.min(ids.length - 1, currentIndex + 1)])]);
+                            wsRoot.switchToWorkspace(ids[Math.min(ids.length - 1, currentIndex + 1)]);
                         }
                     }
                 }
