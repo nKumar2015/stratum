@@ -1,0 +1,90 @@
+//! `stratum_sys` — the system integration layer behind Stratum.
+//!
+//! Every subsystem the shell needs to observe or control lives here: audio
+//! (PulseAudio/PipeWire, including the native parametric EQ), Bluetooth,
+//! Wi-Fi/NetworkManager, battery, media (MPRIS), dashboard metrics, and the
+//! polkit authentication agent.
+//!
+//! The crate is deliberately host-agnostic. It does not own an event loop, a
+//! socket, or a specific UI. Managers that need to report changes call a
+//! [`Publisher`] supplied by whoever embeds them — `stratumd` today, the
+//! native shell at cutover.
+//!
+//! ```no_run
+//! use stratum_sys::{managers, Publisher};
+//!
+//! let publisher = Publisher::new(|channel, payload| {
+//!     println!("{}: {}", channel, payload);
+//! });
+//! managers::audio::spawn_monitor(publisher);
+//! ```
+
+use serde_json::Value;
+use std::sync::Arc;
+
+pub mod managers;
+pub mod state;
+
+pub use state::{
+    AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState,
+};
+
+/// Callback a host provides so managers can publish state changes.
+type PublishFn = dyn Fn(&str, Value) + Send + Sync;
+
+/// Handle managers use to report state changes to their host.
+///
+/// Cloneable and cheap to pass into worker threads. The host decides what to do
+/// with each snapshot: update in-memory state, push it to a UI, or both.
+#[derive(Clone)]
+pub struct Publisher(Arc<PublishFn>);
+
+impl Publisher {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(&str, Value) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    /// Publish a snapshot on `channel` (`"audio"`, `"net"`, `"bluetooth"`,
+    /// `"music"`, `"battery"`, `"dashboard"`, `"polkit"`).
+    pub fn emit(&self, channel: &str, payload: Value) {
+        (self.0)(channel, payload);
+    }
+
+    pub fn audio(&self, payload: Value) {
+        self.emit("audio", payload);
+    }
+
+    pub fn net(&self, payload: Value) {
+        self.emit("net", payload);
+    }
+
+    pub fn bluetooth(&self, payload: Value) {
+        self.emit("bluetooth", payload);
+    }
+
+    pub fn battery(&self, payload: Value) {
+        self.emit("battery", payload);
+    }
+
+    pub fn music(&self, payload: Value) {
+        self.emit("music", payload);
+    }
+
+    pub fn dashboard(&self, payload: Value) {
+        self.emit("dashboard", payload);
+    }
+
+    pub fn polkit(&self, payload: Value) {
+        self.emit("polkit", payload);
+    }
+}
+
+/// The identity of the account the shell runs as, used by the polkit agent
+/// when answering authorization requests.
+pub(crate) fn current_uid() -> u32 {
+    // SAFETY: `getuid` is always successful and has no preconditions.
+    unsafe { libc::getuid() }
+}

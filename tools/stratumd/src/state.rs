@@ -1,13 +1,19 @@
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
+use serde_json::json;
+use serde_json::Value;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-pub struct AudioState {
+/// Snapshot cell for one state domain.
+///
+/// Managers publish into these; the broadcaster drains the dirty flag and
+/// pushes the snapshot to the shell. Comparing before storing means an
+/// unchanged poll costs nothing.
+pub struct StateCell {
     data: Mutex<Value>,
     pub dirty: AtomicBool,
 }
 
-impl AudioState {
+impl StateCell {
     pub fn new() -> Self {
         Self {
             data: Mutex::new(Value::Null),
@@ -16,226 +22,43 @@ impl AudioState {
     }
 
     pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
+        let Ok(mut data) = self.data.lock() else {
+            return;
+        };
         if *data != value {
             *data = value;
-            self.dirty.store(true, Ordering::Release);
+            self.dirty
+                .store(true, std::sync::atomic::Ordering::Release);
         }
     }
 
     pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
+        self.data
+            .lock()
+            .map(|data| data.clone())
+            .unwrap_or(Value::Null)
     }
 
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"audio": self.snapshot()}))
+    /// Return the snapshot once per change, wrapped under `key`.
+    pub fn take_if_dirty(&self, key: &str) -> Option<Value> {
+        if self.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            Some(json!({ key: self.snapshot() }))
         } else {
             None
         }
     }
 }
 
-pub struct NetState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl NetState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"net": self.snapshot()}))
-        } else {
-            None
-        }
+impl Default for StateCell {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-pub struct BluetoothState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl BluetoothState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"bluetooth": self.snapshot()}))
-        } else {
-            None
-        }
-    }
-}
-
-pub struct MusicState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl MusicState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"music": self.snapshot()}))
-        } else {
-            None
-        }
-    }
-}
-
-pub struct DashboardState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl DashboardState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"dashboard": self.snapshot()}))
-        } else {
-            None
-        }
-    }
-}
-
-pub struct BatteryState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl BatteryState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"battery": self.snapshot()}))
-        } else {
-            None
-        }
-    }
-}
-
-pub struct PolkitState {
-    data: Mutex<Value>,
-    pub dirty: AtomicBool,
-}
-
-impl PolkitState {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Value::Null),
-            dirty: AtomicBool::new(false),
-        }
-    }
-
-    pub fn update(&self, value: Value) {
-        let mut data = self.data.lock().unwrap();
-        if *data != value {
-            *data = value;
-            self.dirty.store(true, Ordering::Release);
-        }
-    }
-
-    pub fn snapshot(&self) -> Value {
-        self.data.lock().unwrap().clone()
-    }
-
-    pub fn take_if_dirty(&self) -> Option<Value> {
-        if self.dirty.swap(false, Ordering::AcqRel) {
-            Some(json!({"polkit": self.snapshot()}))
-        } else {
-            None
-        }
-    }
-}
+pub type AudioState = StateCell;
+pub type NetState = StateCell;
+pub type BluetoothState = StateCell;
+pub type MusicState = StateCell;
+pub type DashboardState = StateCell;
+pub type BatteryState = StateCell;
+pub type PolkitState = StateCell;

@@ -1,7 +1,6 @@
 use crate::managers::common::{run_capture_optional, run_command_capture};
 use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use serde_json::{json, Value};
-use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info, warn};
 
@@ -11,12 +10,12 @@ pub(crate) mod monitor;
 pub(crate) mod native_eq;
 pub(crate) mod parser;
 
-use crate::AppState;
+use crate::Publisher;
 
-pub fn spawn_monitor(state: Arc<AppState>) {
+pub fn spawn_monitor(publisher: Publisher) {
     tokio::spawn(async move {
         info!("starting audio monitor");
-        monitor::run_monitor(state).await;
+        monitor::run_monitor(publisher).await;
     });
 }
 

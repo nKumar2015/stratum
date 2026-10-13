@@ -1,3 +1,4 @@
 tools/*/target/
 result
 .github/
+target/

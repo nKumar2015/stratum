@@ -7,7 +7,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::oneshot;
 
 use tracing::{debug, error, info, warn};
 
@@ -15,19 +14,10 @@ mod logger;
 
 use chrono::Datelike;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 
-mod managers {
-    pub mod audio;
-    pub mod battery;
-    pub mod bluetooth;
-    pub mod common;
-    pub mod dashboard;
-    pub mod music;
-    pub mod net;
-    pub mod polkit;
-    pub mod wifi;
-}
+use stratum_sys::managers::polkit::FailureOutcome;
+use stratum_sys::managers::{self, polkit::PolkitAgent};
+use stratum_sys::Publisher;
 
 mod ipc;
 mod state;
@@ -35,11 +25,6 @@ mod state;
 use state::{
     AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState,
 };
-
-struct AuthSession {
-    tx: oneshot::Sender<bool>,
-    attempts: u32,
-}
 
 struct AppState {
     started_at: Instant,
@@ -52,7 +37,9 @@ struct AppState {
     dashboard: DashboardState,
     polkit: PolkitState,
     qs_pid_cache: Mutex<Option<u32>>,
-    pending_auths: Mutex<HashMap<String, AuthSession>>,
+    /// The polkit agent owns its own pending-session bookkeeping, so the
+    /// daemon only needs a handle to answer `polkit.respond`.
+    polkit_agent: Mutex<Option<Arc<PolkitAgent>>>,
 }
 
 fn socket_path() -> PathBuf {
@@ -196,6 +183,25 @@ fn maybe_launch_quickshell() {
     }
 }
 
+/// Publisher that mirrors manager output into the daemon's state cells.
+///
+/// Managers report through this; the broadcaster thread then drains the dirty
+/// flags and pushes to the running shell, so the daemon keeps its existing
+/// push-based contract regardless of how a manager produces updates.
+fn state_publisher(state: &Arc<AppState>) -> Publisher {
+    let state = Arc::clone(state);
+    Publisher::new(move |channel, payload| match channel {
+        "audio" => state.audio.update(payload),
+        "net" => state.net.update(payload),
+        "bluetooth" => state.bluetooth.update(payload),
+        "battery" => state.battery.update(payload),
+        "music" => state.music.update(payload),
+        "dashboard" => state.dashboard.update(payload),
+        "polkit" => state.polkit.update(payload),
+        other => warn!("unhandled publisher channel: {}", other),
+    })
+}
+
 fn spawn_net_monitor(state: Arc<AppState>) {
     tokio::task::spawn_blocking(move || {
         info!("Starting network monitor");
@@ -274,9 +280,16 @@ fn spawn_battery_monitor(state: Arc<AppState>) {
     });
 }
 
-fn spawn_polkit_agent(state: Arc<AppState>) {
+fn spawn_polkit_agent(state: Arc<AppState>, publisher: Publisher) {
     tokio::spawn(async move {
-        if let Err(e) = managers::polkit::register_agent(state).await {
+        let agent = Arc::new(PolkitAgent::new(stratum_sys::managers::polkit::PolkitHost::new(
+            publisher,
+        )));
+        if let Ok(mut slot) = state.polkit_agent.lock() {
+            *slot = Some(Arc::clone(&agent));
+        }
+
+        if let Err(e) = stratum_sys::managers::polkit::register_agent(agent).await {
             error!("[polkit] failed to register authentication agent: {}", e);
         } else {
             info!("[polkit] authentication agent registered successfully");
@@ -319,7 +332,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
 
             let mut any_failed = false;
 
-            if let Some(payload) = state.audio.take_if_dirty() {
+            if let Some(payload) = state.audio.take_if_dirty("audio") {
                 debug!("Broadcasting audio update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "audio", &[payload_text]).is_err() {
@@ -327,7 +340,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.net.take_if_dirty() {
+            if let Some(payload) = state.net.take_if_dirty("net") {
                 debug!("Broadcasting network update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "wifi", &[payload_text]).is_err() {
@@ -335,7 +348,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.bluetooth.take_if_dirty() {
+            if let Some(payload) = state.bluetooth.take_if_dirty("bluetooth") {
                 debug!("Broadcasting bluetooth update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "bluetooth", &[payload_text])
@@ -345,7 +358,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.music.take_if_dirty() {
+            if let Some(payload) = state.music.take_if_dirty("music") {
                 debug!("Broadcasting music update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "music", &[payload_text]).is_err() {
@@ -353,7 +366,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.dashboard.take_if_dirty() {
+            if let Some(payload) = state.dashboard.take_if_dirty("dashboard") {
                 debug!("Broadcasting dashboard update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "dashboard", &[payload_text])
@@ -363,7 +376,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.battery.take_if_dirty() {
+            if let Some(payload) = state.battery.take_if_dirty("battery") {
                 debug!("Broadcasting battery update");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "battery", &[payload_text]).is_err()
@@ -372,7 +385,7 @@ fn spawn_broadcaster(state: Arc<AppState>) {
                 }
             }
 
-            if let Some(payload) = state.polkit.take_if_dirty() {
+            if let Some(payload) = state.polkit.take_if_dirty("polkit") {
                 info!("[polkit] Broadcasting update to shell");
                 let payload_text = payload.to_string();
                 if ipc::send_shell_ipc_with_pid(pid, "daemon", "polkit", &[payload_text]).is_err() {
@@ -757,78 +770,72 @@ async fn handle_method(
 
             info!("received response for cookie: {}", cookie);
 
+            let agent = state
+                .polkit_agent
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone())
+                .ok_or_else(|| "polkit agent is not running".to_string())?;
+
             let success =
                 managers::polkit::verify_password_and_notify(&user, &password, &cookie).await;
 
-            if let Ok(mut pending) = state.pending_auths.lock() {
-                if let Some(session) = pending.get_mut(&cookie) {
-                    if success {
-                        info!("auth success for cookie: {}", cookie);
-                        let session = pending.remove(&cookie).unwrap();
-                        let _ = session.tx.send(true);
+            if success {
+                if agent.resolve(&cookie, true) {
+                    info!("auth success for cookie: {}", cookie);
 
-                        // Broadcast final success
-                        let final_payload = json!({
-                            "polkit": {
-                                "active": false,
-                                "success": true,
-                                "cookie": cookie.clone(),
-                                "message": "Authentication successful."
-                            }
-                        });
-                        state.polkit.update(final_payload["polkit"].clone());
-                        ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
+                    let final_payload = json!({
+                        "active": false,
+                        "success": true,
+                        "cookie": cookie.clone(),
+                        "message": "Authentication successful."
+                    });
+                    state.polkit.update(final_payload.clone());
+                    ipc::broadcast_polkit_update(&state.qs_pid_cache, &json!({"polkit": &final_payload}));
 
-                        return Ok(json!({"ok": true, "success": true}));
-                    } else {
-                        session.attempts += 1;
-                        let remaining = 3_u32.saturating_sub(session.attempts);
-
-                        if remaining > 0 {
-                            info!(
-                                "auth failed for cookie: {}, {} attempts remaining",
-                                cookie, remaining
-                            );
-
-                            // Broadcast intermediate failure
-                            let retry_payload = json!({
-                                "polkit": {
-                                    "active": true,
-                                    "success": false,
-                                    "cookie": cookie.clone(),
-                                    "message": format!("Incorrect password. {} attempts remaining.", remaining)
-                                }
-                            });
-                            state.polkit.update(retry_payload["polkit"].clone());
-                            ipc::broadcast_polkit_update(&state.qs_pid_cache, &retry_payload);
-
-                            return Ok(
-                                json!({"ok": true, "success": false, "retry": true, "remaining": remaining}),
-                            );
-                        } else {
-                            info!("auth failed (max attempts) for cookie: {}", cookie);
-                            let session = pending.remove(&cookie).unwrap();
-                            let _ = session.tx.send(false);
-
-                            // Broadcast final failure
-                            let final_payload = json!({
-                                "polkit": {
-                                    "active": false,
-                                    "success": false,
-                                    "cookie": cookie.clone(),
-                                    "message": "Authentication failed. Too many attempts."
-                                }
-                            });
-                            state.polkit.update(final_payload["polkit"].clone());
-                            ipc::broadcast_polkit_update(&state.qs_pid_cache, &final_payload);
-
-                            return Ok(json!({"ok": true, "success": false, "retry": false}));
-                        }
-                    }
+                    return Ok(json!({"ok": true, "success": true}));
                 }
+
+                return Err("no pending authentication session found for this cookie".to_string());
             }
 
-            Err("no pending authentication session found for this cookie".to_string())
+            // Password was wrong: keep the prompt alive while attempts remain.
+            match agent.record_failure(&cookie) {
+                FailureOutcome::Retry { remaining } => {
+                    info!(
+                        "auth failed for cookie: {}, {} attempts remaining",
+                        cookie, remaining
+                    );
+
+                    let retry_payload = json!({
+                        "active": true,
+                        "success": false,
+                        "cookie": cookie.clone(),
+                        "message": format!("Incorrect password. {} attempts remaining.", remaining)
+                    });
+                    state.polkit.update(retry_payload.clone());
+                    ipc::broadcast_polkit_update(&state.qs_pid_cache, &json!({"polkit": &retry_payload}));
+
+                    Ok(json!({"ok": true, "success": false, "retry": true, "remaining": remaining}))
+                }
+                FailureOutcome::Exhausted => {
+                    info!("auth failed (max attempts) for cookie: {}", cookie);
+
+                    let final_payload = json!({
+                        "active": false,
+                        "success": false,
+                        "cookie": cookie.clone(),
+                        "message": "Authentication failed. Too many attempts."
+                    });
+                    state.polkit.update(final_payload.clone());
+                    ipc::broadcast_polkit_update(&state.qs_pid_cache, &json!({"polkit": &final_payload}));
+
+                    Ok(json!({"ok": true, "success": false, "retry": false}))
+                }
+                FailureOutcome::Unknown => {
+                    Err("no pending authentication session found for this cookie".to_string())
+                }
+            }
         }
         _ => Err(format!("unknown method '{}'", method)),
     }
@@ -912,7 +919,7 @@ async fn main() {
         dashboard: DashboardState::new(),
         polkit: PolkitState::new(),
         qs_pid_cache: Mutex::new(None),
-        pending_auths: Mutex::new(HashMap::new()),
+        polkit_agent: Mutex::new(None),
     });
     // Initialize the RPC listener early so clients can connect even if
     // some managers (e.g. audio) take time during initialization.
@@ -935,14 +942,18 @@ async fn main() {
     // Initialize managers (restore state, etc)
     managers::audio::initialize();
 
+    // Managers that own their own event source report through this publisher;
+    // the broadcaster below turns those snapshots into pushes to the shell.
+    let publisher = state_publisher(&state);
+
     // Spawn per-domain monitor threads (poll system tools, update in-memory state)
-    managers::audio::spawn_monitor(Arc::clone(&state));
+    managers::audio::spawn_monitor(publisher.clone());
     spawn_net_monitor(Arc::clone(&state));
     spawn_bluetooth_monitor(Arc::clone(&state));
     spawn_battery_monitor(Arc::clone(&state));
     spawn_music_monitor(Arc::clone(&state));
     spawn_dashboard_monitor(Arc::clone(&state));
-    spawn_polkit_agent(Arc::clone(&state));
+    spawn_polkit_agent(Arc::clone(&state), publisher.clone());
 
     // Single broadcaster: checks dirty flags and pushes to Quickshell via IPC
     spawn_broadcaster(Arc::clone(&state));

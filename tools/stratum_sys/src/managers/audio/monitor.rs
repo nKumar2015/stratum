@@ -1,6 +1,6 @@
 use super::{engine, parser};
 
-use crate::AppState;
+use crate::Publisher;
 use lazy_static::lazy_static;
 use pipewire::keys;
 use pipewire::registry::GlobalObject;
@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
@@ -20,13 +20,14 @@ lazy_static! {
     pub static ref IS_RESTORING: Mutex<bool> = Mutex::new(false);
 }
 
-pub(crate) async fn run_monitor(state: Arc<AppState>) {
+pub(crate) async fn run_monitor(publisher: Publisher) {
     if let Some(snapshot) = fetch_current_status() {
-        state.audio.update(snapshot.clone());
+        publisher.audio(snapshot.clone());
     }
 
-    let event_state = Arc::clone(&state);
-    let event_result = tokio::task::spawn_blocking(move || run_pipewire_event_loop(event_state)).await;
+    let event_publisher = publisher.clone();
+    let event_result =
+        tokio::task::spawn_blocking(move || run_pipewire_event_loop(event_publisher)).await;
 
     match event_result {
         Ok(Ok(())) => {
@@ -47,14 +48,14 @@ pub(crate) async fn run_monitor(state: Arc<AppState>) {
             if let Some(sink) = snapshot.get("default_sink").and_then(|s| s.as_str()) {
                 notify_default_sink_changed(sink);
             }
-            state.audio.update(snapshot);
+            publisher.audio(snapshot);
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
-fn run_pipewire_event_loop(state: Arc<AppState>) -> Result<(), String> {
+fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
     let mainloop = pipewire::main_loop::MainLoopBox::new(None)
         .map_err(|err| format!("failed to create pipewire mainloop: {}", err))?;
     let context = pipewire::context::ContextBox::new(&mainloop.loop_(), None)
@@ -68,8 +69,8 @@ fn run_pipewire_event_loop(state: Arc<AppState>) -> Result<(), String> {
 
     info!("listening for PipeWire registry events");
 
-    let global_state = Arc::clone(&state);
-    let remove_state = Arc::clone(&state);
+    let global_publisher = publisher.clone();
+    let remove_publisher = publisher.clone();
     let relevant_ids = Rc::new(RefCell::new(HashSet::<u32>::new()));
     let relevant_ids_on_global = Rc::clone(&relevant_ids);
     let relevant_ids_on_remove = Rc::clone(&relevant_ids);
@@ -78,7 +79,7 @@ fn run_pipewire_event_loop(state: Arc<AppState>) -> Result<(), String> {
         .global(move |global| {
             if should_refresh_on_global(global) {
                 relevant_ids_on_global.borrow_mut().insert(global.id);
-                refresh_from_system(&global_state);
+                refresh_from_system(&global_publisher);
             } else {
                 // If this id is re-announced with non-audio props, stop tracking it.
                 relevant_ids_on_global.borrow_mut().remove(&global.id);
@@ -86,13 +87,13 @@ fn run_pipewire_event_loop(state: Arc<AppState>) -> Result<(), String> {
         })
         .global_remove(move |id| {
             if relevant_ids_on_remove.borrow_mut().remove(&id) {
-                refresh_from_system(&remove_state);
+                refresh_from_system(&remove_publisher);
             }
         })
         .register();
 
     // Seed state once after listener setup in case no immediate global event is emitted.
-    refresh_from_system(&state);
+    refresh_from_system(&publisher);
 
     // Runs indefinitely and dispatches registry callbacks in this worker thread.
     mainloop.run();
@@ -158,13 +159,13 @@ fn prop_contains(
         .unwrap_or(false)
 }
 
-fn refresh_from_system(state: &Arc<AppState>) {
+fn refresh_from_system(publisher: &Publisher) {
     let _ = super::refresh_device_cache();
     if let Some(snapshot) = fetch_current_status() {
         if let Some(sink) = snapshot.get("default_sink").and_then(|s| s.as_str()) {
             notify_default_sink_changed(sink);
         }
-        state.audio.update(snapshot);
+        publisher.audio(snapshot);
     }
 }
 

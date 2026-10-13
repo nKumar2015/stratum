@@ -33,13 +33,28 @@
           inherit system overlays;
         }));
   in {
-    packages = forAllSystems (pkgs: {
+    packages = forAllSystems (pkgs: let
+      # Single source tree for the Cargo workspace: crates depend on each other
+      # (stratumd and stratum-cli build on stratum_sys), so each package must
+      # see the whole tree plus the shared lockfile.
+      workspaceSrc = pkgs.lib.cleanSourceWith {
+        src = ./.;
+        filter = path: type: let
+          base = baseNameOf path;
+        in
+          base != "target"
+          && base != ".direnv"
+          && base != ".git"
+          && !(pkgs.lib.hasPrefix "result" base);
+      };
+    in {
       stratum-cli = pkgs.rustPlatform.buildRustPackage {
         pname = "stratum-cli";
         version = "0.1.0";
 
-        src = ./tools/stratum_cli;
-        cargoLock.lockFile = ./tools/stratum_cli/Cargo.lock;
+        src = workspaceSrc;
+        buildAndTestSubdir = "tools/stratum_cli";
+        cargoLock.lockFile = ./Cargo.lock;
 
         nativeBuildInputs = with pkgs; [pkg-config];
         buildInputs = with pkgs; [dbus openssl];
@@ -49,8 +64,9 @@
         pname = "stratumd";
         version = "0.1.0";
 
-        src = ./tools/stratumd;
-        cargoLock.lockFile = ./tools/stratumd/Cargo.lock;
+        src = workspaceSrc;
+        buildAndTestSubdir = "tools/stratumd";
+        cargoLock.lockFile = ./Cargo.lock;
 
         nativeBuildInputs = with pkgs; [pkg-config clang];
         buildInputs = with pkgs; [pam dbus pipewire libpulseaudio];
