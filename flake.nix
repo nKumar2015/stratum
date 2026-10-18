@@ -74,6 +74,27 @@
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
 
+      stratum-shell = pkgs.rustPlatform.buildRustPackage {
+        pname = "stratum-shell";
+        version = "0.1.0";
+
+        src = workspaceSrc;
+        buildAndTestSubdir = "tools/stratum_shell";
+        cargoLock.lockFile = ./Cargo.lock;
+
+        nativeBuildInputs = with pkgs; [pkg-config clang];
+        # Wayland client headers + the Vulkan loader are needed at link time.
+        buildInputs = with pkgs; [
+          wayland wayland-protocols
+          libxkbcommon
+          vulkan-loader
+          libGL
+          dbus
+        ];
+
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+      };
+
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
     });
 
@@ -124,6 +145,15 @@
           clang
           libpulseaudio
           pipewire
+
+          # Native shell: Wayland protocol headers, keyboard handling, and the
+          # Vulkan loader that wgpu presents through.
+          wayland
+          wayland-protocols
+          libxkbcommon
+          vulkan-loader
+          libGL
+          udev
         ];
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";

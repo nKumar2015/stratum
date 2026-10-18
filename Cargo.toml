@@ -1,5 +1,10 @@
 [workspace]
-members = ["tools/stratum_sys", "tools/stratumd", "tools/stratum_cli"]
+members = [
+    "tools/stratum_sys",
+    "tools/stratum_shell",
+    "tools/stratumd",
+    "tools/stratum_cli",
+]
 resolver = "2"
 
 [workspace.package]

@@ -1,0 +1,27 @@
+[package]
+name = "stratum-shell"
+version.workspace = true
+edition.workspace = true
+description = "Native Stratum desktop shell"
+
+[[bin]]
+name = "stratum-shell"
+path = "src/main.rs"
+
+[dependencies]
+# Wayland protocol plumbing only — no UI toolkit.
+# `system` enables libwayland-backed pointer access, which wgpu needs to build
+# a VK_KHR_wayland_surface from a raw wl_surface.
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop"] }
+wayland-client = { version = "0.31", features = ["system"] }
+calloop = "0.14"
+
+# Rendering: Vulkan through wgpu, behind our own Renderer trait.
+wgpu = { version = "30", default-features = false, features = ["std", "vulkan", "wgsl"] }
+raw-window-handle = "0.6.2"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
