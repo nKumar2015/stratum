@@ -102,6 +102,26 @@ pub struct ThemeConfig {
     pub border_active: String,
     pub border_inactive: String,
     pub font: String,
+
+    // Optional Material-style aliases. Each falls back to an existing colour,
+    // so a config only needs to set the ones it cares about. This is the
+    // vocabulary loaf-fm uses and makes multi-surface theming coherent.
+    #[serde(default)]
+    pub surface_lowest: Option<String>,
+    #[serde(default)]
+    pub surface_low: Option<String>,
+    #[serde(default)]
+    pub surface: Option<String>,
+    #[serde(default)]
+    pub surface_high: Option<String>,
+    #[serde(default)]
+    pub surface_highest: Option<String>,
+    #[serde(default)]
+    pub outline: Option<String>,
+    #[serde(default)]
+    pub on_primary: Option<String>,
+    #[serde(default)]
+    pub on_surface: Option<String>,
 }
 
 impl Default for ThemeConfig {
@@ -122,6 +142,14 @@ impl Default for ThemeConfig {
             border_active: "#4589ff".into(),
             border_inactive: "#393939".into(),
             font: "JetBrainsMono NFM".into(),
+            surface_lowest: None,
+            surface_low: None,
+            surface: None,
+            surface_high: None,
+            surface_highest: None,
+            outline: None,
+            on_primary: None,
+            on_surface: None,
         }
     }
 }
@@ -147,6 +175,23 @@ impl ThemeConfig {
             border_active: parse_color(&self.border_active, f),
             border_inactive: parse_color(&self.border_inactive, f),
             font: self.font.clone(),
+            surface_lowest: parse_color(
+                self.surface_lowest.as_deref().unwrap_or(&self.bg_dark),
+                f,
+            ),
+            surface_low: parse_color(self.surface_low.as_deref().unwrap_or(&self.bg_main), f),
+            surface: parse_color(self.surface.as_deref().unwrap_or(&self.bg_main), f),
+            surface_high: parse_color(self.surface_high.as_deref().unwrap_or(&self.bg_widget), f),
+            surface_highest: parse_color(
+                self.surface_highest.as_deref().unwrap_or(&self.bg_hover),
+                f,
+            ),
+            outline: parse_color(
+                self.outline.as_deref().unwrap_or(&self.border_inactive),
+                f,
+            ),
+            on_primary: parse_color(self.on_primary.as_deref().unwrap_or(&self.bg_main), f),
+            on_surface: parse_color(self.on_surface.as_deref().unwrap_or(&self.text_main), f),
         }
     }
 }
@@ -374,6 +419,19 @@ pub struct Theme {
     pub border_active: Color,
     pub border_inactive: Color,
     pub font: String,
+
+    /// Material-style surface ramp: lowest (deepest) to highest (most raised).
+    pub surface_lowest: Color,
+    pub surface_low: Color,
+    pub surface: Color,
+    pub surface_high: Color,
+    pub surface_highest: Color,
+    /// Hairline colour for dividers and frame borders.
+    pub outline: Color,
+    /// Foreground that reads on `primary` (text on filled buttons).
+    pub on_primary: Color,
+    /// Foreground that reads on surface colours.
+    pub on_surface: Color,
 }
 
 impl Default for Theme {
@@ -454,6 +512,7 @@ fn builtin_themes() -> BTreeMap<String, ThemeConfig> {
             border_active: "#4589ff".into(),
             border_inactive: "#393939".into(),
             font: "JetBrainsMono NFM".into(),
+            ..ThemeConfig::default()
         },
     );
     themes.insert(
@@ -474,6 +533,7 @@ fn builtin_themes() -> BTreeMap<String, ThemeConfig> {
             border_active: "#83a598".into(),
             border_inactive: "#141617".into(),
             font: "JetBrainsMono NFM".into(),
+            ..ThemeConfig::default()
         },
     );
     themes.insert(
@@ -494,6 +554,7 @@ fn builtin_themes() -> BTreeMap<String, ThemeConfig> {
             border_active: "#c4a7e7".into(),
             border_inactive: "#191724".into(),
             font: "JetBrainsMono NFM".into(),
+            ..ThemeConfig::default()
         },
     );
     themes.insert(
@@ -514,6 +575,7 @@ fn builtin_themes() -> BTreeMap<String, ThemeConfig> {
             border_active: "#7aa2f7".into(),
             border_inactive: "#15161e".into(),
             font: "JetBrainsMono NFM".into(),
+            ..ThemeConfig::default()
         },
     );
     themes

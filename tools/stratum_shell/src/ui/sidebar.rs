@@ -190,7 +190,7 @@ impl Sidebar {
 fn build_widget(entry: &WidgetConfig, config: Arc<Config>) -> Box<dyn Widget> {
     match entry.kind {
         WidgetKind::Launcher => Box::new(LauncherWidget),
-        WidgetKind::Workspaces => Box::new(WorkspacesWidget),
+        WidgetKind::Workspaces => Box::new(WorkspacesWidget { cells: Vec::new() }),
         WidgetKind::AppTitle => Box::new(AppTitleWidget {
             fallback: "Desktop".to_string(),
         }),
@@ -254,7 +254,10 @@ impl Widget for LauncherWidget {
     }
 }
 
-struct WorkspacesWidget;
+struct WorkspacesWidget {
+    /// Cells from the last paint, paired with workspace ids, for hit-testing.
+    cells: Vec<(Rect, i32)>,
+}
 
 impl Widget for WorkspacesWidget {
     fn height(&self, _width: f32) -> Option<f32> {
@@ -289,6 +292,7 @@ impl Widget for WorkspacesWidget {
             ((1..=10).collect(), 0)
         };
 
+        self.cells.clear();
         let vertical = ctx.is_vertical();
         let step = if vertical { 23.0 } else { rect.height.min(24.0) + 6.0 };
         let cell = if vertical {
@@ -316,7 +320,17 @@ impl Widget for WorkspacesWidget {
                 ctx.theme.text_muted
             };
             ui::paint_text_centered(ctx, list, &id.to_string(), row, 15.0, color);
+            self.cells.push((row, *id));
         }
+    }
+
+    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
+        // Switch workspaces directly; it is a cheap socket write, so it does not
+        // need the action queue.
+        if let Some((_, id)) = self.cells.iter().find(|(rect, _)| rect.contains(point)) {
+            let _ = crate::hyprland::focus_workspace(*id);
+        }
+        None
     }
 }
 

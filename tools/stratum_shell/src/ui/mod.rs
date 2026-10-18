@@ -8,6 +8,7 @@
 use crate::render::display_list::{
     Color, DisplayList, Paint, Path, PathCommand, Point, Rect, TextRun, Transform,
 };
+pub mod animation;
 pub mod control_center;
 pub mod controls;
 pub mod sidebar;

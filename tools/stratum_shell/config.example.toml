@@ -142,7 +142,18 @@ border_active = "#7aa2f7"
 border_inactive = "#15161e"
 font = "JetBrainsMono NFM"
 
-# A custom theme:
+# Optional Material-style tokens. Each falls back to an existing colour, so a
+# theme can set only the ones it needs. These give multi-surface UIs a coherent
+# ramp instead of ad-hoc greys.
+#
 # [themes.mine]
 # bg_main = "#0b0b10"
 # primary = "#ff79c6"
+# surface_lowest  = "#08080c"   # deepest recess
+# surface_low     = "#0b0b10"
+# surface         = "#111118"
+# surface_high    = "#181820"   # cards
+# surface_highest = "#20202a"   # hover / raised
+# outline         = "#2a2a36"   # dividers and frame borders
+# on_primary      = "#08080c"   # text on filled primary buttons
+# on_surface      = "#e8e8f0"   # text on surfaces

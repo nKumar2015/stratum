@@ -49,6 +49,16 @@ fn query(command: &str) -> Option<String> {
     Some(out)
 }
 
+/// Send a dispatch command to the compositor.
+pub fn dispatch(command: &str) -> bool {
+    query(&format!("dispatch {}", command)).is_some()
+}
+
+/// Focus a workspace by id, creating it if necessary.
+pub fn focus_workspace(id: i32) -> bool {
+    dispatch(&format!("workspace {id}"))
+}
+
 impl HyprState {
     /// Query the current state once.
     pub fn read() -> Self {

@@ -16,6 +16,7 @@ mod glyph_probe;
 mod actions;
 mod config;
 mod hyprland;
+mod notifications;
 #[allow(dead_code)]
 mod icons;
 mod render;

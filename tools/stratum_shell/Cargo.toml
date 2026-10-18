@@ -39,6 +39,7 @@ stratum_sys = { path = "../stratum_sys" }
 # The managers use tokio internally; the shell gives them a small runtime on a
 # worker thread instead of blocking the Wayland loop.
 tokio = { workspace = true }
+zbus = { workspace = true }
 serde_json = { workspace = true }
 toml = "1.1"
 tracing = { workspace = true }
