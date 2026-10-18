@@ -22,6 +22,15 @@ raw-window-handle = "0.6.2"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
 
+# Vector geometry, text shaping, and icon rasterization.
+lyon = "1.0"
+cosmic-text = "0.19"
+# Must match cosmic-text's fontdb version so glyph font IDs are the same type.
+fontdb = "0.23"
+swash = "0.2"
+resvg = "0.48"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

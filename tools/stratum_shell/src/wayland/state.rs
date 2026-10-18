@@ -24,6 +24,7 @@ use wayland_client::{Connection, QueueHandle};
 use super::surfaces::SurfaceEntry;
 use super::display_ptr;
 use crate::render::Gpu;
+use crate::text::TextEngine;
 
 /// Logical width of the M1 sidebar; mirrors the QML shell's 40px rail.
 const SIDEBAR_WIDTH: u32 = 40;
@@ -37,6 +38,7 @@ pub struct App {
     gpu: Gpu,
     display: NonNull<std::ffi::c_void>,
     surfaces: Vec<SurfaceEntry>,
+    text: TextEngine,
 
     #[allow(dead_code)]
     pub should_exit: bool,
@@ -76,6 +78,7 @@ impl App {
             gpu,
             display,
             surfaces: Vec::new(),
+            text: TextEngine::new(),
             should_exit: false,
         };
 
@@ -100,7 +103,7 @@ impl App {
             if !entry.dirty || !entry.configured {
                 continue;
             }
-            entry.render(&self.gpu, self.display)?;
+            entry.render(&self.gpu, self.display, &mut self.text)?;
             entry.dirty = false;
         }
         Ok(())
@@ -112,6 +115,9 @@ impl App {
 
         for output in outputs {
             let info = self.output_state.info(&output);
+            // SCTK reports an integer scale. For fractional outputs (Hyprland
+            // reports 1.6) an integer buffer scale of 2 is correct for sharpness;
+            // the compositor downsamples the buffer to the logical size.
             let scale = info.as_ref().map(|i| i.scale_factor).unwrap_or(1).max(1);
             let output_name = info.as_ref().map(|i| i.model.clone()).unwrap_or_default();
 

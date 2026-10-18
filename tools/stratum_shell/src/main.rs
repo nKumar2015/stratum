@@ -9,7 +9,13 @@
 //! Vulkan surface handoff works. The window is a flat background plus one
 //! rounded rectangle; no widgets or state yet.
 
+#[allow(dead_code)]
+#[cfg(test)]
+mod glyph_probe;
+#[allow(dead_code)]
+mod icons;
 mod render;
+mod text;
 mod wayland;
 
 use std::process::ExitCode;
