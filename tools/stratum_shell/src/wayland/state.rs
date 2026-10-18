@@ -174,6 +174,7 @@ impl App {
                 text: &mut self.text,
                 state: &self.state,
                 output_name: &output_name,
+                axis: self.config.sidebar.axis(),
             };
             entry.render_with(
                 &self.gpu,

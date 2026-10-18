@@ -231,6 +231,10 @@ impl Widget for LauncherWidget {
         Some(24.0)
     }
 
+    fn width(&self, height: f32) -> Option<f32> {
+        Some(height.max(24.0))
+    }
+
     fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -249,6 +253,11 @@ impl Widget for WorkspacesWidget {
         // Room for ten workspaces plus gaps; the rail's flexible widget takes
         // whatever is left.
         Some(10.0 * 20.0 + 9.0 * 3.0)
+    }
+
+    fn width(&self, height: f32) -> Option<f32> {
+        // Ten cells side by side in a horizontal bar.
+        Some(10.0 * (height.min(24.0) + 6.0))
     }
 
     fn paint(
@@ -272,11 +281,22 @@ impl Widget for WorkspacesWidget {
             ((1..=10).collect(), 0)
         };
 
-        for (index, id) in ids.iter().enumerate() {
-            let row = Rect {
-                y: rect.y + index as f32 * 23.0,
-                height: 20.0,
+        let vertical = ctx.is_vertical();
+        let step = if vertical { 23.0 } else { rect.height.min(24.0) + 6.0 };
+        let cell = if vertical {
+            Rect { height: 20.0, ..rect }
+        } else {
+            Rect {
+                width: step,
                 ..rect
+            }
+        };
+
+        for (index, id) in ids.iter().enumerate() {
+            let row = if vertical {
+                Rect { y: rect.y + index as f32 * step, ..cell }
+            } else {
+                Rect { x: rect.x + index as f32 * step, ..cell }
             };
             let is_active = index == active_index;
             let occupied = hypr.occupied.contains(id);
@@ -304,6 +324,12 @@ impl Widget for AppTitleWidget {
         None
     }
 
+    /// In a horizontal bar the title is ordinary inline text, and it is the
+    /// widget that absorbs slack, so it reports no intrinsic width.
+    fn width(&self, _height: f32) -> Option<f32> {
+        None
+    }
+
     fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -311,6 +337,44 @@ impl Widget for AppTitleWidget {
         rect: Rect,
         _input: &InputState,
     ) {
+        let live_title = ctx
+            .state
+            .hypr
+            .get()
+            .title
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| self.fallback.clone());
+
+        if !ctx.is_vertical() {
+            // Horizontal bar: a single line, left-aligned after a small inset.
+            let style = crate::text::TextStyle {
+                family: Arc::from(ctx.theme.font.as_str()),
+                size: 13.0,
+                weight: 500,
+                color: ctx.theme.text_main,
+            };
+            let insets = 6.0;
+            let available = rect.width - insets * 2.0;
+            if available <= 0.0 {
+                return;
+            }
+            let text = self.elide_text(&live_title, &style, ctx, available);
+            if text.is_empty() {
+                return;
+            }
+            ui::paint_text_vcentered(
+                ctx,
+                list,
+                &text,
+                rect.x + insets,
+                rect,
+                style.size,
+                style.weight,
+                style.color,
+            );
+            return;
+        }
+
         // Vertical label, matching the QML app-title. The run advances upward;
         // `line_height` is its cross-axis extent, which must fit the rail.
         let mut size = 14.0_f32;
@@ -406,6 +470,13 @@ impl Widget for QuickPanelWidget {
         Some(self.height)
     }
 
+    /// In a horizontal bar the panel sizes to its children side by side.
+    fn width(&self, height: f32) -> Option<f32> {
+        let slot = height - 8.0;
+        let count = self.children.len().max(1) as f32;
+        Some(slot * count + 6.0 * (count - 1.0) + 8.0)
+    }
+
     fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -413,6 +484,10 @@ impl Widget for QuickPanelWidget {
         rect: Rect,
         input: &InputState,
     ) {
+        if !ctx.is_vertical() {
+            self.paint_horizontal(ctx, list, rect, input);
+            return;
+        }
         const PANEL_WIDTH: f32 = 30.0;
         const INNER_MARGIN: f32 = 6.0;
         const CHILD_SPACING: f32 = 4.0;
@@ -465,6 +540,52 @@ impl Widget for QuickPanelWidget {
     }
 }
 
+impl QuickPanelWidget {
+    /// Row layout for a horizontal bar: children side by side inside the frame.
+    fn paint_horizontal(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        list: &mut DisplayList,
+        rect: Rect,
+        input: &InputState,
+    ) {
+        const INNER_MARGIN: f32 = 4.0;
+        const CHILD_SPACING: f32 = 6.0;
+
+        if self.framed {
+            ui::paint_frame(
+                list,
+                rect,
+                ctx.theme.bg_widget,
+                ctx.theme.border_active,
+                ctx.appearance.framed_border,
+            );
+        }
+
+        let count = self.children.len();
+        if count == 0 {
+            return;
+        }
+        let inner_width = (rect.width - INNER_MARGIN * 2.0).max(0.0);
+        let gaps = CHILD_SPACING * (count.saturating_sub(1)) as f32;
+        let slot = ((inner_width - gaps) / count as f32).max(0.0);
+
+        let mut x = rect.x + INNER_MARGIN;
+        for child in self.children.iter_mut() {
+            let slot_rect = Rect {
+                x,
+                y: rect.y,
+                width: slot,
+                height: rect.height,
+                radius: 0.0,
+                color: Color::TRANSPARENT,
+            };
+            child.paint(ctx, list, slot_rect, input);
+            x += slot + CHILD_SPACING;
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IconKind {
     Audio,
@@ -481,6 +602,10 @@ struct IconWidget {
 impl Widget for IconWidget {
     fn height(&self, _width: f32) -> Option<f32> {
         Some(self.size + 4.0)
+    }
+
+    fn width(&self, height: f32) -> Option<f32> {
+        Some(height.max(self.size + 4.0))
     }
 
     fn paint(
@@ -519,6 +644,10 @@ struct BatteryWidget;
 impl Widget for BatteryWidget {
     fn height(&self, _width: f32) -> Option<f32> {
         Some(24.0)
+    }
+
+    fn width(&self, height: f32) -> Option<f32> {
+        Some(height.max(24.0))
     }
 
     fn paint(
@@ -571,6 +700,12 @@ impl Widget for ClockWidget {
         Some(64.0)
     }
 
+    /// In a bar the clock is one line; width is measured at paint time, so use
+    /// a stable estimate.
+    fn width(&self, _height: f32) -> Option<f32> {
+        Some(84.0)
+    }
+
     fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -578,6 +713,31 @@ impl Widget for ClockWidget {
         rect: Rect,
         _input: &InputState,
     ) {
+        if !ctx.is_vertical() {
+            // Single line: "04:20 PM".
+            let now = chrono::Local::now();
+            let text = now.format("%I:%M %p").to_string();
+            let style = crate::text::TextStyle {
+                family: Arc::from(ctx.theme.font.as_str()),
+                size: 13.0,
+                weight: 500,
+                color: ctx.theme.primary,
+            };
+            let width = ctx.text.measure(&text, &style).0;
+            let x = rect.x + (rect.width - width) * 0.5;
+            ui::paint_text_vcentered(
+                ctx,
+                list,
+                &text,
+                x,
+                rect,
+                style.size,
+                style.weight,
+                style.color,
+            );
+            return;
+        }
+
         // Three stacked lines: hour, minute, meridiem — matching the QML clock.
         let now = chrono::Local::now();
         let hour = now.format("%I").to_string();
@@ -610,6 +770,10 @@ struct SpacerWidget {
 
 impl Widget for SpacerWidget {
     fn height(&self, _width: f32) -> Option<f32> {
+        Some(self.height)
+    }
+
+    fn width(&self, _height: f32) -> Option<f32> {
         Some(self.height)
     }
 

@@ -21,6 +21,14 @@ pub struct PaintCtx<'a> {
     pub state: &'a crate::sys_state::SystemState,
     /// Which output's bar is being painted (for per-monitor workspace focus).
     pub output_name: &'a str,
+    /// Orientation of the bar being painted.
+    pub axis: crate::config::Axis,
+}
+
+impl PaintCtx<'_> {
+    pub fn is_vertical(&self) -> bool {
+        self.axis == crate::config::Axis::Vertical
+    }
 }
 
 impl PaintCtx<'_> {
@@ -275,6 +283,58 @@ pub fn paint_text_centered(
     let baseline = box_top + ascent;
     let x = rect.x + (rect.width - width) * 0.5;
     ctx.text_text(list, value, x, baseline, style);
+}
+
+/// Draw a single line vertically centred in `rect`, starting at `x`.
+///
+/// Uses the font's real ascent and line height, so text sits on the optical
+/// centre regardless of size. Horizontal placement is the caller's choice.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_text_vcentered(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    value: &str,
+    x: f32,
+    rect: Rect,
+    size: f32,
+    weight: u16,
+    color: Color,
+) {
+    if value.is_empty() || rect.height <= 0.0 {
+        return;
+    }
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight,
+        color,
+    };
+    let (ascent, line_height) = ctx.text.metrics(&style);
+    let box_top = rect.y + (rect.height - line_height) * 0.5;
+    let baseline = box_top + ascent;
+    ctx.text_text(list, value, x, baseline, style);
+}
+
+/// Like [`paint_text_centered`] but with an explicit weight.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_text_centered_weighted(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    value: &str,
+    rect: Rect,
+    size: f32,
+    weight: u16,
+    color: Color,
+) {
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight,
+        color,
+    };
+    let width = ctx.text.measure(value, &style).0;
+    let x = rect.x + (rect.width - width) * 0.5;
+    paint_text_vcentered(ctx, list, value, x, rect, size, weight, color);
 }
 
 /// Rotate a text run so it reads upward along a vertical rail.
