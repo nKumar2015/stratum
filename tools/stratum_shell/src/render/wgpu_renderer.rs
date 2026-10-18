@@ -367,10 +367,9 @@ impl SurfaceRenderer {
         }
         for (glyph, run_x, run_y, run_size, color, transform, raster) in glyph_uploads {
             if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
-                // Reproduce cosmic-text's `PhysicalGlyph` placement:
-                //   pen_x = (glyph.x + glyph.x_offset * size) * scale + run.x
-                //   pen_y = (glyph.y - glyph.y_offset * size) * scale + run.y
-                // and swash's bitmap origin: (left, -top) from the pen.
+                // `run_x`/`run_y` place the run's baseline origin; glyph
+                // offsets are relative to it. Swash's bitmap origin is
+                // (left, -top) from the pen.
                 let scale = self.scale;
                 let pen_x = run_x + glyph.x + glyph.x_offset * run_size;
                 let pen_y = run_y + glyph.y - glyph.y_offset * run_size;

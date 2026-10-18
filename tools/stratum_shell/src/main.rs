@@ -13,6 +13,7 @@
 #[cfg(test)]
 mod glyph_probe;
 #[allow(dead_code)]
+mod actions;
 mod config;
 mod hyprland;
 #[allow(dead_code)]

@@ -34,6 +34,19 @@ fn glyph_probe_renders_visible_text() {
     write_png(&output, WIDTH, HEIGHT, &pixels);
     eprintln!("glyph probe written to {}", output.display());
 
+    // Diagnostic: report the ink's vertical extent so a baseline regression is
+    // visible in the test output.
+    let mut min_y = u32::MAX;
+    let mut max_y = 0u32;
+    for (i, px) in pixels.chunks_exact(4).enumerate() {
+        if px[0] > 40 {
+            let y = i as u32 / WIDTH;
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+    }
+    eprintln!("ink vertical extent: {min_y}..{max_y} of {HEIGHT}");
+
     // The probe passes when enough non-background pixels exist to form glyphs.
     let lit = pixels
         .chunks_exact(4)

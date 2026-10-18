@@ -78,13 +78,15 @@ impl TextEngine {
         let mut glyphs = Vec::new();
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
-                // `line_y` is the baseline; convert to a top-left origin so the
-                // renderer can offset by the glyph bitmap's own bearing.
+                // Glyphs are positioned relative to the run origin. `line_y` is
+                // the baseline within the shaped buffer; the renderer adds the
+                // run's y, so keeping the absolute baseline here would count it
+                // twice and push text a full line down.
                 glyphs.push(PositionedGlyph {
                     glyph_id: glyph.glyph_id,
                     font_id: glyph.font_id,
                     x: glyph.x,
-                    y: run.line_y,
+                    y: glyph.y,
                     x_offset: glyph.x_offset,
                     y_offset: glyph.y_offset,
                 });

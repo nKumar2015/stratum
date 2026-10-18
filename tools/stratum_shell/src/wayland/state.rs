@@ -56,6 +56,7 @@ pub struct App {
     sidebar: Sidebar,
     seat_state: SeatState,
     control_center: crate::ui::control_center::ControlCenter,
+    actions: Arc<crate::actions::ActionQueue>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -135,6 +136,7 @@ impl App {
             sidebar,
             seat_state,
             control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
+            actions: crate::actions::ActionQueue::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -150,6 +152,7 @@ impl App {
 
         app.create_surfaces(&qh);
         app.start_monitors();
+
 
 
         // Hand the queue to calloop, which dispatches whenever the socket is
@@ -221,6 +224,11 @@ impl App {
                 }
                 self.settings = Some(window);
             }
+            // Dispatch whatever the panel asked for. The worker executes them
+            // off-thread and their effects arrive as normal state updates.
+            for action in self.control_center.take_actions() {
+                self.actions.push(action);
+            }
         }
 
         let theme = self.config.active_theme();
@@ -268,6 +276,7 @@ impl App {
         use stratum_sys::managers;
 
         let publisher = SystemState::publisher(&self.state);
+        self.actions.start_worker();
 
         // The managers' async entry points expect a Tokio runtime. The shell's
         // UI thread runs calloop, so give them a small dedicated runtime.
@@ -468,9 +477,14 @@ impl SettingsWindow {
         self.width = width.max(1);
         self.height = height.max(1);
         self.configured = true;
-        self.window.wl_surface().set_buffer_scale(1);
+        // Buffer scale applies to toplevels too. Without this the window is
+        // rendered at 1x and upscaled by the compositor, which is what made it
+        // look blurry next to the sharp layer surfaces.
+        let scale = self.scale.max(1) as u32;
+        self.window.wl_surface().set_buffer_scale(scale as i32);
+        let physical = (self.width * scale, self.height * scale);
         if let Some(renderer) = &mut self.renderer {
-            renderer.resize(gpu, (self.width, self.height), 1.0);
+            renderer.resize(gpu, physical, self.scale as f32);
         }
     }
 
@@ -484,8 +498,13 @@ impl SettingsWindow {
     ) -> Result<crate::render::display_list::Rect, String> {
         if self.renderer.is_none() {
             let surface = self.window.wl_surface();
+            let scale = self.scale.max(1) as u32;
             self.renderer = Some(crate::render::SurfaceRenderer::new(
-                gpu, display, surface, (self.width, self.height), 1.0,
+                gpu,
+                display,
+                surface,
+                (self.width * scale, self.height * scale),
+                self.scale as f32,
             )?);
         }
 
@@ -504,9 +523,13 @@ impl SettingsWindow {
 
         let renderer = self.renderer.as_mut().ok_or("renderer missing")?;
         renderer.submit(gpu, &list, ctx.text)?;
-        self.window
-            .wl_surface()
-            .damage_buffer(0, 0, self.width as i32, self.height as i32);
+        let scale = self.scale.max(1);
+        self.window.wl_surface().damage_buffer(
+            0,
+            0,
+            (self.width * scale as u32) as i32,
+            (self.height * scale as u32) as i32,
+        );
         self.window.commit();
         Ok(panel)
     }
@@ -542,7 +565,15 @@ impl App {
             );
         }
 
-        self.settings = Some(SettingsWindow::new(window, 1));
+        // Match the scale of an existing bar surface so the window is as sharp
+        // as the rest of the shell on this output.
+        let scale = self
+            .surfaces
+            .iter()
+            .map(|s| s.scale)
+            .max()
+            .unwrap_or(1);
+        self.settings = Some(SettingsWindow::new(window, scale));
     }
 
     fn apply_action(&mut self, action: crate::ui::Action) {
