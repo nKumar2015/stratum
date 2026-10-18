@@ -17,6 +17,25 @@ pub struct Color {
     pub a: f32,
 }
 
+impl Rect {
+    pub const EMPTY: Rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
+        radius: 0.0,
+        color: Color::TRANSPARENT,
+    };
+
+    /// True when `point` lies inside this rectangle.
+    pub fn contains(self, point: Point) -> bool {
+        point.x >= self.x
+            && point.x <= self.x + self.width
+            && point.y >= self.y
+            && point.y <= self.y + self.height
+    }
+}
+
 impl Color {
     pub const TRANSPARENT: Self = Self::rgba(0.0, 0.0, 0.0, 0.0);
     pub const WHITE: Self = Self::rgba(1.0, 1.0, 1.0, 1.0);

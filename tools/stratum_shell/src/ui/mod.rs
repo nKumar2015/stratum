@@ -8,6 +8,7 @@
 use crate::render::display_list::{
     Color, DisplayList, Paint, Path, PathCommand, Point, Rect, TextRun, Transform,
 };
+pub mod control_center;
 pub mod sidebar;
 
 use crate::text::{TextEngine, TextStyle};
@@ -87,6 +88,15 @@ pub struct InputState {
     pub pressed: bool,
 }
 
+/// Something a widget asks the shell to do when clicked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Action {
+    /// Open the control centre on a specific page.
+    OpenPanel(crate::ui::control_center::Page),
+    /// Close the control centre.
+    ClosePanel,
+}
+
 /// A bar widget.
 pub trait Widget {
     /// Intrinsic height in a vertical bar at the given width. `None` means
@@ -106,9 +116,9 @@ pub trait Widget {
     /// Draw into `rect` (surface coordinates, logical pixels).
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, input: &InputState);
 
-    /// Return true when the widget handled a click at `point`.
-    fn on_click(&mut self, _point: Point, _input: &InputState) -> bool {
-        false
+    /// Handle a click at `point`, optionally returning an action for the shell.
+    fn on_click(&mut self, _point: Point, _input: &InputState) -> Option<Action> {
+        None
     }
 }
 
@@ -167,11 +177,11 @@ impl Column {
         cursor - y
     }
 
-    /// Route a click to the first child that accepts it.
-    pub fn on_click(&mut self, point: Point, input: &InputState) -> bool {
+    /// Route a click to the first child that returns an action.
+    pub fn on_click(&mut self, point: Point, input: &InputState) -> Option<Action> {
         self.widgets
             .iter_mut()
-            .any(|widget| widget.on_click(point, input))
+            .find_map(|widget| widget.on_click(point, input))
     }
 }
 

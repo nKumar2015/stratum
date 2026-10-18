@@ -15,6 +15,9 @@ use smithay_client_toolkit::seat::pointer::{
     PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT,
 };
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::activation::{ActivationHandler, ActivationState, RequestData};
+use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
+use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
     LayerSurfaceConfigure,
@@ -52,6 +55,14 @@ pub struct App {
     state: Arc<SystemState>,
     sidebar: Sidebar,
     seat_state: SeatState,
+    control_center: crate::ui::control_center::ControlCenter,
+    /// Last frame time, for animation.
+    last_frame: std::time::Instant,
+    queue_handle: QueueHandle<App>,
+    xdg_shell: XdgShell,
+    activation: Option<ActivationState>,
+    /// The control-centre window, created on first open.
+    settings: Option<SettingsWindow>,
     /// Surface the pointer is currently over, and the last known position in
     /// that surface's logical coordinates.
     pointer: Option<(wl_surface::WlSurface, f32, f32)>,
@@ -87,6 +98,7 @@ impl App {
         let config = Arc::new(config);
         let state = SystemState::new();
         let sidebar = Sidebar::new(Arc::clone(&config));
+        let config_for_cc = Arc::clone(&config);
 
         // Enumerates the globals and hands us the queue they were collected on.
         let (globals, event_queue) = wayland_client::globals::registry_queue_init::<App>(&conn)
@@ -103,6 +115,10 @@ impl App {
             .map_err(|err| format!("compositor unavailable: {err}"))?;
         let layer_shell = LayerShell::bind(&globals, &qh)
             .map_err(|err| format!("wlr-layer-shell unavailable: {err}"))?;
+        let xdg_shell = XdgShell::bind(&globals, &qh)
+            .map_err(|err| format!("xdg-shell unavailable: {err}"))?;
+        // Optional: lets us hand focus to the settings window when opened.
+        let activation = ActivationState::bind(&globals, &qh).ok();
         let registry_state = RegistryState::new(&globals);
 
         let mut app = App {
@@ -118,6 +134,12 @@ impl App {
             state,
             sidebar,
             seat_state,
+            control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
+            last_frame: std::time::Instant::now(),
+            queue_handle: qh.clone(),
+            xdg_shell,
+            activation,
+            settings: None,
             pointer: None,
             pointer_pressed: false,
             config_path: path,
@@ -128,6 +150,7 @@ impl App {
 
         app.create_surfaces(&qh);
         app.start_monitors();
+
 
         // Hand the queue to calloop, which dispatches whenever the socket is
         // readable. The App itself lives in the loop's shared data.
@@ -152,6 +175,54 @@ impl App {
                 entry.dirty = true;
             }
         }
+        // The settings window is a normal toplevel, so no overlay animation is
+        // needed; the compositor owns its presentation.
+        self.last_frame = std::time::Instant::now();
+
+        // The settings window is an ordinary toplevel: create it on demand and
+        // redraw while it is open.
+        if self.control_center.open {
+            self.ensure_settings_window();
+        }
+        if self.control_center.visible() {
+            let theme = self.config.active_theme();
+            if let Some(mut window) = self.settings.take() {
+                if window.configured {
+                    let output_name = self
+                        .surfaces
+                        .first()
+                        .map(|s| s.output_name.clone())
+                        .unwrap_or_default();
+                    let input = crate::ui::InputState {
+                        pointer: self
+                            .pointer
+                            .as_ref()
+                            .filter(|(surface, _, _)| surface == window.window.wl_surface())
+                            .map(|(_, x, y)| (*x, *y)),
+                        pressed: self.pointer_pressed,
+                    };
+                    let mut ctx = crate::ui::PaintCtx {
+                        theme: &theme,
+                        appearance: &self.config.appearance,
+                        text: &mut self.text,
+                        state: &self.state,
+                        output_name: &output_name,
+                        axis: self.config.sidebar.axis(),
+                    };
+                    if let Err(err) = window.render(
+                        &self.gpu,
+                        self.display,
+                        &mut ctx,
+                        &mut self.control_center,
+                        &input,
+                    ) {
+                        tracing::error!("settings window render failed: {err}");
+                    }
+                }
+                self.settings = Some(window);
+            }
+        }
+
         let theme = self.config.active_theme();
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
@@ -355,8 +426,133 @@ impl App {
             layer.set_size(size.0, size.1);
             layer.commit();
 
-            self.surfaces.push(SurfaceEntry::new(layer, scale, output_name));
+            self.surfaces.push(SurfaceEntry::new(layer, scale, output_name.clone()));
+
             debug!("created layer surface on output (scale {scale}x)");
+        }
+    }
+}
+
+/// The control centre as a real toplevel window.
+///
+/// Using xdg-shell rather than a layer surface means the compositor owns the
+/// window: it gets normal focus, workspace placement, alt-tab, and stacking,
+/// so it feels like part of the shell rather than an overlay.
+struct SettingsWindow {
+    window: Window,
+    renderer: Option<crate::render::SurfaceRenderer>,
+    scale: i32,
+    width: u32,
+    height: u32,
+    configured: bool,
+    dirty: bool,
+    /// Whether we have asked for focus in response to an open request.
+    activated: bool,
+}
+
+impl SettingsWindow {
+    fn new(window: Window, scale: i32) -> Self {
+        Self {
+            window,
+            renderer: None,
+            scale,
+            width: 520,
+            height: 640,
+            configured: false,
+            dirty: true,
+            activated: false,
+        }
+    }
+
+    fn resize(&mut self, gpu: &Gpu, width: u32, height: u32) {
+        self.width = width.max(1);
+        self.height = height.max(1);
+        self.configured = true;
+        self.window.wl_surface().set_buffer_scale(1);
+        if let Some(renderer) = &mut self.renderer {
+            renderer.resize(gpu, (self.width, self.height), 1.0);
+        }
+    }
+
+    fn render(
+        &mut self,
+        gpu: &Gpu,
+        display: NonNull<std::ffi::c_void>,
+        ctx: &mut crate::ui::PaintCtx<'_>,
+        control_center: &mut crate::ui::control_center::ControlCenter,
+        input: &crate::ui::InputState,
+    ) -> Result<crate::render::display_list::Rect, String> {
+        if self.renderer.is_none() {
+            let surface = self.window.wl_surface();
+            self.renderer = Some(crate::render::SurfaceRenderer::new(
+                gpu, display, surface, (self.width, self.height), 1.0,
+            )?);
+        }
+
+        let mut list = crate::render::display_list::DisplayList::new(
+            ctx.theme.bg_main,
+        );
+        let surface_rect = crate::render::display_list::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.width as f32,
+            height: self.height as f32,
+            radius: 0.0,
+            color: ctx.theme.bg_main,
+        };
+        let panel = control_center.paint_window(ctx, &mut list, surface_rect, input);
+
+        let renderer = self.renderer.as_mut().ok_or("renderer missing")?;
+        renderer.submit(gpu, &list, ctx.text)?;
+        self.window
+            .wl_surface()
+            .damage_buffer(0, 0, self.width as i32, self.height as i32);
+        self.window.commit();
+        Ok(panel)
+    }
+}
+
+impl App {
+    /// Create the settings window the first time the control centre opens.
+    fn ensure_settings_window(&mut self) {
+        if self.settings.is_some() {
+            return;
+        }
+        let qh = self.queue_handle.clone();
+        let surface = self.compositor_state.create_surface(&qh);
+        let window = self
+            .xdg_shell
+            .create_window(surface, WindowDecorations::RequestServer, &qh);
+        window.set_title("Stratum Settings");
+        window.set_app_id("org.stratum.Settings");
+        window.set_min_size(Some((360, 320)));
+        // Initial commit with no buffer; the compositor answers with a configure.
+        window.commit();
+
+        // Ask for focus so the window comes to the front when opened.
+        if let Some(activation) = &self.activation {
+            activation.request_token(
+                &qh,
+                RequestData {
+                    seat_and_serial: None,
+                    surface: Some(window.wl_surface().clone()),
+                    app_id: Some("org.stratum.Settings".to_string()),
+                    udata: (),
+                },
+            );
+        }
+
+        self.settings = Some(SettingsWindow::new(window, 1));
+    }
+
+    fn apply_action(&mut self, action: crate::ui::Action) {
+        use crate::ui::Action;
+        match action {
+            Action::OpenPanel(page) => self.control_center.toggle(page),
+            Action::ClosePanel => self.control_center.close(),
+        }
+        for entry in &mut self.surfaces {
+            entry.dirty = true;
         }
     }
 }
@@ -582,7 +778,32 @@ impl PointerHandler for App {
                 pressed: true,
             };
             let point = crate::render::display_list::Point::new(x, y);
-            if self.sidebar.on_click(point, &input) {
+
+            // The settings window handles its own clicks; the bar only acts
+            // when the window is not the target.
+            let in_settings = self
+                .settings
+                .as_ref()
+                .map(|w| w.window.wl_surface() == &surface)
+                .unwrap_or(false);
+
+            if in_settings {
+                if let Some(window) = self.settings.as_ref() {
+                    let rect = crate::render::display_list::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: window.width as f32,
+                        height: window.height as f32,
+                        radius: 0.0,
+                        color: crate::render::display_list::Color::TRANSPARENT,
+                    };
+                    if let Some(action) = self.control_center.on_click(point, rect, &input) {
+                        self.apply_action(action);
+                        changed = true;
+                    }
+                }
+            } else if let Some(action) = self.sidebar.on_click(point, &input) {
+                self.apply_action(action);
                 changed = true;
             }
         }
@@ -591,6 +812,48 @@ impl PointerHandler for App {
             for entry in &mut self.surfaces {
                 entry.dirty = true;
             }
+        }
+    }
+}
+
+impl WindowHandler for App {
+    fn request_close(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _window: &Window,
+    ) {
+        // Closing the settings window closes the control centre; the window
+        // itself is kept for reuse.
+        self.control_center.close();
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        window: &Window,
+        configure: WindowConfigure,
+        _serial: u32,
+    ) {
+        let width = configure.new_size.0.map(|v| v.get()).unwrap_or(520);
+        let height = configure.new_size.1.map(|v| v.get()).unwrap_or(640);
+        if let Some(settings) = &mut self.settings {
+            if settings.window.wl_surface() == window.wl_surface() {
+                settings.resize(&self.gpu, width, height);
+                settings.dirty = true;
+            }
+        }
+    }
+}
+
+impl ActivationHandler for App {
+    type RequestUdata = ();
+
+    fn new_token(&mut self, token: String, _data: &RequestData<()>) {
+        // Apply the token to the settings window so the compositor focuses it.
+        if let (Some(activation), Some(settings)) = (&self.activation, &self.settings) {
+            activation.activate::<App>(settings.window.wl_surface(), token);
         }
     }
 }

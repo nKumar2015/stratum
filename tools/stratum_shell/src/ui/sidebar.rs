@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::config::{Axis, Config, SidebarPosition, WidgetConfig, WidgetKind};
 use crate::render::display_list::{Color, DisplayList, Rect, TextRun};
 use crate::sys_state::SystemState;
-use crate::ui::{self, InputState, PaintCtx, Widget};
+use crate::ui::control_center::Page;
+use crate::ui::{self, Action, InputState, PaintCtx, Widget};
 
 /// The sidebar surface for one output.
 pub struct Sidebar {
@@ -81,10 +82,14 @@ impl Sidebar {
     }
 
     /// Route a click to a widget, using the same geometry as the last paint.
-    pub fn on_click(&mut self, point: crate::render::display_list::Point, input: &InputState) -> bool {
+    pub fn on_click(
+        &mut self,
+        point: crate::render::display_list::Point,
+        input: &InputState,
+    ) -> Option<crate::ui::Action> {
         self.widgets
             .iter_mut()
-            .any(|widget| widget.on_click(point, input))
+            .find_map(|widget| widget.on_click(point, input))
     }
 
     /// Classic vertical rail: widgets stacked, flexible ones absorb the slack.
@@ -203,18 +208,21 @@ fn build_widget(entry: &WidgetConfig, config: Arc<Config>) -> Box<dyn Widget> {
             glyph: "\u{f0581}".to_string(),
             kind: IconKind::Audio,
             size: 20.0,
+            last_rect: Rect::EMPTY,
         }),
         WidgetKind::Bluetooth => Box::new(IconWidget {
             glyph: "\u{f00b1}".to_string(),
             kind: IconKind::Bluetooth,
             size: 20.0,
+            last_rect: Rect::EMPTY,
         }),
         WidgetKind::Wifi => Box::new(IconWidget {
             glyph: "\u{f05a9}".to_string(),
             kind: IconKind::Wifi,
             size: 20.0,
+            last_rect: Rect::EMPTY,
         }),
-        WidgetKind::Battery => Box::new(BatteryWidget),
+        WidgetKind::Battery => Box::new(BatteryWidget { last_rect: Rect::EMPTY }),
         WidgetKind::Clock => Box::new(ClockWidget),
         WidgetKind::Spacer => Box::new(SpacerWidget {
             height: entry.height.unwrap_or(12) as f32,
@@ -538,9 +546,25 @@ impl Widget for QuickPanelWidget {
             y += slot + CHILD_SPACING;
         }
     }
+
+    fn on_click(&mut self, point: crate::render::display_list::Point, input: &InputState) -> Option<Action> {
+        self.children
+            .iter_mut()
+            .find_map(|child| child.on_click(point, input))
+    }
 }
 
 impl QuickPanelWidget {
+    fn click_children(
+        &mut self,
+        point: crate::render::display_list::Point,
+        input: &InputState,
+    ) -> Option<Action> {
+        self.children
+            .iter_mut()
+            .find_map(|child| child.on_click(point, input))
+    }
+
     /// Row layout for a horizontal bar: children side by side inside the frame.
     fn paint_horizontal(
         &mut self,
@@ -597,6 +621,8 @@ struct IconWidget {
     glyph: String,
     kind: IconKind,
     size: f32,
+    /// Rect from the last paint, used for click hit-testing.
+    last_rect: Rect,
 }
 
 impl Widget for IconWidget {
@@ -615,6 +641,7 @@ impl Widget for IconWidget {
         rect: Rect,
         _input: &InputState,
     ) {
+        self.last_rect = rect;
         // Enabled state mirrors the real subsystem state; disabled icons use
         // the muted colour, matching the QML sidebar.
         let (enabled, color) = match self.kind {
@@ -637,9 +664,24 @@ impl Widget for IconWidget {
         let _ = enabled;
         ui::paint_text_centered(ctx, list, &self.glyph, rect, self.size, color);
     }
+
+    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
+        // Icons are only meaningful when the pointer is over them; the bar
+        // routes every click, so hit-test against the last painted slot.
+        if !self.last_rect.contains(point) {
+            return None;
+        }
+        Some(Action::OpenPanel(match self.kind {
+            IconKind::Audio => Page::Audio,
+            IconKind::Bluetooth => Page::Bluetooth,
+            IconKind::Wifi => Page::Wifi,
+        }))
+    }
 }
 
-struct BatteryWidget;
+struct BatteryWidget {
+    last_rect: Rect,
+}
 
 impl Widget for BatteryWidget {
     fn height(&self, _width: f32) -> Option<f32> {
@@ -657,6 +699,7 @@ impl Widget for BatteryWidget {
         rect: Rect,
         _input: &InputState,
     ) {
+        self.last_rect = rect;
         // Live percentage and charging state from stratum_sys.
         let battery = ctx.state.battery.get();
         let percent = battery["battery"]["pct"]
@@ -690,6 +733,12 @@ impl Widget for BatteryWidget {
             ctx.theme.success
         };
         ui::paint_text_centered(ctx, list, glyph, rect, 24.0, color);
+    }
+
+    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
+        self.last_rect
+            .contains(point)
+            .then_some(Action::OpenPanel(Page::Battery))
     }
 }
 

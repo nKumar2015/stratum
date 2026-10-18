@@ -30,6 +30,7 @@ pub struct Config {
     pub sidebar: SidebarConfig,
     pub appearance: AppearanceConfig,
     pub behavior: BehaviorConfig,
+    pub control_center: ControlCenterConfig,
 }
 
 impl Default for Config {
@@ -40,6 +41,7 @@ impl Default for Config {
             sidebar: SidebarConfig::default(),
             appearance: AppearanceConfig::default(),
             behavior: BehaviorConfig::default(),
+            control_center: ControlCenterConfig::default(),
         }
     }
 }
@@ -309,6 +311,28 @@ impl Default for AppearanceConfig {
             corner_radius: 15.0,
             animation_ms: 180,
             framed_border: true,
+        }
+    }
+}
+
+/// The paged settings surface.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ControlCenterConfig {
+    /// Panel width in logical pixels.
+    pub width: u32,
+    /// Slide/fade duration in milliseconds. Zero opens instantly.
+    pub animation_ms: u32,
+    /// Which page to show when opened by something without a page of its own.
+    pub default_page: String,
+}
+
+impl Default for ControlCenterConfig {
+    fn default() -> Self {
+        Self {
+            width: 520,
+            animation_ms: 160,
+            default_page: "overview".into(),
         }
     }
 }
