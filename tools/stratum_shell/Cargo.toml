@@ -31,6 +31,12 @@ swash = "0.2"
 resvg = "0.48"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+serde = { workspace = true }
+chrono = { workspace = true }
+
+# System managers, shared with stratumd. The shell embeds them directly.
+stratum_sys = { path = "../stratum_sys" }
 serde_json = { workspace = true }
+toml = "1.1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

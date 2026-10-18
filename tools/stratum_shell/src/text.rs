@@ -203,8 +203,16 @@ fn raster_to_mask(image: &SwashImage) -> Option<RasterGlyph> {
 /// sandboxed build). Tests use this to skip instead of failing the build.
 #[cfg(test)]
 fn fonts_available(engine: &mut TextEngine) -> bool {
+    fonts_available_for(engine, "sans-serif")
+}
+
+/// Like [`fonts_available`], but probes the family the caller will actually use.
+/// The sandboxed build has no fonts at all, and cosmic-text panics when a
+/// requested family cannot be resolved, so every shaping test must probe first.
+#[cfg(test)]
+fn fonts_available_for(engine: &mut TextEngine, family: &str) -> bool {
     let style = TextStyle {
-        family: Arc::from("sans-serif"),
+        family: Arc::from(family),
         size: 16.0,
         weight: 400,
         color: Color::WHITE,
@@ -285,5 +293,29 @@ mod placement_tests {
         // All glyphs share one baseline.
         let ys: Vec<f32> = rasters.iter().map(|(g, _)| g.y).collect();
         assert!(ys.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-3), "one baseline: {ys:?}");
+    }
+}
+
+#[cfg(test)]
+mod glyph_availability_tests {
+    use super::*;
+
+    #[test]
+    fn nerd_font_icon_resolves_to_a_real_glyph() {
+        let mut engine = TextEngine::new();
+        let style = TextStyle {
+            family: Arc::from("JetBrainsMono NFM"),
+            size: 16.0,
+            weight: 400,
+            color: Color::WHITE,
+        };
+        if !super::fonts_available_for(&mut engine, "JetBrainsMono NFM") {
+            eprintln!("skipping: JetBrainsMono NFM not available");
+            return;
+        }
+        // U+F0581 (audio speaker) must map to a real glyph, not .notdef (0).
+        let run = engine.shape("\u{f0581}", &style, 0.0, 0.0);
+        assert_eq!(run.glyphs.len(), 1, "one codepoint should shape to one glyph");
+        assert_ne!(run.glyphs[0].glyph_id, 0, "icon must not be .notdef");
     }
 }

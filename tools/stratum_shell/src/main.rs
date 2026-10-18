@@ -13,9 +13,12 @@
 #[cfg(test)]
 mod glyph_probe;
 #[allow(dead_code)]
+mod config;
 mod icons;
 mod render;
+mod sys_state;
 mod text;
+mod ui;
 mod wayland;
 
 use std::process::ExitCode;

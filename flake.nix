@@ -84,12 +84,17 @@
 
         nativeBuildInputs = with pkgs; [pkg-config clang];
         # Wayland client headers + the Vulkan loader are needed at link time.
+        # The shell embeds stratum_sys, whose PipeWire bindings run bindgen, so
+        # the PipeWire/SPA headers and libclang must be present too.
         buildInputs = with pkgs; [
           wayland wayland-protocols
           libxkbcommon
           vulkan-loader
           libGL
           dbus
+          pipewire
+          libpulseaudio
+          pam
         ];
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";

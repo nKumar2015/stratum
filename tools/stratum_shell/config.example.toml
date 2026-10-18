@@ -1,0 +1,148 @@
+# Stratum shell configuration
+#
+# Copy to one of:
+#   $XDG_CONFIG_HOME/stratum/config.toml   (usually ~/.config/stratum/config.toml)
+# or point STRATUM_CONFIG at this file.
+#
+# Every field below is optional; the built-in defaults match the old QML shell.
+# Unknown keys are a hard error, so typos surface instead of being ignored.
+
+# Active theme, by key from the [themes.*] tables below.
+theme = "carbon"
+
+[appearance]
+font_size = 13.0        # logical px
+corner_radius = 15.0    # framed widgets and menus
+animation_ms = 180      # 0 disables animation
+framed_border = true
+
+[behavior]
+poll_ms = 3000          # widgets without push updates
+reload_on_change = true # watch this file and redraw when it changes
+
+[sidebar]
+position = "left"       # "left" or "right"
+width = 40              # logical px
+padding = 12            # space above and below the widget column
+spacing = 16            # gap between widgets
+inverted_corners = true # scooped corners where the rail meets the screen edge
+
+# Widgets are rendered in this order, top to bottom. Delete an entry to hide
+# that widget. A widget with `height` omitted uses its intrinsic size; the
+# app_title widget is flexible and absorbs the leftover space, which pushes
+# everything after it to the bottom of the rail.
+
+[[sidebar.widgets]]
+kind = "launcher"
+
+[[sidebar.widgets]]
+kind = "workspaces"
+
+[[sidebar.widgets]]
+kind = "app_title"
+
+[[sidebar.widgets]]
+kind = "tray"
+
+# Container: draws a rounded frame and stacks its children.
+[[sidebar.widgets]]
+kind = "quick_panel"
+framed = true
+height = 86
+children = [
+  { kind = "audio" },
+  { kind = "bluetooth" },
+  { kind = "wifi" },
+]
+
+[[sidebar.widgets]]
+kind = "battery"
+
+[[sidebar.widgets]]
+kind = "clock"
+
+# Add a fixed gap anywhere:
+# [[sidebar.widgets]]
+# kind = "spacer"
+# height = 12
+
+
+# ---------------------------------------------------------------------------
+# Themes
+#
+# Colours accept #rgb, #rrggbb, or #rrggbbaa. Define as many as you like and
+# switch between them with `theme = "..."` above.
+# ---------------------------------------------------------------------------
+
+[themes.carbon]
+bg_main = "#161616"
+bg_widget = "#262626"
+bg_hover = "#393939"
+bg_dark = "#15161e"
+text_main = "#f4f4f4"
+text_muted = "#8d8d8d"
+primary = "#4589ff"
+secondary = "#a56eff"
+tertiary = "#33b1ff"
+success = "#42be64"
+warning = "#f1c21b"
+error = "#fa4d56"
+border_active = "#4589ff"
+border_inactive = "#393939"
+font = "JetBrainsMono NFM"
+
+[themes.gruvbox]
+bg_main = "#1d2021"
+bg_widget = "#282828"
+bg_hover = "#3c3836"
+bg_dark = "#141617"
+text_main = "#ebdbb2"
+text_muted = "#a89984"
+primary = "#83a598"
+secondary = "#d3869b"
+tertiary = "#fe8019"
+success = "#b8bb26"
+warning = "#fabd2f"
+error = "#fb4934"
+border_active = "#83a598"
+border_inactive = "#141617"
+font = "JetBrainsMono NFM"
+
+[themes.rosepine]
+bg_main = "#1f1d2e"
+bg_widget = "#26233a"
+bg_hover = "#403d52"
+bg_dark = "#191724"
+text_main = "#e0def4"
+text_muted = "#908caa"
+primary = "#c4a7e7"
+secondary = "#ebbcba"
+tertiary = "#31748f"
+success = "#9ccfd8"
+warning = "#f6c177"
+error = "#eb6f92"
+border_active = "#c4a7e7"
+border_inactive = "#191724"
+font = "JetBrainsMono NFM"
+
+[themes.tokyonight]
+bg_main = "#1a1b26"
+bg_widget = "#1f2335"
+bg_hover = "#292e42"
+bg_dark = "#15161e"
+text_main = "#c0caf5"
+text_muted = "#565f89"
+primary = "#7aa2f7"
+secondary = "#bb9af7"
+tertiary = "#7dcfff"
+success = "#9ece6a"
+warning = "#e0af68"
+error = "#f7768e"
+border_active = "#7aa2f7"
+border_inactive = "#15161e"
+font = "JetBrainsMono NFM"
+
+# A custom theme:
+# [themes.mine]
+# bg_main = "#0b0b10"
+# primary = "#ff79c6"

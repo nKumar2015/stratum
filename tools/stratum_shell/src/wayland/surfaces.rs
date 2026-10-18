@@ -6,15 +6,8 @@ use smithay_client_toolkit::shell::wlr_layer::LayerSurface;
 use smithay_client_toolkit::shell::WaylandSurface;
 use tracing::debug;
 
-use crate::render::display_list::{
-    Color, DisplayList, Path, PathCommand, Paint, Point, Rect, Transform,
-};
+use crate::render::display_list::DisplayList;
 use crate::render::{Gpu, SurfaceRenderer};
-use crate::text::{TextEngine, TextStyle};
-
-/// Colours for the M1 placeholder: the shell's default Carbon palette.
-const BG_MAIN: u32 = 0x161616;
-const PRIMARY: u32 = 0x4589ff;
 
 pub struct SurfaceEntry {
     pub layer: LayerSurface,
@@ -71,11 +64,13 @@ impl SurfaceEntry {
     }
 
     /// Draw one frame and present it.
-    pub fn render(
+    pub fn render_with(
         &mut self,
         gpu: &Gpu,
         display: NonNull<std::ffi::c_void>,
-        text: &mut TextEngine,
+        ctx: &mut crate::ui::PaintCtx<'_>,
+        sidebar: &mut crate::ui::sidebar::Sidebar,
+        state: &crate::sys_state::SystemState,
     ) -> Result<(), String> {
         if !self.configured {
             return Ok(());
@@ -92,12 +87,23 @@ impl SurfaceEntry {
             )?);
         }
 
-        let list = build_display_list(self, text);
+        let mut list = DisplayList::new(ctx.theme.bg_main.with_alpha(0.0));
+        let surface_rect = crate::render::display_list::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.logical_width as f32,
+            height: self.logical_height as f32,
+            radius: 0.0,
+            color: ctx.theme.bg_main,
+        };
+        let input = crate::ui::InputState::default();
+        sidebar.paint(ctx, &mut list, surface_rect, &input, state);
+
         let renderer = self
             .renderer
             .as_mut()
             .ok_or_else(|| "renderer missing".to_string())?;
-        renderer.submit(gpu, &list, text)?;
+        renderer.submit(gpu, &list, ctx.text)?;
 
         // Tell the compositor we are done with this surface state.
         self.layer
@@ -106,74 +112,4 @@ impl SurfaceEntry {
         self.layer.commit();
         Ok(())
     }
-}
-
-/// The M2 sampler scene: a vertical rail with a rounded block, a tessellated
-/// path, a gradient, and shaped text. It exercises every renderer feature and
-/// is replaced by real widgets in M3.
-pub fn build_display_list(entry: &SurfaceEntry, text: &mut TextEngine) -> DisplayList {
-    let mut list = DisplayList::new(Color::TRANSPARENT);
-
-    let w = entry.logical_width as f32;
-    let h = entry.logical_height as f32;
-
-    list.push_rect(Rect {
-        x: 0.0,
-        y: 0.0,
-        width: w,
-        height: h,
-        radius: 0.0,
-        color: Color::from_hex(BG_MAIN, 1.0),
-    });
-
-    // Rounded accent block (SDF path).
-    let block = 24.0_f32.min(w);
-    list.push_rect(Rect {
-        x: (w - block) * 0.5,
-        y: 48.0,
-        width: block,
-        height: block,
-        radius: 8.0,
-        color: Color::from_hex(PRIMARY, 1.0),
-    });
-
-    // A quadratic "swoosh" to exercise lyon tessellation.
-    list.push_path(
-        Path::new(
-            vec![
-                PathCommand::MoveTo(Point::new(w * 0.15, 110.0)),
-                PathCommand::QuadTo(
-                    Point::new(w * 1.2, 150.0),
-                    Point::new(w * 0.15, 190.0),
-                ),
-            ],
-            Paint::Solid(Color::from_hex(0x33b1ff, 0.9)),
-        )
-        .stroked(3.0),
-    );
-
-    // Shaped text rotated 270 degrees, exactly as the QML app-title does:
-    // the run is laid out along x, pivoted about its origin, and reads up the
-    // rail. This is the transform-only motion tier — no re-rasterization.
-    let style = TextStyle {
-        family: std::sync::Arc::from("JetBrainsMono NFM"),
-        size: 12.0,
-        weight: 600,
-        color: Color::from_hex(0xf4f4f4, 1.0),
-    };
-    // Vertical label, matching the QML app-title: rotate the run -90 degrees
-    // so it advances upward, then translate so its box sits in the rail.
-    // Shaping happens at the origin, so the transform owns placement.
-    let mut run = text.shape("Desktop", &style, 0.0, 0.0);
-    // Rotating -90 degrees maps the run's advance (x) to "up" (negative y) and
-    // its line height (y) to negative x. Shift by the line height first so the
-    // ink lands centred in the rail, not clipped at its right edge.
-    let line_height = style.size;
-    let label_bottom = h - 80.0;
-    run.transform = Transform::translate(0.0, line_height)
-        .then(Transform::rotate(-std::f32::consts::FRAC_PI_2))
-        .then(Transform::translate((w - line_height) * 0.5, label_bottom));
-    list.push_text(run);
-
-    list
 }
