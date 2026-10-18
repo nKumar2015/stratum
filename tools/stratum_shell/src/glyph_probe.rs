@@ -80,7 +80,7 @@ async fn render_probe() -> Vec<u8> {
         color: Color::WHITE,
     };
     let run = text.shape("Desktop", &style, 4.0, 30.0);
-    let rasters = text.rasterize_run(&run);
+    let rasters = text.rasterize_run(&run, 1.0);
     assert!(!rasters.is_empty(), "no glyphs rasterized");
 
     // --- Use the shell's real atlas implementation. ---

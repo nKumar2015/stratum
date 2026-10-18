@@ -12,8 +12,10 @@ use crate::render::{Gpu, SurfaceRenderer};
 pub struct SurfaceEntry {
     pub layer: LayerSurface,
     pub renderer: Option<SurfaceRenderer>,
-    /// Integer buffer scale reported by SCTK. Fractional scales (e.g. 1.6)
-    /// arrive here as their ceiling for buffer sizing purposes.
+    /// Integer buffer scale reported by SCTK, used for `set_buffer_scale`,
+    /// buffer sizing, and glyph rasterization. Fractional outputs (e.g. 1.6)
+    /// arrive as their ceiling; rasterizing at the ceiling and letting the
+    /// compositor downsample is what keeps text sharp on those outputs.
     pub scale: i32,
     pub logical_width: u32,
     pub logical_height: u32,
@@ -70,7 +72,7 @@ impl SurfaceEntry {
         display: NonNull<std::ffi::c_void>,
         ctx: &mut crate::ui::PaintCtx<'_>,
         sidebar: &mut crate::ui::sidebar::Sidebar,
-        state: &crate::sys_state::SystemState,
+        input: &crate::ui::InputState,
     ) -> Result<(), String> {
         if !self.configured {
             return Ok(());
@@ -96,8 +98,7 @@ impl SurfaceEntry {
             radius: 0.0,
             color: ctx.theme.bg_main,
         };
-        let input = crate::ui::InputState::default();
-        sidebar.paint(ctx, &mut list, surface_rect, &input, state);
+        sidebar.paint(ctx, &mut list, surface_rect, input);
 
         let renderer = self
             .renderer

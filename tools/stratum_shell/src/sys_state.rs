@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 use stratum_sys::Publisher;
 
 /// One observable value, with a change flag the renderer can consult.
+///
+/// Widgets read `get()` while painting; the shell's render loop asks
+/// `take_dirty()` to decide whether a redraw is needed.
 pub struct Cell<T> {
     value: Mutex<T>,
     dirty: AtomicBool,
@@ -44,7 +47,6 @@ impl<T: Clone> Cell<T> {
 }
 
 /// Everything the sidebar needs.
-#[derive(Default)]
 pub struct SystemState {
     pub audio: Cell<serde_json::Value>,
     pub net: Cell<serde_json::Value>,
@@ -53,6 +55,9 @@ pub struct SystemState {
     pub music: Cell<serde_json::Value>,
     pub dashboard: Cell<serde_json::Value>,
     pub polkit: Cell<serde_json::Value>,
+    /// Compositor state (workspaces, active window), refreshed by the event
+    /// watcher rather than polled.
+    pub hypr: Cell<crate::hyprland::HyprState>,
 }
 
 impl SystemState {
@@ -65,6 +70,7 @@ impl SystemState {
             music: Cell::new(serde_json::Value::Null),
             dashboard: Cell::new(serde_json::Value::Null),
             polkit: Cell::new(serde_json::Value::Null),
+            hypr: Cell::new(crate::hyprland::HyprState::default()),
         })
     }
 
@@ -77,6 +83,7 @@ impl SystemState {
             | self.music.take_dirty()
             | self.dashboard.take_dirty()
             | self.polkit.take_dirty()
+            | self.hypr.take_dirty()
     }
 
     /// A publisher that feeds every manager snapshot into this state.
@@ -95,9 +102,9 @@ impl SystemState {
     }
 }
 
-impl Default for Cell<serde_json::Value> {
+impl<T: Clone + Default> Default for Cell<T> {
     fn default() -> Self {
-        Self::new(serde_json::Value::Null)
+        Self::new(T::default())
     }
 }
 

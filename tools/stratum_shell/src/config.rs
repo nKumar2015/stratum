@@ -149,15 +149,20 @@ impl ThemeConfig {
     }
 }
 
-/// Sidebar layout: placement plus which widgets to show, in order.
+/// Bar layout: placement, orientation, and which widgets to show, in order.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SidebarConfig {
-    /// Edge to anchor the rail to: `left` or `right`.
+    /// Which screen edge the bar occupies.
     pub position: SidebarPosition,
-    /// Rail width in logical pixels.
+    /// Orientation. `vertical` is the classic rail; `horizontal` is a top bar.
+    /// When omitted it is inferred from `position`.
+    pub axis: Option<Axis>,
+    /// Rail width (vertical) in logical pixels.
     pub width: u32,
-    /// Padding above and below the widget column.
+    /// Bar height (horizontal) in logical pixels.
+    pub height: u32,
+    /// Padding at both ends of the widget run.
     pub padding: u32,
     /// Gap between widgets.
     pub spacing: u32,
@@ -171,7 +176,9 @@ impl Default for SidebarConfig {
     fn default() -> Self {
         Self {
             position: SidebarPosition::Left,
+            axis: None,
             width: 40,
+            height: 32,
             padding: 12,
             spacing: 16,
             widgets: vec![
@@ -201,6 +208,30 @@ pub enum SidebarPosition {
     #[default]
     Left,
     Right,
+    Top,
+    Bottom,
+}
+
+/// Orientation of the bar.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Axis {
+    Vertical,
+    Horizontal,
+}
+
+impl SidebarConfig {
+    /// Effective orientation: explicit `axis`, else inferred from `position`.
+    pub fn axis(&self) -> Axis {
+        self.axis.unwrap_or(match self.position {
+            SidebarPosition::Left | SidebarPosition::Right => Axis::Vertical,
+            SidebarPosition::Top | SidebarPosition::Bottom => Axis::Horizontal,
+        })
+    }
+
+    pub fn is_vertical(&self) -> bool {
+        self.axis() == Axis::Vertical
+    }
 }
 
 /// One widget entry in the sidebar.

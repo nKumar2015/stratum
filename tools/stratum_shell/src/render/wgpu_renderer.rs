@@ -360,7 +360,7 @@ impl SurfaceRenderer {
         // Glyphs last so text sits above geometry in the same draw.
         let mut glyph_uploads = Vec::new();
         for run in &list.texts {
-            let rasterized = text.rasterize_run(run);
+            let rasterized = text.rasterize_run(run, self.scale);
             for (glyph, raster) in rasterized {
                 glyph_uploads.push((glyph, run.x, run.y, run.size, run.color, run.transform, raster));
             }

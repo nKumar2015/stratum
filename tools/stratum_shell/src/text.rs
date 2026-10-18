@@ -103,16 +103,50 @@ impl TextEngine {
         }
     }
 
-    /// Measure a single line without retaining the shaped buffer.
+    /// Measure a single line.
+    ///
+    /// Returns `(advance_width, line_height)`. The width comes from the shaper's
+    /// own layout run (`line_w`), so centred text lands exactly.
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
-        let run = self.shape(text, style, 0.0, 0.0);
-        let width = run
-            .glyphs
-            .iter()
-            .map(|g| g.x)
-            .fold(0.0_f32, f32::max)
-            + style.size * 0.5;
-        (width, style.size * 1.2)
+        let metrics = Metrics::new(style.size, style.size * 1.2);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(None, None);
+
+        let attrs = Attrs::new()
+            .family(Family::Name(&style.family))
+            .weight(cosmic_text::Weight(style.weight));
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        let mut width: f32 = 0.0;
+        let mut height: f32 = style.size * 1.2;
+        for run in buffer.layout_runs() {
+            width = width.max(run.line_w);
+            height = run.line_height.max(height);
+        }
+        (width, height)
+    }
+
+    /// Line height and ascent for a style, used to centre text vertically on
+    /// its real baseline rather than a guessed offset.
+    pub fn metrics(&mut self, style: &TextStyle) -> (f32, f32) {
+        let (_, height) = self.measure("Mg", style);
+        // Cosmic places the baseline at roughly 80% of the line box for the
+        // default metrics; derive it from a shaped run for accuracy.
+        let metrics = Metrics::new(style.size, style.size * 1.2);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(None, None);
+        let attrs = Attrs::new()
+            .family(Family::Name(&style.family))
+            .weight(cosmic_text::Weight(style.weight));
+        buffer.set_text("Mg", &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+        let ascent = buffer
+            .layout_runs()
+            .next()
+            .map(|run| run.line_y)
+            .unwrap_or(style.size * 0.8);
+        (ascent, height)
     }
 
     /// Rasterize one glyph for the shaped run.
@@ -143,16 +177,28 @@ impl TextEngine {
     }
 
     /// Rasterize every drawable glyph in a run, in draw order.
-    pub fn rasterize_run(&mut self, run: &TextRun) -> Vec<(PositionedGlyph, RasterGlyph)> {
+    ///
+    /// `scale` is the output's buffer scale. Glyphs are rasterized at
+    /// `run.size * scale` so they are sharp on high-DPI outputs; all positions
+    /// the caller receives stay in *physical* pixels, which is what the
+    /// renderer consumes before converting to logical space.
+    pub fn rasterize_run(
+        &mut self,
+        run: &TextRun,
+        scale: f32,
+    ) -> Vec<(PositionedGlyph, RasterGlyph)> {
+        let scale = scale.max(1.0);
         let mut out = Vec::with_capacity(run.glyphs.len());
         for glyph in &run.glyphs {
+            // Subpixel binning uses the scaled pen so hinting matches the
+            // physical grid.
             if let Some(raster) = self.rasterize(
                 glyph.font_id,
                 glyph.glyph_id,
-                run.size,
+                run.size * scale,
                 run.weight,
-                glyph.x,
-                glyph.y,
+                glyph.x * scale,
+                glyph.y * scale,
             ) {
                 out.push((*glyph, raster));
             }
@@ -281,7 +327,7 @@ mod placement_tests {
             color: Color::WHITE,
         };
         let run = engine.shape("Desktop", &style, 0.0, 0.0);
-        let rasters = engine.rasterize_run(&run);
+        let rasters = engine.rasterize_run(&run, 1.0);
         assert_eq!(rasters.len(), run.glyphs.len(), "every glyph should rasterize");
 
         // Pens must advance monotonically to the right.

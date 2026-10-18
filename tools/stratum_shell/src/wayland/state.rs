@@ -11,6 +11,10 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::registry_handlers;
+use smithay_client_toolkit::seat::pointer::{
+    PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT,
+};
+use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
     LayerSurfaceConfigure,
@@ -18,7 +22,7 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry};
 use tracing::{debug, info, warn};
-use wayland_client::protocol::{wl_output, wl_surface};
+use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
 use wayland_client::{Connection, QueueHandle};
 
 use super::surfaces::SurfaceEntry;
@@ -47,6 +51,11 @@ pub struct App {
     config: Arc<Config>,
     state: Arc<SystemState>,
     sidebar: Sidebar,
+    seat_state: SeatState,
+    /// Surface the pointer is currently over, and the last known position in
+    /// that surface's logical coordinates.
+    pointer: Option<(wl_surface::WlSurface, f32, f32)>,
+    pointer_pressed: bool,
     /// Where the config came from, and its modification time at load.
     config_path: Option<std::path::PathBuf>,
     config_mtime: Option<std::time::SystemTime>,
@@ -89,6 +98,7 @@ impl App {
         let loop_handle = event_loop.handle();
 
         let output_state = OutputState::new(&globals, &qh);
+        let seat_state = SeatState::new(&globals, &qh);
         let compositor_state = CompositorState::bind(&globals, &qh)
             .map_err(|err| format!("compositor unavailable: {err}"))?;
         let layer_shell = LayerShell::bind(&globals, &qh)
@@ -107,6 +117,9 @@ impl App {
             config,
             state,
             sidebar,
+            seat_state,
+            pointer: None,
+            pointer_pressed: false,
             config_path: path,
             config_mtime,
             last_reload_check: std::time::Instant::now(),
@@ -114,6 +127,7 @@ impl App {
         };
 
         app.create_surfaces(&qh);
+        app.start_monitors();
 
         // Hand the queue to calloop, which dispatches whenever the socket is
         // readable. The App itself lives in the loop's shared data.
@@ -131,20 +145,104 @@ impl App {
     /// Redraw every dirty surface. Called after each loop iteration.
     pub fn render_pending(&mut self) -> Result<(), String> {
         self.maybe_reload_config();
+        // Polled managers update state asynchronously; when anything changed,
+        // redraw every surface even without pointer input.
+        if self.state.take_dirty() {
+            for entry in &mut self.surfaces {
+                entry.dirty = true;
+            }
+        }
         let theme = self.config.active_theme();
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
                 continue;
             }
+            let input = crate::ui::InputState {
+                pointer: self
+                    .pointer
+                    .as_ref()
+                    .filter(|(surface, _, _)| surface == entry.layer.wl_surface())
+                    .map(|(_, x, y)| (*x, *y)),
+                pressed: self.pointer_pressed,
+            };
+            // Clone the output name: the context borrows it while `entry` is
+            // borrowed mutably for rendering.
+            let output_name = entry.output_name.clone();
             let mut ctx = crate::ui::PaintCtx {
                 theme: &theme,
                 appearance: &self.config.appearance,
                 text: &mut self.text,
+                state: &self.state,
+                output_name: &output_name,
             };
-            entry.render_with(&self.gpu, self.display, &mut ctx, &mut self.sidebar, &self.state)?;
+            entry.render_with(
+                &self.gpu,
+                self.display,
+                &mut ctx,
+                &mut self.sidebar,
+                &input,
+            )?;
             entry.dirty = false;
         }
         Ok(())
+    }
+
+    /// Start the system managers and compositor watcher.
+    ///
+    /// The managers publish into `SystemState` from their own threads, so the
+    /// UI thread only ever reads. Hyprland changes wake the render loop by
+    /// marking every surface dirty.
+    fn start_monitors(&mut self) {
+        use stratum_sys::managers;
+
+        let publisher = SystemState::publisher(&self.state);
+
+        // The managers' async entry points expect a Tokio runtime. The shell's
+        // UI thread runs calloop, so give them a small dedicated runtime.
+        managers::audio::initialize();
+        let audio_publisher = publisher.clone();
+        std::thread::Builder::new()
+            .name("stratum-runtime".into())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(err) => {
+                        tracing::error!("failed to start manager runtime: {err}");
+                        return;
+                    }
+                };
+                runtime.block_on(async move {
+                    managers::audio::spawn_monitor(audio_publisher);
+                    // Keep the runtime alive for the shell's lifetime.
+                    std::future::pending::<()>().await;
+                });
+            })
+            .ok();
+
+        let state = Arc::clone(&self.state);
+        std::thread::Builder::new()
+            .name("stratum-poll".into())
+            .spawn(move || {
+                let poll = std::time::Duration::from_secs(3);
+                loop {
+                    state.net.set(managers::net::status());
+                    state.bluetooth.set(managers::bluetooth::status());
+                    state.battery.set(managers::battery::status());
+                    std::thread::sleep(poll);
+                }
+            })
+            .ok();
+
+        // Hyprland is edge-driven: re-read on each relevant event.
+        let state = Arc::clone(&self.state);
+        crate::hyprland::HyprState::spawn_watcher(move || {
+            state.hypr.set(crate::hyprland::HyprState::read());
+        });
+        // Seed once so the first frame is correct.
+        self.state.hypr.set(crate::hyprland::HyprState::read());
     }
 
     /// Reload the configuration when the file changed on disk.
@@ -225,15 +323,35 @@ impl App {
 
             // Placement and width come from the configuration.
             let width = self.config.sidebar.width.max(1);
-            let anchor = match self.config.sidebar.position {
-                SidebarPosition::Left => Anchor::TOP | Anchor::LEFT | Anchor::BOTTOM,
-                SidebarPosition::Right => Anchor::TOP | Anchor::RIGHT | Anchor::BOTTOM,
+            let config = &self.config.sidebar;
+            let vertical = config.is_vertical();
+            let (anchor, size) = match config.position {
+                SidebarPosition::Left => (
+                    Anchor::TOP | Anchor::LEFT | Anchor::BOTTOM,
+                    (config.width, 0),
+                ),
+                SidebarPosition::Right => (
+                    Anchor::TOP | Anchor::RIGHT | Anchor::BOTTOM,
+                    (config.width, 0),
+                ),
+                SidebarPosition::Top => (
+                    Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
+                    (0, config.height),
+                ),
+                SidebarPosition::Bottom => (
+                    Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                    (0, config.height),
+                ),
             };
+            let _ = vertical;
             layer.set_anchor(anchor);
-            layer.set_exclusive_zone(width as i32);
+            layer.set_exclusive_zone(match config.position {
+                SidebarPosition::Top | SidebarPosition::Bottom => config.height as i32,
+                _ => config.width as i32,
+            });
             layer.set_margin(0, 0, 0, 0);
             layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            layer.set_size(width, 0);
+            layer.set_size(size.0, size.1);
             layer.commit();
 
             self.surfaces.push(SurfaceEntry::new(layer, scale, output_name));
@@ -363,13 +481,115 @@ impl LayerShellHandler for App {
         if let Some(entry) = self.surfaces.iter_mut().find(|e| &e.layer == layer) {
             // A zero on an anchored axis means "you choose"; the rail always
             // takes the height the compositor gave us.
-            let width = if width == 0 {
-                self.config.sidebar.width.max(1)
-            } else {
-                width
+            // A zero on an axis means "you choose". Vertical rails choose their
+            // width and take the compositor's height; horizontal bars do the
+            // reverse.
+            let config = &self.config.sidebar;
+            let (width, height) = match config.axis() {
+                crate::config::Axis::Vertical => (
+                    if width == 0 { config.width.max(1) } else { width },
+                    height,
+                ),
+                crate::config::Axis::Horizontal => (
+                    width,
+                    if height == 0 { config.height.max(1) } else { height },
+                ),
             };
             entry.resize(&self.gpu, width, height);
             entry.dirty = true;
+        }
+    }
+}
+
+impl SeatHandler for App {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer {
+            match self.seat_state.get_pointer(qh, &seat) {
+                Ok(pointer) => info!("pointer capability acquired"),
+                Err(err) => tracing::warn!("failed to create pointer: {err}"),
+            }
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        _: Capability,
+    ) {
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for App {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        let mut clicked_at: Option<(wl_surface::WlSurface, f32, f32)> = None;
+        let mut changed = false;
+
+        for event in events {
+            let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+            match event.kind {
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    self.pointer = Some((event.surface.clone(), x, y));
+                    changed = true;
+                }
+                PointerEventKind::Leave { .. } => {
+                    self.pointer = None;
+                    self.pointer_pressed = false;
+                    changed = true;
+                }
+                PointerEventKind::Press { button, .. } => {
+                    if button == BTN_LEFT {
+                        self.pointer_pressed = true;
+                        clicked_at = Some((event.surface.clone(), x, y));
+                        changed = true;
+                    }
+                }
+                PointerEventKind::Release { button, .. } => {
+                    if button == BTN_LEFT {
+                        self.pointer_pressed = false;
+                        changed = true;
+                    }
+                }
+                PointerEventKind::Axis { .. } => {}
+            }
+        }
+
+        if let Some((surface, x, y)) = clicked_at {
+            let input = crate::ui::InputState {
+                pointer: Some((x, y)),
+                pressed: true,
+            };
+            let point = crate::render::display_list::Point::new(x, y);
+            if self.sidebar.on_click(point, &input) {
+                changed = true;
+            }
+        }
+
+        if changed {
+            for entry in &mut self.surfaces {
+                entry.dirty = true;
+            }
         }
     }
 }
@@ -379,7 +599,7 @@ impl ProvidesRegistryState for App {
         &mut self.registry_state
     }
 
-    registry_handlers![OutputState];
+    registry_handlers![OutputState, SeatState];
 }
 
 delegate_dispatch2!(App);

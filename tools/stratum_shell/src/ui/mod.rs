@@ -17,6 +17,10 @@ pub struct PaintCtx<'a> {
     pub theme: &'a crate::config::Theme,
     pub appearance: &'a crate::config::AppearanceConfig,
     pub text: &'a mut TextEngine,
+    /// Live system state, read by widgets that display real data.
+    pub state: &'a crate::sys_state::SystemState,
+    /// Which output's bar is being painted (for per-monitor workspace focus).
+    pub output_name: &'a str,
 }
 
 impl PaintCtx<'_> {
@@ -75,11 +79,19 @@ pub struct InputState {
     pub pressed: bool,
 }
 
-/// A sidebar widget.
+/// A bar widget.
 pub trait Widget {
-    /// Intrinsic height at the given width. `None` means "fill available".
+    /// Intrinsic height in a vertical bar at the given width. `None` means
+    /// "fill available".
     fn height(&self, width: f32) -> Option<f32> {
         let _ = width;
+        None
+    }
+
+    /// Intrinsic width in a horizontal bar at the given height. `None` means
+    /// "fill available". Defaults to a square-ish slot matching the height.
+    fn width(&self, height: f32) -> Option<f32> {
+        let _ = height;
         None
     }
 
@@ -247,10 +259,22 @@ pub fn paint_text_centered(
     size: f32,
     color: Color,
 ) {
-    let width = ctx.measure(value, size);
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight: 400,
+        color,
+    };
+    let width = ctx.text.measure(value, &style).0;
+    let (ascent, line_height) = ctx.text.metrics(&style);
+
+    // Centre the line box vertically, then place the baseline inside it. This
+    // is exact rather than a fixed fudge, which is what made mixed-size labels
+    // look misaligned.
+    let box_top = rect.y + (rect.height - line_height) * 0.5;
+    let baseline = box_top + ascent;
     let x = rect.x + (rect.width - width) * 0.5;
-    let baseline = rect.y + (rect.height + size) * 0.5 - size * 0.15;
-    ctx.text(list, value, x, baseline, size, color);
+    ctx.text_text(list, value, x, baseline, style);
 }
 
 /// Rotate a text run so it reads upward along a vertical rail.

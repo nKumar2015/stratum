@@ -2336,6 +2336,7 @@ dependencies = [
  "smithay-client-toolkit",
  "stratum_sys",
  "swash",
+ "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
