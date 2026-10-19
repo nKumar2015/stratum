@@ -66,6 +66,54 @@ impl SurfaceEntry {
     }
 
     /// Draw one frame and present it.
+    /// Render an arbitrary display list produced by another surface owner.
+    pub fn render_list(
+        &mut self,
+        gpu: &Gpu,
+        display: NonNull<std::ffi::c_void>,
+        list: &DisplayList,
+        text: &mut crate::text::TextEngine,
+    ) -> Result<(), String> {
+        if !self.configured {
+            return Ok(());
+        }
+        if self.renderer.is_none() {
+            let surface = self.layer.wl_surface();
+            self.renderer = Some(SurfaceRenderer::new(
+                gpu,
+                display,
+                surface,
+                self.physical,
+                self.scale as f32,
+            )?);
+        }
+        let renderer = self
+            .renderer
+            .as_mut()
+            .ok_or_else(|| "renderer missing".to_string())?;
+        renderer.submit(gpu, list, text)?;
+        self.layer.wl_surface().damage_buffer(
+            0,
+            0,
+            self.physical.0 as i32,
+            self.physical.1 as i32,
+        );
+        self.layer.commit();
+        Ok(())
+    }
+
+    /// Convenience rect for this surface in logical coordinates.
+    pub fn logical_rect(&self) -> crate::render::display_list::Rect {
+        crate::render::display_list::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.logical_width as f32,
+            height: self.logical_height as f32,
+            radius: 0.0,
+            color: crate::render::display_list::Color::TRANSPARENT,
+        }
+    }
+
     pub fn render_with(
         &mut self,
         gpu: &Gpu,

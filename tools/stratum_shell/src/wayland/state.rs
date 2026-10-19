@@ -58,6 +58,9 @@ pub struct App {
     control_center: crate::ui::control_center::ControlCenter,
     actions: Arc<crate::actions::ActionQueue>,
     notifications: Option<Arc<crate::notifications::NotificationServer>>,
+    osd: crate::osd::Osd,
+    /// OSD overlay surfaces, one per output.
+    osd_surfaces: Vec<SurfaceEntry>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -139,6 +142,8 @@ impl App {
             control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
             actions: crate::actions::ActionQueue::new(),
             notifications: None,
+            osd: crate::osd::Osd::new(),
+            osd_surfaces: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -180,9 +185,26 @@ impl App {
                 entry.dirty = true;
             }
         }
-        // The settings window is a normal toplevel, so no overlay animation is
-        // needed; the compositor owns its presentation.
-        self.last_frame = std::time::Instant::now();
+        // Advance the OSD and pick up value changes. Volume is pushed state;
+        // brightness has no push source, so it is polled on a slow cadence.
+        let now = std::time::Instant::now();
+        let dt = now
+            .duration_since(self.last_frame)
+            .as_secs_f32()
+            .min(0.1);
+        self.last_frame = now;
+        self.osd.observe_audio(&self.state);
+        self.osd.observe_brightness(self.state.brightness.get());
+        if self.osd.tick(dt) {
+            for entry in &mut self.osd_surfaces {
+                entry.dirty = true;
+            }
+        }
+        if self.osd.visible() {
+            for entry in &mut self.osd_surfaces {
+                entry.dirty = true;
+            }
+        }
 
         // The settings window is an ordinary toplevel: create it on demand and
         // redraw while it is open.
@@ -368,6 +390,19 @@ impl App {
                 .ok();
         }
 
+        // Brightness has no push source; poll it slowly. The reading is stored
+        // in SystemState so the OSD can react to changes.
+        let brightness_state = Arc::clone(&self.state);
+        std::thread::Builder::new()
+            .name("stratum-brightness".into())
+            .spawn(move || loop {
+                if let Some(percent) = read_brightness_percent() {
+                    brightness_state.brightness.set(percent);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(350));
+            })
+            .ok();
+
         // Hyprland is edge-driven: re-read on each relevant event.
         let state = Arc::clone(&self.state);
         crate::hyprland::HyprState::spawn_watcher(move || {
@@ -488,6 +523,25 @@ impl App {
 
             self.surfaces.push(SurfaceEntry::new(layer, scale, output_name.clone()));
 
+            // OSD: an overlay-layer surface anchored bottom-centre with no
+            // exclusive zone, so it floats above windows without reserving
+            // space. It takes no input.
+            let osd_wl = self.compositor_state.create_surface(qh);
+            let osd_layer = self.layer_shell.create_layer_surface(
+                qh,
+                osd_wl,
+                Layer::Overlay,
+                Some("stratum-osd"),
+                Some(&output),
+            );
+            osd_layer.set_anchor(Anchor::BOTTOM);
+            osd_layer.set_exclusive_zone(-1);
+            osd_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            osd_layer.set_margin(0, 0, 72, 0);
+            osd_layer.set_size(320, 94);
+            osd_layer.commit();
+            self.osd_surfaces.push(SurfaceEntry::new(osd_layer, scale, output_name));
+
             debug!("created layer surface on output (scale {scale}x)");
         }
     }
@@ -498,6 +552,30 @@ impl App {
 /// Using xdg-shell rather than a layer surface means the compositor owns the
 /// window: it gets normal focus, workspace placement, alt-tab, and stacking,
 /// so it feels like part of the shell rather than an overlay.
+/// Read the backlight percentage via `brightnessctl`.
+///
+/// Returns `None` when no backlight backend is available, which is normal on
+/// desktops; the OSD then simply never shows brightness.
+fn read_brightness_percent() -> Option<i64> {
+    let current = std::process::Command::new("brightnessctl")
+        .arg("get")
+        .output()
+        .ok()?;
+    let max = std::process::Command::new("brightnessctl")
+        .arg("max")
+        .output()
+        .ok()?;
+    if !current.status.success() || !max.status.success() {
+        return None;
+    }
+    let current = String::from_utf8_lossy(&current.stdout).trim().parse::<i64>().ok()?;
+    let max = String::from_utf8_lossy(&max.stdout).trim().parse::<i64>().ok()?;
+    if max <= 0 {
+        return None;
+    }
+    Some(((current as f64 * 100.0) / max as f64).round() as i64)
+}
+
 struct SettingsWindow {
     window: Window,
     renderer: Option<crate::render::SurfaceRenderer>,
@@ -742,6 +820,7 @@ impl LayerShellHandler for App {
         _qh: &QueueHandle<Self>,
         layer: &LayerSurface,
     ) {
+        self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
     }
@@ -756,6 +835,17 @@ impl LayerShellHandler for App {
     ) {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
+
+        if let Some(entry) = self.osd_surfaces.iter_mut().find(|e| &e.layer == layer) {
+            let (width, height) = configure.new_size;
+            entry.resize(
+                &self.gpu,
+                if width == 0 { 320 } else { width },
+                if height == 0 { 94 } else { height },
+            );
+            entry.dirty = true;
+            return;
+        }
 
         if let Some(entry) = self.surfaces.iter_mut().find(|e| &e.layer == layer) {
             // A zero on an anchored axis means "you choose"; the rail always
