@@ -57,6 +57,7 @@ pub struct App {
     seat_state: SeatState,
     control_center: crate::ui::control_center::ControlCenter,
     actions: Arc<crate::actions::ActionQueue>,
+    notifications: Option<Arc<crate::notifications::NotificationServer>>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -137,6 +138,7 @@ impl App {
             seat_state,
             control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
             actions: crate::actions::ActionQueue::new(),
+            notifications: None,
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -227,7 +229,28 @@ impl App {
             // Dispatch whatever the panel asked for. The worker executes them
             // off-thread and their effects arrive as normal state updates.
             for action in self.control_center.take_actions() {
-                self.actions.push(action);
+                match action {
+                    crate::actions::SystemAction::Dismiss(id) => {
+                        if let Some(server) = &self.notifications {
+                            server.close(id, 2);
+                        }
+                    }
+                    crate::actions::SystemAction::DismissAll => {
+                        if let Some(server) = &self.notifications {
+                            let ids: Vec<u32> = self
+                                .state
+                                .notifications
+                                .get()
+                                .iter()
+                                .map(|n| n.id)
+                                .collect();
+                            for id in ids {
+                                server.close(id, 2);
+                            }
+                        }
+                    }
+                    other => self.actions.push(other),
+                }
             }
         }
 
@@ -316,6 +339,34 @@ impl App {
                 }
             })
             .ok();
+
+        // Own org.freedesktop.Notifications when configured to. Off by default
+        // so another daemon (Quickshell) can keep it during migration.
+        if self.config.behavior.notifications {
+            let sink_state = Arc::clone(&self.state);
+            let sink: crate::notifications::NotificationSink =
+                Arc::new(move |list| sink_state.notifications.set(list));
+            let server = crate::notifications::NotificationServer::new(sink);
+            self.notifications = Some(Arc::clone(&server));
+            std::thread::Builder::new()
+                .name("stratum-notifications".into())
+                .spawn(move || {
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime,
+                        Err(err) => {
+                            tracing::error!("failed to start notification runtime: {err}");
+                            return;
+                        }
+                    };
+                    if let Err(err) = runtime.block_on(server.serve()) {
+                        tracing::error!("notification server failed: {err}");
+                    }
+                })
+                .ok();
+        }
 
         // Hyprland is edge-driven: re-read on each relevant event.
         let state = Arc::clone(&self.state);

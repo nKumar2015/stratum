@@ -390,6 +390,10 @@ pub struct BehaviorConfig {
     pub poll_ms: u64,
     /// Watch the config file and reload on change.
     pub reload_on_change: bool,
+    /// Own `org.freedesktop.Notifications`. Off by default so the shell can run
+    /// beside another notification daemon (including Quickshell) during
+    /// migration; enable it once this shell is the only one.
+    pub notifications: bool,
 }
 
 impl Default for BehaviorConfig {
@@ -397,6 +401,7 @@ impl Default for BehaviorConfig {
         Self {
             poll_ms: 3000,
             reload_on_change: true,
+            notifications: false,
         }
     }
 }

@@ -58,6 +58,8 @@ pub struct SystemState {
     /// Compositor state (workspaces, active window), refreshed by the event
     /// watcher rather than polled.
     pub hypr: Cell<crate::hyprland::HyprState>,
+    /// Live notifications, newest last, published by the notification server.
+    pub notifications: Cell<Vec<crate::notifications::Notification>>,
 }
 
 impl SystemState {
@@ -71,6 +73,7 @@ impl SystemState {
             dashboard: Cell::new(serde_json::Value::Null),
             polkit: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
+            notifications: Cell::new(Vec::new()),
         })
     }
 
@@ -84,6 +87,7 @@ impl SystemState {
             | self.dashboard.take_dirty()
             | self.polkit.take_dirty()
             | self.hypr.take_dirty()
+            | self.notifications.take_dirty()
     }
 
     /// A publisher that feeds every manager snapshot into this state.

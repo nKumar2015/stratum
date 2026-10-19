@@ -271,6 +271,39 @@ mod tests {
     }
 
     #[test]
+    fn publish_reports_the_current_list() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&count);
+        let sink: NotificationSink = Arc::new(move |list| {
+            seen.store(list.len(), Ordering::SeqCst);
+        });
+        let server = NotificationServer::new(sink);
+
+        {
+            let mut store = server.store.lock().unwrap();
+            store.notifications.push(Notification {
+                id: 1,
+                app_name: "app".into(),
+                app_icon: String::new(),
+                summary: "one".into(),
+                body: String::new(),
+                actions: Vec::new(),
+                urgency: 1,
+                expire_timeout: 0,
+                image_path: None,
+            });
+            store.by_id.insert(1, 0);
+        }
+        server.publish();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        server.close(1, 2);
+        assert_eq!(count.load(Ordering::SeqCst), 0, "close should republish");
+    }
+
+    #[test]
     fn json_snapshot_shape() {
         let list = vec![Notification {
             id: 1,

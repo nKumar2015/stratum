@@ -23,18 +23,20 @@ pub enum Page {
     Bluetooth,
     Wifi,
     Battery,
+    Notifications,
     Display,
     Power,
 }
 
 impl Page {
     /// Pages shown in the navigation rail, in order.
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::Overview,
         Page::Audio,
         Page::Bluetooth,
         Page::Wifi,
         Page::Battery,
+        Page::Notifications,
         Page::Display,
         Page::Power,
     ];
@@ -46,6 +48,7 @@ impl Page {
             Page::Bluetooth => "Bluetooth",
             Page::Wifi => "Network",
             Page::Battery => "Battery",
+            Page::Notifications => "Notifications",
             Page::Display => "Display",
             Page::Power => "Power",
         }
@@ -59,6 +62,7 @@ impl Page {
             Page::Bluetooth => "\u{f00b1}",
             Page::Wifi => "\u{f05a9}",
             Page::Battery => "\u{f007a}",
+            Page::Notifications => "\u{f009a}",
             Page::Display => "\u{f108}",
             Page::Power => "\u{f011}",
         }
@@ -423,6 +427,7 @@ impl ControlCenter {
             Page::Bluetooth => self.paint_bluetooth(ctx, list, body, input),
             Page::Wifi => self.paint_wifi(ctx, list, body, input),
             Page::Battery => self.paint_battery(ctx, list, body, input),
+            Page::Notifications => self.paint_notifications(ctx, list, body, input),
             Page::Display => self.paint_display(ctx, list, body),
             Page::Power => self.paint_power(ctx, list, body, input),
         }
@@ -855,6 +860,142 @@ impl ControlCenter {
                 ));
             }
             y += 38.0;
+        }
+    }
+
+    fn paint_notifications(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        list: &mut DisplayList,
+        area: Rect,
+        input: &InputState,
+    ) {
+        let notifications = ctx.state.notifications.get();
+        if notifications.is_empty() {
+            ui::paint_text_vcentered(
+                ctx,
+                list,
+                "No notifications",
+                area.x,
+                Rect { height: 24.0, ..area },
+                13.0,
+                400,
+                ctx.theme.text_muted,
+            );
+            return;
+        }
+
+        // Dismiss-all button.
+        let clear = Rect {
+            x: area.x,
+            y: area.y,
+            width: 120.0,
+            height: 30.0,
+            radius: 8.0,
+            color: Color::TRANSPARENT,
+        };
+        if crate::ui::controls::button(
+            ctx,
+            list,
+            clear,
+            "Clear all",
+            input,
+            self.clicked_this_frame,
+            false,
+        ) {
+            self.pending.push(crate::actions::SystemAction::DismissAll);
+        }
+
+        let mut y = area.y + 42.0;
+        // Newest first.
+        for notification in notifications.iter().rev().take(8) {
+            let card = Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 66.0,
+                radius: 10.0,
+                color: Color::TRANSPARENT,
+            };
+            list.push_rect(card);
+            ui::paint_frame(
+                list,
+                card,
+                ctx.theme.surface_high,
+                ctx.theme.outline,
+                ctx.appearance.framed_border,
+            );
+
+            // Urgency stripe.
+            let stripe = Rect {
+                x: card.x,
+                y: card.y,
+                width: 3.0,
+                height: card.height,
+                radius: 0.0,
+                color: match notification.urgency {
+                    2 => ctx.theme.error,
+                    0 => ctx.theme.text_muted,
+                    _ => ctx.theme.primary,
+                },
+            };
+            list.push_rect(stripe);
+
+            ui::paint_text_vcentered(
+                ctx,
+                list,
+                &notification.summary,
+                card.x + 14.0,
+                Rect { height: 26.0, ..card },
+                13.0,
+                600,
+                ctx.theme.text_main,
+            );
+            let app = if notification.app_name.is_empty() {
+                String::new()
+            } else {
+                format!("{} · ", notification.app_name)
+            };
+            let body = format!("{app}{}", notification.body);
+            ui::paint_text_vcentered(
+                ctx,
+                list,
+                &body,
+                card.x + 14.0,
+                Rect {
+                    y: card.y + 24.0,
+                    height: 20.0,
+                    width: card.width - 90.0,
+                    ..card
+                },
+                11.0,
+                400,
+                ctx.theme.text_muted,
+            );
+
+            // Dismiss button.
+            let dismiss = Rect {
+                x: card.x + card.width - 34.0,
+                y: card.y + (card.height - 22.0) * 0.5,
+                width: 22.0,
+                height: 22.0,
+                radius: 11.0,
+                color: Color::TRANSPARENT,
+            };
+            if crate::ui::controls::button(
+                ctx,
+                list,
+                dismiss,
+                "x",
+                input,
+                self.clicked_this_frame,
+                false,
+            ) {
+                self.pending
+                    .push(crate::actions::SystemAction::Dismiss(notification.id));
+            }
+            let _ = &stripe;
+            y += 72.0;
         }
     }
 

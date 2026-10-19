@@ -40,6 +40,10 @@ pub enum SystemAction {
     SetPowerProfile(String),
     /// Run a shell command (power menu entries, lock, and so on).
     Spawn(Vec<String>),
+    /// Close one notification by id.
+    Dismiss(u32),
+    /// Close every notification.
+    DismissAll,
 }
 
 /// A queue the UI writes to and a worker drains.
@@ -133,6 +137,11 @@ fn execute(action: &SystemAction) -> Result<(), String> {
             std::fs::write("/sys/firmware/acpi/platform_profile", profile)
                 .map_err(|err| format!("failed to set power profile: {err}"))?;
             serde_json::json!({ "ok": true })
+        }
+        SystemAction::Dismiss(_) | SystemAction::DismissAll => {
+            // Handled by the shell, which owns the notification server; the
+            // worker has nothing to do.
+            return Ok(());
         }
         SystemAction::Spawn(argv) => {
             let Some((program, args)) = argv.split_first() else {
