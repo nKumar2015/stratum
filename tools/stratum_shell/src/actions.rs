@@ -4,22 +4,27 @@
 //! queued here and executed by a worker. Results flow back into
 //! [`crate::sys_state::SystemState`] through the normal publishers, which means
 //! the UI updates the same way for a user action and a background change.
+//!
+//! Every action refreshes the domain it touched before returning, so the next
+//! frame reflects the change without waiting for the poller. That is what makes
+//! a toggle feel immediate rather than "eventually correct".
 
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 use stratum_sys::managers;
+
+use crate::sys_state::SystemState;
 
 /// One user-initiated operation.
 #[derive(Clone, Debug)]
 pub enum SystemAction {
     /// Set output volume to an absolute percentage (0..=150).
     SetVolume(i64),
-    /// Toggle mute on the default sink. `muted` is the current state, which
-    /// decides whether this unmutes or mutes.
-    ToggleMute { muted: bool },
+    /// Mute or unmute the default sink.
+    SetMuted(bool),
     /// Switch the default sink.
     SetOutput(String),
     /// Switch the default source.
@@ -36,6 +41,12 @@ pub enum SystemAction {
     WifiConnect { ssid: String, password: Option<String> },
     /// Disconnect the active connection on a device.
     WifiDisconnect(String),
+    /// Re-read the Wi-Fi access-point list. `rescan` asks NetworkManager to
+    /// probe the airwaves first, which is slow; the fast path only re-reads the
+    /// cache.
+    WifiRefresh { rescan: bool },
+    /// Re-read Bluetooth devices.
+    BluetoothRefresh,
     /// Set the platform power profile.
     SetPowerProfile(String),
     /// Run a shell command (power menu entries, lock, and so on).
@@ -72,19 +83,23 @@ impl ActionQueue {
     /// Start the worker thread that executes actions in order.
     ///
     /// Actions run one at a time on a dedicated thread because several of them
-    /// (Bluetooth, Wi-Fi) are slow and must not stall the UI.
-    pub fn start_worker(self: &Arc<Self>) {
+    /// (Bluetooth, Wi-Fi) are slow and must not stall the UI. The worker writes
+    /// straight into [`SystemState`], so a completed action is visible to the
+    /// next paint.
+    pub fn start_worker(self: &Arc<Self>, state: Arc<SystemState>) {
         let Some(rx) = self.rx.lock().ok().and_then(|mut slot| slot.take()) else {
             return;
         };
-        // Take a weak reference so the worker does not keep the queue alive.
         thread::Builder::new()
             .name("stratum-actions".into())
             .spawn(move || {
                 for action in rx {
-                    if let Err(err) = execute(&action) {
+                    if let Err(err) = execute(&action, &state) {
                         tracing::warn!("action failed: {err}");
                     }
+                    // Wake the UI even on failure: the attempt may have changed
+                    // something (a refused connect still reorders the list).
+                    state.notify();
                 }
             })
             .ok();
@@ -101,58 +116,92 @@ impl Default for ActionQueue {
     }
 }
 
-/// Execute one action. Returns an error message for logging.
-/// Run `nmcli` and report whether it succeeded.
-fn run_nmcli(args: &[&str]) -> serde_json::Value {
-    match std::process::Command::new("nmcli").args(args).output() {
-        Ok(output) if output.status.success() => serde_json::json!({ "ok": true }),
-        Ok(output) => serde_json::json!({
-            "ok": false,
-            "error": String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        }),
-        Err(err) => serde_json::json!({ "ok": false, "error": err.to_string() }),
+/// Refresh the audio snapshot after a change.
+fn refresh_audio(state: &SystemState) {
+    if let Some(snapshot) = managers::audio::snapshot() {
+        state.audio.set(snapshot);
     }
 }
 
-fn execute(action: &SystemAction) -> Result<(), String> {
+/// Refresh network connection state and, when the radio is up, the access-point
+/// list as well.
+fn refresh_network(state: &SystemState, rescan: bool) {
+    state.net.set(managers::net::status());
+    let wifi = managers::wifi::state();
+    let enabled = wifi["enabled"].as_bool().unwrap_or(false);
+    state.wifi.set(wifi);
+    if enabled {
+        state.wifi_networks.set(managers::wifi::list(rescan));
+    } else {
+        // A disabled radio has no list; clearing it avoids showing stale
+        // networks that cannot be joined.
+        state
+            .wifi_networks
+            .set(serde_json::json!({ "ok": true, "networks": [] }));
+    }
+    state.notify();
+}
+
+fn refresh_bluetooth(state: &SystemState) {
+    state.bluetooth.set(managers::bluetooth::status());
+    state.notify();
+}
+
+fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
     let result = match action {
         SystemAction::SetVolume(percent) => managers::audio::set_volume(*percent),
-        SystemAction::ToggleMute { muted } => {
-            // Absolute mute-switching lives in the manager's engine; until it
-            // exposes a toggle, drive it through volume so the UI stays honest.
-            if *muted {
-                managers::audio::set_volume(50)
-            } else {
-                managers::audio::set_volume(0)
-            }
-        }
+        SystemAction::SetMuted(muted) => managers::audio::set_mute(*muted),
         SystemAction::SetOutput(target) => managers::audio::set_output(target),
         SystemAction::SetInput(target) => managers::audio::set_input(target),
         SystemAction::BluetoothPower(on) => {
-            managers::bluetooth::power(if *on { "on" } else { "off" })
+            let result = managers::bluetooth::power(if *on { "on" } else { "off" });
+            refresh_bluetooth(state);
+            result
         }
         SystemAction::BluetoothConnect { address, connect } => {
-            if *connect {
+            let result = if *connect {
                 managers::bluetooth::connect(address)
             } else {
                 managers::bluetooth::disconnect(address)
-            }
+            };
+            refresh_bluetooth(state);
+            result
         }
-        SystemAction::BluetoothScan => managers::bluetooth::scan(),
+        SystemAction::BluetoothScan => {
+            let result = managers::bluetooth::scan();
+            refresh_bluetooth(state);
+            result
+        }
+        SystemAction::BluetoothRefresh => {
+            refresh_bluetooth(state);
+            serde_json::json!({ "ok": true })
+        }
         SystemAction::WifiToggle(on) => {
-            // NetworkManager directly: the manager's CLI wrapper shells out to
-            // stratum-cli, which blocks past the action worker's patience.
-            let target = if *on { "on" } else { "off" };
-            run_nmcli(&["radio", "wifi", target])
+            let result = managers::wifi::toggle(if *on { "on" } else { "off" });
+            // A radio toggle changes both the radio state and the list; refresh
+            // before returning so the panel flips on this frame.
+            refresh_network(state, false);
+            result
         }
         SystemAction::WifiConnect { ssid, password } => {
-            managers::wifi::connect(ssid, password.as_deref())
+            let result = managers::wifi::connect(ssid, password.as_deref());
+            refresh_network(state, false);
+            result
         }
-        SystemAction::WifiDisconnect(device) => managers::wifi::disconnect(device),
+        SystemAction::WifiDisconnect(device) => {
+            let result = managers::wifi::disconnect(device);
+            refresh_network(state, false);
+            result
+        }
+        SystemAction::WifiRefresh { rescan } => {
+            refresh_network(state, *rescan);
+            serde_json::json!({ "ok": true })
+        }
         SystemAction::SetPowerProfile(profile) => {
             // Writes the ACPI platform profile directly; the CLI does the same.
             std::fs::write("/sys/firmware/acpi/platform_profile", profile)
                 .map_err(|err| format!("failed to set power profile: {err}"))?;
+            state.battery.set(managers::battery::status());
             serde_json::json!({ "ok": true })
         }
         SystemAction::Dismiss(_) | SystemAction::DismissAll | SystemAction::SetTheme(_) => {
@@ -171,6 +220,18 @@ fn execute(action: &SystemAction) -> Result<(), String> {
             serde_json::json!({ "ok": true })
         }
     };
+
+    // Audio changes come back through the monitor, but that can take a frame or
+    // two; read the value we just set so the UI never lags the user.
+    if matches!(
+        action,
+        SystemAction::SetVolume(_)
+            | SystemAction::SetMuted(_)
+            | SystemAction::SetOutput(_)
+            | SystemAction::SetInput(_)
+    ) {
+        refresh_audio(state);
+    }
 
     if result.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         return Err(result
@@ -196,9 +257,11 @@ mod tests {
 
     #[test]
     fn spawn_of_missing_program_reports_an_error() {
-        let err = execute(&SystemAction::Spawn(vec![
-            "/nonexistent/definitely-not-here".into(),
-        ]));
+        let state = SystemState::new();
+        let err = execute(
+            &SystemAction::Spawn(vec!["/nonexistent/definitely-not-here".into()]),
+            &state,
+        );
         assert!(err.is_err());
     }
 }

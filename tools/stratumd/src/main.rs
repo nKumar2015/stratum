@@ -451,6 +451,10 @@ fn param_f64(params: Option<&Value>, key: &str, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
+fn param_bool(params: Option<&Value>, key: &str) -> Option<bool> {
+    params.and_then(|p| p.get(key)).and_then(Value::as_bool)
+}
+
 fn param_value_or_default(params: Option<&Value>, key: &str, default: Value) -> Value {
     params.and_then(|p| p.get(key)).cloned().unwrap_or(default)
 }
@@ -589,7 +593,8 @@ async fn handle_method(
                 .map_err(|e| e.to_string())?)
         }
         "wifi.list" => {
-            Ok(tokio::task::spawn_blocking(|| managers::wifi::list())
+            let rescan = param_bool(_params, "rescan").unwrap_or(true);
+            Ok(tokio::task::spawn_blocking(move || managers::wifi::list(rescan))
                 .await
                 .map_err(|e| e.to_string())?)
         }

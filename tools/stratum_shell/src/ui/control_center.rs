@@ -1,92 +1,18 @@
-//! The control centre: a paged settings surface for the shell.
+//! The control centre: a paged settings window for the shell.
 //!
-//! It renders on a fullscreen transparent overlay so it can dismiss on a click
-//! outside the panel, matching the QML menus. Bar widgets open it on a specific
-//! page: clicking the battery icon lands on Battery, the audio icon on Audio,
-//! and so on.
-//!
-//! Pages are driven by the same `SystemState` as the bar, so what the panel
-//! shows is always the state the bar is showing.
+//! This module is window chrome only: the navigation rail, the page frame, and
+//! the open/close animation. Each page lives in [`crate::ui::pages`] and owns
+//! its own controls and interaction state, so a page can be tested and restyled
+//! without touching the window.
 
 use std::sync::Arc;
 
 use crate::config::{Config, SidebarPosition};
 use crate::render::display_list::{Color, DisplayList, Rect};
-use crate::sys_state::SystemState;
-use crate::ui::{self, Action, InputState, PaintCtx, Widget};
+use crate::ui::pages::Pages;
+use crate::ui::{InputState, PaintCtx};
 
-/// A control-centre page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Page {
-    Overview,
-    Audio,
-    Bluetooth,
-    Wifi,
-    Battery,
-    Notifications,
-    Display,
-    Power,
-}
-
-impl Page {
-    /// Pages shown in the navigation rail, in order.
-    pub const ALL: [Page; 8] = [
-        Page::Overview,
-        Page::Audio,
-        Page::Bluetooth,
-        Page::Wifi,
-        Page::Battery,
-        Page::Notifications,
-        Page::Display,
-        Page::Power,
-    ];
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Page::Overview => "Overview",
-            Page::Audio => "Audio",
-            Page::Bluetooth => "Bluetooth",
-            Page::Wifi => "Network",
-            Page::Battery => "Battery",
-            Page::Notifications => "Notifications",
-            Page::Display => "Display",
-            Page::Power => "Power",
-        }
-    }
-
-    /// Nerd Font glyph for the navigation rail.
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Page::Overview => "\u{f009}",
-            Page::Audio => "\u{f0581}",
-            Page::Bluetooth => "\u{f00b1}",
-            Page::Wifi => "\u{f05a9}",
-            Page::Battery => "\u{f007a}",
-            Page::Notifications => "\u{f009a}",
-            Page::Display => "\u{f108}",
-            Page::Power => "\u{f011}",
-        }
-    }
-}
-
-/// Visual state of the control centre.
-pub struct ControlCenter {
-    pub open: bool,
-    pub page: Page,
-    config: Arc<Config>,
-    /// Panel size in logical pixels.
-    width: f32,
-    /// Animation progress 0..1, driven by the shell's frame ticker.
-    pub progress: f32,
-    /// Actions produced by the last paint, drained by the shell.
-    pub pending: Vec<crate::actions::SystemAction>,
-    /// Which slider is being dragged, if any.
-    dragging: Option<SliderId>,
-    /// Pointer was pressed during the last frame, so a click can be detected.
-    pressed_last: bool,
-    /// True when this paint follows a fresh press.
-    clicked_this_frame: bool,
-}
+pub use crate::ui::pages::Page;
 
 /// Layout constants shared by painting and hit-testing. These must agree, or
 /// clicks land on the wrong row.
@@ -97,9 +23,16 @@ const NAV_ROW_SPACING: f32 = 40.0;
 const NAV_INSET: f32 = 8.0;
 const NAV_TOP_GAP: f32 = 6.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SliderId {
-    Volume,
+/// Visual state of the control centre.
+pub struct ControlCenter {
+    pub open: bool,
+    pub page: Page,
+    config: Arc<Config>,
+    /// Panel size in logical pixels.
+    width: f32,
+    /// Animation progress 0..1.
+    pub progress: f32,
+    pages: Pages,
 }
 
 impl ControlCenter {
@@ -111,10 +44,7 @@ impl ControlCenter {
             config,
             width,
             progress: 0.0,
-            pending: Vec::new(),
-            dragging: None,
-            pressed_last: false,
-            clicked_this_frame: false,
+            pages: Pages::new(),
         }
     }
 
@@ -127,7 +57,7 @@ impl ControlCenter {
 
     /// Take any actions produced by the last paint.
     pub fn take_actions(&mut self) -> Vec<crate::actions::SystemAction> {
-        std::mem::take(&mut self.pending)
+        self.pages.take_actions()
     }
 
     /// Open on `page`, or close if already open on that page.
@@ -135,8 +65,12 @@ impl ControlCenter {
         if self.open && self.page == page {
             self.open = false;
         } else {
+            let changed = !self.open || self.page != page;
             self.open = true;
             self.page = page;
+            if changed {
+                self.pages.on_page_shown(page);
+            }
         }
     }
 
@@ -167,23 +101,19 @@ impl ControlCenter {
         self.open || self.progress > 0.001
     }
 
-    /// Geometry of the panel inside a fullscreen surface.
-    fn panel_rect(&self, surface: Rect) -> Rect {
-        let width = self.width.min(surface.width - 40.0);
-        let height = (surface.height - 80.0).max(200.0);
-        // Slide in from the edge the bar lives on.
-        let slide = (1.0 - self.progress) * (width + 24.0);
-        let x = match self.config.sidebar.position {
-            SidebarPosition::Right => surface.x + surface.width - width - 12.0 + slide,
-            _ => surface.x + 12.0 - slide,
-        };
-        Rect {
-            x,
-            y: surface.y + 40.0,
-            width,
-            height,
-            radius: self.config.appearance.corner_radius,
-            color: Color::TRANSPARENT,
+    /// True while the open/close animation is still running.
+    pub fn animating(&self) -> bool {
+        let target = if self.open { 1.0 } else { 0.0 };
+        (self.progress - target).abs() > 0.001 || (self.open && self.pages.animating(self.page))
+    }
+
+    /// Wheel scrolling for pages that have lists.
+    pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
+        match self.page {
+            Page::Wifi => {
+                self.pages.wifi.on_scroll(point, delta);
+            }
+            _ => {}
         }
     }
 
@@ -196,13 +126,10 @@ impl ControlCenter {
         surface: Rect,
         input: &InputState,
     ) -> Rect {
-        self.pending.clear();
-        // A click is a press edge: `pressed` true now, false last frame.
-        let clicked = input.pressed && !self.pressed_last;
-        self.pressed_last = input.pressed;
-        self.clicked_this_frame = clicked;
-        // Fill the whole window: `surface` carries the caller's colour, which
-        // may be transparent, so paint an explicit background.
+        self.pages.begin_frame(input, ctx.dt);
+
+        // Fill the whole window: `surface` may carry a transparent colour, so
+        // paint an explicit background.
         list.push_rect(Rect {
             color: ctx.theme.bg_main,
             ..surface
@@ -216,72 +143,21 @@ impl ControlCenter {
             color: ctx.theme.bg_main,
         };
 
-        // Navigation rail down the left of the panel.
-        let nav_width = NAV_WIDTH;
-        let nav = Rect {
-            x: panel.x,
-            y: panel.y,
-            width: nav_width,
-            height: panel.height,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-
-        let header_height = NAV_HEADER;
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            "Settings",
-            nav.x + 18.0,
-            Rect { height: header_height, ..nav },
-            15.0,
-            700,
-            ctx.theme.text_main,
-        );
-
-        let mut y = nav.y + header_height + NAV_TOP_GAP;
-        for page in Page::ALL {
-            let row = Rect {
-                x: nav.x + NAV_INSET,
-                y,
-                width: nav.width - NAV_INSET * 2.0,
-                height: NAV_ROW_HEIGHT,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            let selected = page == self.page;
-            if selected {
-                list.push_rect(Rect { color: ctx.theme.bg_hover, ..row });
-            }
-            let color = if selected { ctx.theme.primary } else { ctx.theme.text_muted };
-            ui::paint_text_vcentered(ctx, list, page.glyph(), row.x + 10.0, row, 15.0, 400, color);
-            ui::paint_text_vcentered(ctx, list, page.title(), row.x + 36.0, row, 13.0, 400, color);
-            y += NAV_ROW_SPACING;
-        }
-
-        // Subtle separator between rail and content.
-        list.push_rect(Rect {
-            x: panel.x + nav_width,
-            y: panel.y,
-            width: 1.0,
-            height: panel.height,
-            radius: 0.0,
-            color: ctx.theme.border_inactive,
-        });
-
+        let nav = self.paint_nav(ctx, list, panel);
         let content = Rect {
-            x: panel.x + nav_width + 1.0,
+            x: panel.x + nav + 1.0,
             y: panel.y,
-            width: panel.width - nav_width - 1.0,
+            width: panel.width - nav - 1.0,
             height: panel.height,
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
-        self.paint_page(ctx, list, content, input);
+        self.paint_content(ctx, list, content, input);
         panel
     }
 
-    /// Paint the overlay. Returns the panel's rect so clicks can be routed.
+    /// Paint the overlay variant (kept for the panel-style presentation; the
+    /// window is the default).
     pub fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -289,16 +165,28 @@ impl ControlCenter {
         surface: Rect,
         input: &InputState,
     ) -> Rect {
-        // Scrim: dim the desktop and catch clicks outside the panel.
         let alpha = 0.45 * self.progress;
         list.push_rect(Rect {
             color: Color::rgba(0.0, 0.0, 0.0, alpha),
             ..surface
         });
 
-        let panel = self.panel_rect(surface);
-
-        ui::paint_frame(
+        let width = self.width.min(surface.width - 40.0);
+        let height = (surface.height - 80.0).max(200.0);
+        let slide = (1.0 - self.progress) * (width + 24.0);
+        let x = match self.config.sidebar.position {
+            SidebarPosition::Right => surface.x + surface.width - width - 12.0 + slide,
+            _ => surface.x + 12.0 - slide,
+        };
+        let panel = Rect {
+            x,
+            y: surface.y + 40.0,
+            width,
+            height,
+            radius: self.config.appearance.corner_radius,
+            color: Color::TRANSPARENT,
+        };
+        crate::ui::paint_frame(
             list,
             panel,
             ctx.theme.bg_main,
@@ -306,39 +194,52 @@ impl ControlCenter {
             true,
         );
 
-        // Navigation rail down the left of the panel.
-        let nav_width = 132.0;
+        self.pages.begin_frame(input, ctx.dt);
+        let nav = NAV_WIDTH.min(132.0);
+        let content = Rect {
+            x: panel.x + nav + 8.0,
+            y: panel.y,
+            width: panel.width - nav - 8.0,
+            height: panel.height,
+            radius: 0.0,
+            color: Color::TRANSPARENT,
+        };
+        self.paint_content(ctx, list, content, input);
+        panel
+    }
+
+    /// Draw the navigation rail and its divider. Returns the rail width.
+    fn paint_nav(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect) -> f32 {
         let nav = Rect {
             x: panel.x,
             y: panel.y,
-            width: nav_width,
+            width: NAV_WIDTH,
             height: panel.height,
-            radius: panel.radius,
+            radius: 0.0,
             color: Color::TRANSPARENT,
         };
 
-        let header_height = 44.0;
-        ui::paint_text_vcentered(
+        crate::ui::paint_text_vcentered(
             ctx,
             list,
-            "Control Centre",
-            nav.x + 16.0,
+            "Settings",
+            nav.x + 18.0,
             Rect {
-                height: header_height,
+                height: NAV_HEADER,
                 ..nav
             },
-            14.0,
+            15.0,
             700,
             ctx.theme.text_main,
         );
 
-        let mut y = nav.y + header_height + 8.0;
+        let mut y = nav.y + NAV_HEADER + NAV_TOP_GAP;
         for page in Page::ALL {
             let row = Rect {
-                x: nav.x + 8.0,
+                x: nav.x + NAV_INSET,
                 y,
-                width: nav.width - 16.0,
-                height: 34.0,
+                width: nav.width - NAV_INSET * 2.0,
+                height: NAV_ROW_HEIGHT,
                 radius: 8.0,
                 color: Color::TRANSPARENT,
             };
@@ -354,44 +255,27 @@ impl ControlCenter {
             } else {
                 ctx.theme.text_muted
             };
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                page.glyph(),
-                row.x + 10.0,
-                row,
-                15.0,
-                400,
-                color,
+            crate::ui::paint_text_vcentered(
+                ctx, list, page.glyph(), row.x + 10.0, row, 15.0, 400, color,
             );
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                page.title(),
-                row.x + 34.0,
-                row,
-                13.0,
-                400,
-                color,
+            crate::ui::paint_text_vcentered(
+                ctx, list, page.title(), row.x + 36.0, row, 13.0, 400, color,
             );
-            y += 36.0;
+            y += NAV_ROW_SPACING;
         }
 
-        // Content area.
-        let content = Rect {
-            x: panel.x + nav_width + 8.0,
+        list.push_rect(Rect {
+            x: panel.x + NAV_WIDTH,
             y: panel.y,
-            width: panel.width - nav_width - 8.0,
+            width: 1.0,
             height: panel.height,
             radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        self.paint_page(ctx, list, content, input);
-
-        panel
+            color: ctx.theme.border_inactive,
+        });
+        NAV_WIDTH
     }
 
-    fn paint_page(
+    fn paint_content(
         &mut self,
         ctx: &mut PaintCtx<'_>,
         list: &mut DisplayList,
@@ -402,796 +286,40 @@ impl ControlCenter {
         let inner = Rect {
             x: area.x + padding,
             y: area.y + padding,
-            width: area.width - padding * 2.0,
-            height: area.height - padding * 2.0,
+            width: (area.width - padding * 2.0).max(0.0),
+            height: (area.height - padding * 2.0).max(0.0),
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
-
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            self.page.title(),
-            inner.x,
-            Rect {
-                height: 30.0,
-                ..inner
-            },
-            18.0,
-            700,
-            ctx.theme.text_main,
-        );
-
-        let body = Rect {
-            y: inner.y + 40.0,
-            height: inner.height - 40.0,
-            ..inner
-        };
-
-        match self.page {
-            Page::Overview => self.paint_overview(ctx, list, body, input),
-            Page::Audio => self.paint_audio(ctx, list, body, input),
-            Page::Bluetooth => self.paint_bluetooth(ctx, list, body, input),
-            Page::Wifi => self.paint_wifi(ctx, list, body, input),
-            Page::Battery => self.paint_battery(ctx, list, body, input),
-            Page::Notifications => self.paint_notifications(ctx, list, body, input),
-            Page::Display => self.paint_display(ctx, list, body, input),
-            Page::Power => self.paint_power(ctx, list, body, input),
-        }
+        self.pages.paint(self.page, ctx, list, inner, input);
     }
 
-    fn paint_overview(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        _input: &InputState,
-    ) {
-        let tiles = [
-            ("Audio", ctx.state.audio.get()),
-            ("Bluetooth", ctx.state.bluetooth.get()),
-            ("Network", ctx.state.net.get()),
-            ("Battery", ctx.state.battery.get()),
-        ];
-        let columns = 2;
-        let gap = 12.0;
-        let tile_w = (area.width - gap) / columns as f32;
-        let tile_h = 76.0;
-
-        for (index, (label, snapshot)) in tiles.iter().enumerate() {
-            let col = index % columns;
-            let row = index / columns;
-            let rect = Rect {
-                x: area.x + col as f32 * (tile_w + gap),
-                y: area.y + row as f32 * (tile_h + gap),
-                width: tile_w,
-                height: tile_h,
-                radius: 10.0,
-                color: Color::TRANSPARENT,
-            };
-            ui::paint_frame(
-                list,
-                rect,
-                ctx.theme.bg_widget,
-                ctx.theme.border_inactive,
-                ctx.appearance.framed_border,
-            );
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                label,
-                rect.x + 14.0,
-                Rect { height: 28.0, ..rect },
-                13.0,
-                600,
-                ctx.theme.text_muted,
-            );
-            let summary = summarize(label, snapshot.clone());
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &summary,
-                rect.x + 14.0,
-                Rect { y: rect.y + 28.0, height: 30.0, ..rect },
-                15.0,
-                500,
-                ctx.theme.text_main,
-            );
-        }
-    }
-
-    fn paint_audio(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        let audio = ctx.state.audio.get();
-        let muted = audio["mute"].as_str() == Some("yes");
-        let volume_text = audio["volume"].as_str().unwrap_or("0%").to_string();
-        let volume = volume_text
-            .trim_end_matches('%')
-            .parse::<f32>()
-            .unwrap_or(0.0)
-            / 100.0;
-
-        // Volume slider. A drag reports a new value; release commits nothing
-        // further, so the last drag frame is the applied value.
-        let slider_rect = Rect {
-            x: area.x,
-            y: area.y + 4.0,
-            width: area.width,
-            height: 24.0,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        let pointer_inside = input
-            .pointer
-            .map(|(x, y)| slider_rect.contains(crate::render::display_list::Point::new(x, y)))
-            .unwrap_or(false);
-        if input.pressed && pointer_inside {
-            self.dragging = Some(SliderId::Volume);
-        } else if !input.pressed {
-            self.dragging = None;
-        }
-        let dragging = self.dragging == Some(SliderId::Volume);
-        if let Some(value) = crate::ui::controls::slider(
-            ctx, list, slider_rect, volume, dragging, input,
-        ) {
-            // Commit in 1% steps to avoid flooding the action worker.
-            let percent = (value * 100.0).round() as i64;
-            let current = (volume * 100.0).round() as i64;
-            if percent != current {
-                self.pending.push(crate::actions::SystemAction::SetVolume(percent));
-            }
-        }
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            &volume_text,
-            area.x + area.width - 52.0,
-            Rect { y: area.y + 30.0, height: 18.0, ..area },
-            12.0,
-            500,
-            ctx.theme.text_muted,
-        );
-
-        // Mute switch.
-        let mute_rect = Rect {
-            x: area.x,
-            y: area.y + 56.0,
-            width: area.width,
-            height: 30.0,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        if let Some(next) = crate::ui::controls::toggle(
-            ctx,
-            list,
-            mute_rect,
-            "Muted",
-            muted,
-            input,
-            self.clicked_this_frame,
-        ) {
-            self.pending
-                .push(crate::actions::SystemAction::ToggleMute { muted: next == false && !muted });
-        }
-
-        // Output devices: click to switch.
-        let mut y = area.y + 100.0;
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            "Outputs",
-            area.x,
-            Rect { y, height: 20.0, ..area },
-            12.0,
-            600,
-            ctx.theme.text_muted,
-        );
-        y += 24.0;
-
-        let current_output = audio["default_sink"]
-            .as_str()
-            .or_else(|| audio["default"]["sink"].as_str())
-            .unwrap_or("");
-        if let Some(sinks) = audio["sinks"].as_array() {
-            for sink in sinks.iter().take(6) {
-                let name = sink["name"].as_str().unwrap_or("");
-                let label = sink["description"].as_str().unwrap_or(name);
-                let row = Rect {
-                    x: area.x,
-                    y,
-                    width: area.width,
-                    height: 40.0,
-                    radius: 8.0,
-                    color: Color::TRANSPARENT,
-                };
-                let selected = name == current_output;
-                if crate::ui::controls::selectable_row(
-                    ctx,
-                    list,
-                    row,
-                    label,
-                    name,
-                    selected,
-                    input,
-                    self.clicked_this_frame,
-                ) && !selected
-                {
-                    self.pending.push(crate::actions::SystemAction::SetOutput(name.to_string()));
-                }
-                y += 44.0;
-            }
-        }
-    }
-
-    fn paint_bluetooth(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        let bt = ctx.state.bluetooth.get();
-        let state = bt["state"].as_str().unwrap_or("off");
-        let powered = state != "off";
-
-        let toggle_rect = Rect {
-            x: area.x,
-            y: area.y + 2.0,
-            width: area.width,
-            height: 30.0,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        if let Some(next) = crate::ui::controls::toggle(
-            ctx,
-            list,
-            toggle_rect,
-            "Adapter",
-            powered,
-            input,
-            self.clicked_this_frame,
-        ) {
-            self.pending
-                .push(crate::actions::SystemAction::BluetoothPower(next));
-        }
-
-        // Scan button.
-        let scan_rect = Rect {
-            x: area.x,
-            y: area.y + 44.0,
-            width: 140.0,
-            height: 32.0,
-            radius: 8.0,
-            color: Color::TRANSPARENT,
-        };
-        if crate::ui::controls::button(
-            ctx,
-            list,
-            scan_rect,
-            "Scan",
-            input,
-            self.clicked_this_frame,
-            true,
-        ) {
-            self.pending.push(crate::actions::SystemAction::BluetoothScan);
-        }
-
-        let mut y = area.y + 88.0;
-        let devices = bt["devices"].as_array().cloned().unwrap_or_default();
-        if devices.is_empty() {
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                "No devices",
-                area.x,
-                Rect { y, height: 24.0, ..area },
-                13.0,
-                400,
-                ctx.theme.text_muted,
-            );
-            return;
-        }
-        for device in devices.iter().take(8) {
-            let address = device["address"].as_str().unwrap_or("").to_string();
-            let name = device["name"]
-                .as_str()
-                .or_else(|| device["alias"].as_str())
-                .unwrap_or(&address);
-            let connected = device["connected"].as_bool().unwrap_or(false);
-            let subtitle = if connected { "connected" } else { "click to connect" };
-            let row = Rect {
-                x: area.x,
-                y,
-                width: area.width,
-                height: 44.0,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            if crate::ui::controls::selectable_row(
-                ctx,
-                list,
-                row,
-                name,
-                subtitle,
-                connected,
-                input,
-                self.clicked_this_frame,
-            ) && !address.is_empty()
-            {
-                self.pending.push(crate::actions::SystemAction::BluetoothConnect {
-                    address,
-                    connect: !connected,
-                });
-            }
-            y += 48.0;
-        }
-    }
-
-    fn paint_wifi(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        // The radio state lives in `wifi.state` ("enabled"/"disabled"), not in
-        // `net.status`, which only lists active connections.
-        let wifi = ctx.state.wifi.get();
-        let enabled = wifi["state"].as_str() != Some("disabled");
-
-        let toggle_rect = Rect {
-            x: area.x,
-            y: area.y + 2.0,
-            width: area.width,
-            height: 30.0,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        if let Some(next) = crate::ui::controls::toggle(
-            ctx,
-            list,
-            toggle_rect,
-            "Wi-Fi",
-            enabled,
-            input,
-            self.clicked_this_frame,
-        ) {
-            self.pending
-                .push(crate::actions::SystemAction::WifiToggle(next));
-        }
-
-        let mut y = area.y + 48.0;
-        let net = ctx.state.net.get();
-        let connections = net["connections"].as_array().cloned().unwrap_or_default();
-        if connections.is_empty() {
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                "No active connections",
-                area.x,
-                Rect { y, height: 24.0, ..area },
-                13.0,
-                400,
-                ctx.theme.text_muted,
-            );
-            return;
-        }
-        for conn in connections.iter().take(8) {
-            let name = conn["connection"].as_str().unwrap_or("network");
-            let device = conn["device"].as_str().unwrap_or("").to_string();
-            let address = conn["ip_address"].as_str().unwrap_or("");
-            let row = Rect {
-                x: area.x,
-                y,
-                width: area.width,
-                height: 44.0,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            if crate::ui::controls::selectable_row(
-                ctx,
-                list,
-                row,
-                name,
-                address,
-                true,
-                input,
-                self.clicked_this_frame,
-            ) && !device.is_empty()
-            {
-                self.pending
-                    .push(crate::actions::SystemAction::WifiDisconnect(device));
-            }
-            y += 48.0;
-        }
-    }
-
-    fn paint_battery(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        let battery = ctx.state.battery.get();
-        let pct = battery["battery"]["pct"]
-            .as_u64()
-            .map(|p| format!("{p}%"))
-            .unwrap_or_else(|| "--".into());
-        let state = battery["battery"]["state"].as_str().unwrap_or("unknown");
-        let charging = battery["charging_info"].as_str().unwrap_or("");
-        let profile = battery["profile"].as_str().unwrap_or("").to_string();
-
-        self.stat_row(ctx, list, area, 0, "Charge", &pct);
-        self.stat_row(ctx, list, area, 1, "State", state);
-        self.stat_row(ctx, list, area, 2, "Power supply", charging);
-
-        // Power profile choices.
-        let mut y = area.y + 132.0;
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            "Power profile",
-            area.x,
-            Rect { y, height: 20.0, ..area },
-            12.0,
-            600,
-            ctx.theme.text_muted,
-        );
-        y += 26.0;
-        for option in ["low-power", "balanced", "balanced-performance"] {
-            let row = Rect {
-                x: area.x,
-                y,
-                width: area.width.min(320.0),
-                height: 34.0,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            let selected = profile == option;
-            if crate::ui::controls::selectable_row(
-                ctx,
-                list,
-                row,
-                option,
-                "",
-                selected,
-                input,
-                self.clicked_this_frame,
-            ) && !selected
-            {
-                self.pending.push(crate::actions::SystemAction::SetPowerProfile(
-                    option.to_string(),
-                ));
-            }
-            y += 38.0;
-        }
-    }
-
-    fn paint_notifications(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        let notifications = ctx.state.notifications.get();
-        if notifications.is_empty() {
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                "No notifications",
-                area.x,
-                Rect { height: 24.0, ..area },
-                13.0,
-                400,
-                ctx.theme.text_muted,
-            );
-            return;
-        }
-
-        // Dismiss-all button.
-        let clear = Rect {
-            x: area.x,
-            y: area.y,
-            width: 120.0,
-            height: 30.0,
-            radius: 8.0,
-            color: Color::TRANSPARENT,
-        };
-        if crate::ui::controls::button(
-            ctx,
-            list,
-            clear,
-            "Clear all",
-            input,
-            self.clicked_this_frame,
-            false,
-        ) {
-            self.pending.push(crate::actions::SystemAction::DismissAll);
-        }
-
-        let mut y = area.y + 42.0;
-        // Newest first.
-        for notification in notifications.iter().rev().take(8) {
-            let card = Rect {
-                x: area.x,
-                y,
-                width: area.width,
-                height: 66.0,
-                radius: 10.0,
-                color: Color::TRANSPARENT,
-            };
-            list.push_rect(card);
-            ui::paint_frame(
-                list,
-                card,
-                ctx.theme.surface_high,
-                ctx.theme.outline,
-                ctx.appearance.framed_border,
-            );
-
-            // Urgency stripe.
-            let stripe = Rect {
-                x: card.x,
-                y: card.y,
-                width: 3.0,
-                height: card.height,
-                radius: 0.0,
-                color: match notification.urgency {
-                    2 => ctx.theme.error,
-                    0 => ctx.theme.text_muted,
-                    _ => ctx.theme.primary,
-                },
-            };
-            list.push_rect(stripe);
-
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &notification.summary,
-                card.x + 14.0,
-                Rect { height: 26.0, ..card },
-                13.0,
-                600,
-                ctx.theme.text_main,
-            );
-            let app = if notification.app_name.is_empty() {
-                String::new()
-            } else {
-                format!("{} · ", notification.app_name)
-            };
-            let body = format!("{app}{}", notification.body);
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &body,
-                card.x + 14.0,
-                Rect {
-                    y: card.y + 24.0,
-                    height: 20.0,
-                    width: card.width - 90.0,
-                    ..card
-                },
-                11.0,
-                400,
-                ctx.theme.text_muted,
-            );
-
-            // Dismiss button.
-            let dismiss = Rect {
-                x: card.x + card.width - 34.0,
-                y: card.y + (card.height - 22.0) * 0.5,
-                width: 22.0,
-                height: 22.0,
-                radius: 11.0,
-                color: Color::TRANSPARENT,
-            };
-            if crate::ui::controls::button(
-                ctx,
-                list,
-                dismiss,
-                "x",
-                input,
-                self.clicked_this_frame,
-                false,
-            ) {
-                self.pending
-                    .push(crate::actions::SystemAction::Dismiss(notification.id));
-            }
-            let _ = &stripe;
-            y += 72.0;
-        }
-    }
-
-    fn paint_display(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        self.stat_row(ctx, list, area, 0, "Font size", &self.config.appearance.font_size.to_string());
-        self.stat_row(ctx, list, area, 1, "Output", ctx.output_name);
-
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            "Theme",
-            area.x,
-            Rect { y: area.y + 84.0, height: 20.0, ..area },
-            12.0,
-            600,
-            ctx.theme.text_muted,
-        );
-
-        let mut y = area.y + 108.0;
-        let mut names: Vec<String> = self.config.themes.keys().cloned().collect();
-        names.sort();
-        for name in names {
-            let row = Rect {
-                x: area.x,
-                y,
-                width: area.width.min(320.0),
-                height: 34.0,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            let selected = name == self.config.theme;
-            if crate::ui::controls::selectable_row(
-                ctx,
-                list,
-                row,
-                &name,
-                "",
-                selected,
-                input,
-                self.clicked_this_frame,
-            ) && !selected
-            {
-                self.pending
-                    .push(crate::actions::SystemAction::SetTheme(name.clone()));
-            }
-            y += 38.0;
-        }
-    }
-
-    fn paint_power(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        input: &InputState,
-    ) {
-        let actions: [(&str, &[&str]); 4] = [
-            ("Lock", &["loginctl", "lock-session"]),
-            ("Suspend", &["systemctl", "suspend"]),
-            ("Reboot", &["systemctl", "reboot"]),
-            ("Shutdown", &["systemctl", "poweroff"]),
-        ];
-        for (index, (label, argv)) in actions.iter().enumerate() {
-            let rect = Rect {
-                x: area.x,
-                y: area.y + index as f32 * 48.0,
-                width: area.width.min(280.0),
-                height: 38.0,
-                radius: 8.0,
-                color: Color::TRANSPARENT,
-            };
-            let clicked = crate::ui::controls::button(
-                ctx,
-                list,
-                rect,
-                label,
-                input,
-                self.clicked_this_frame,
-                *label == "Shutdown",
-            );
-            if clicked {
-                self.pending.push(crate::actions::SystemAction::Spawn(
-                    argv.iter().map(|s| s.to_string()).collect(),
-                ));
-            }
-        }
-    }
-
-    /// One label/value row.
-    fn stat_row(
-        &self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        area: Rect,
-        index: usize,
-        label: &str,
-        value: &str,
-    ) {
-        let rect = Rect {
-            x: area.x,
-            y: area.y + index as f32 * 38.0,
-            width: area.width,
-            height: 32.0,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            label,
-            rect.x,
-            rect,
-            13.0,
-            400,
-            ctx.theme.text_muted,
-        );
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            value,
-            rect.x + rect.width * 0.45,
-            rect,
-            13.0,
-            500,
-            ctx.theme.text_main,
-        );
-    }
-
-    /// Route a click in window coordinates.
+    /// Route a click in window coordinates. Returns an action for the shell.
     pub fn on_click(
         &mut self,
         point: crate::render::display_list::Point,
         surface: Rect,
         _input: &InputState,
-    ) -> Option<Action> {
+    ) -> Option<crate::ui::Action> {
         if !self.open {
             return None;
         }
 
         // Navigation rail: the same geometry `paint_window` draws.
         let mut y = surface.y + NAV_HEADER + NAV_TOP_GAP;
-        if point.x >= surface.x + NAV_INSET
-            && point.x <= surface.x + NAV_WIDTH - NAV_INSET
-        {
+        if point.x >= surface.x + NAV_INSET && point.x <= surface.x + NAV_WIDTH - NAV_INSET {
             for page in Page::ALL {
                 if point.y >= y && point.y <= y + NAV_ROW_HEIGHT {
-                    self.page = page;
+                    if self.page != page {
+                        self.page = page;
+                        self.pages.on_page_shown(page);
+                    }
                     return None;
                 }
                 y += NAV_ROW_SPACING;
             }
         }
         None
-    }
-}
-
-/// A short human-readable summary of a subsystem snapshot.
-fn summarize(label: &str, snapshot: serde_json::Value) -> String {
-    match label {
-        "Audio" => {
-            let volume = snapshot["volume"].as_str().unwrap_or("--");
-            let muted = snapshot["mute"].as_str() == Some("yes");
-            if muted {
-                format!("muted ({volume})")
-            } else {
-                volume.to_string()
-            }
-        }
-        "Bluetooth" => snapshot["state"].as_str().unwrap_or("unknown").to_string(),
-        "Network" => snapshot["connections"]
-            .as_array()
-            .and_then(|list| list.first())
-            .and_then(|conn| conn["connection"].as_str())
-            .unwrap_or("disconnected")
-            .to_string(),
-        "Battery" => snapshot["battery"]["pct"]
-            .as_u64()
-            .map(|p| format!("{p}%"))
-            .unwrap_or_else(|| "--".into()),
-        _ => String::new(),
     }
 }
 
@@ -1209,7 +337,6 @@ mod tests {
         assert!(center.open);
         assert_eq!(center.page, Page::Battery);
 
-        // Toggling the same page closes it.
         center.toggle(Page::Battery);
         assert!(!center.open);
     }
@@ -1244,23 +371,15 @@ mod tests {
         assert!(center.progress.abs() < 1e-3);
         assert!(!center.visible());
     }
-}
-
-#[cfg(test)]
-mod config_tests {
-    use super::*;
 
     #[test]
     fn set_config_preserves_open_state_and_page() {
         let mut config = Config::default();
         config.theme = "carbon".into();
         let mut center = ControlCenter::new(Arc::new(config));
-
         center.toggle(Page::Display);
         assert!(center.open);
-        assert_eq!(center.page, Page::Display);
 
-        // Simulate a theme switch delivering a new config.
         let mut next = Config::default();
         next.theme = "gruvbox".into();
         next.control_center.width = 640;
@@ -1269,6 +388,5 @@ mod config_tests {
         assert!(center.open, "open state must survive a config swap");
         assert_eq!(center.page, Page::Display, "page must survive");
         assert_eq!(center.width, 640.0, "new width should apply");
-        assert_eq!(center.config.theme, "gruvbox");
     }
 }

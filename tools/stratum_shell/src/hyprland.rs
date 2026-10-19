@@ -21,7 +21,7 @@ pub struct Workspace {
 }
 
 /// Everything the bar needs from the compositor.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct HyprState {
     /// Monitor name -> active workspace id.
     pub active: std::collections::HashMap<String, i32>,
@@ -110,10 +110,18 @@ impl HyprState {
     ///
     /// The event socket is level-triggered; re-reading state on each relevant
     /// event keeps us consistent without parsing every event payload.
+    ///
+    /// Events are coalesced: applications that animate their window title (a
+    /// terminal's spinner, a browser's loading indicator) emit `activewindow`
+    /// several times a second, and each one would otherwise cost three socket
+    /// queries plus a full repaint.
     pub fn spawn_watcher<F>(on_change: F)
     where
         F: Fn() + Send + 'static,
     {
+        /// Minimum spacing between state reads.
+        const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
+
         let Some(dir) = instance_dir() else {
             tracing::warn!("Hyprland instance directory not found; workspace state will be static");
             return;
@@ -128,11 +136,13 @@ impl HyprState {
                     match UnixStream::connect(&socket) {
                         Ok(stream) => {
                             let reader = BufReader::new(stream);
+                            let mut last = std::time::Instant::now()
+                                - MIN_INTERVAL;
                             for line in reader.lines() {
                                 let Ok(line) = line else { break };
                                 let event = line.split(">>").next().unwrap_or_default();
                                 // Only these affect what the bar shows.
-                                if matches!(
+                                if !matches!(
                                     event,
                                     "workspace"
                                         | "workspacev2"
@@ -144,8 +154,18 @@ impl HyprState {
                                         | "closewindow"
                                         | "movewindow"
                                 ) {
-                                    on_change();
+                                    continue;
                                 }
+                                // Coalesce bursts: wait out the remainder of the
+                                // cooldown instead of dropping the event, so a
+                                // rapid workspace switch still updates. Events
+                                // that arrive meanwhile stay buffered in the
+                                // socket and are read after the wait.
+                                if let Some(remaining) = MIN_INTERVAL.checked_sub(last.elapsed()) {
+                                    std::thread::sleep(remaining);
+                                }
+                                last = std::time::Instant::now();
+                                on_change();
                             }
                         }
                         Err(err) => {

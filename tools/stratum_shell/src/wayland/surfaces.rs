@@ -24,6 +24,8 @@ pub struct SurfaceEntry {
     pub dirty: bool,
     pub frame_pending: bool,
     pub output_name: String,
+    /// The output this surface belongs to, so hotplug can be matched up.
+    pub output: Option<wayland_client::protocol::wl_output::WlOutput>,
 }
 
 impl SurfaceEntry {
@@ -39,7 +41,14 @@ impl SurfaceEntry {
             dirty: true,
             frame_pending: false,
             output_name,
+            output: None,
         }
+    }
+
+    /// Associate this surface with the output it was created for.
+    pub fn with_output(mut self, output: wayland_client::protocol::wl_output::WlOutput) -> Self {
+        self.output = Some(output);
+        self
     }
 
     /// Apply a compositor configure and reconfigure the swapchain.

@@ -269,6 +269,8 @@ pub struct TextRun {
     pub glyphs: Vec<PositionedGlyph>,
     /// Applied around the run origin when vertices are built.
     pub transform: Transform,
+    /// Scissor in effect when the run was pushed, if any.
+    pub clip: Option<Rect>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -303,17 +305,24 @@ pub enum DrawCommand {
     Rect(Rect),
     Path(Path),
     Image(Image),
+    /// Restrict everything drawn after this to `rect`.
+    PushClip(Rect),
+    /// Restore the clip in effect before the matching [`DrawCommand::PushClip`].
+    PopClip,
 }
 
 /// The frame's contents.
 ///
 /// Text is kept separately because it needs the font/glyph caches, which live
-/// with the renderer rather than in this data structure.
+/// with the renderer rather than in this data structure. A text run records the
+/// clip in effect when it was pushed, so text obeys the same scissor as the
+/// geometry around it.
 #[derive(Clone, Debug)]
 pub struct DisplayList {
     pub clear: Color,
     pub commands: Vec<DrawCommand>,
     pub texts: Vec<TextRun>,
+    clip_stack: Vec<Rect>,
 }
 
 impl Default for DisplayList {
@@ -322,6 +331,7 @@ impl Default for DisplayList {
             clear: Color::TRANSPARENT,
             commands: Vec::new(),
             texts: Vec::new(),
+            clip_stack: Vec::new(),
         }
     }
 }
@@ -332,6 +342,7 @@ impl DisplayList {
             clear,
             commands: Vec::new(),
             texts: Vec::new(),
+            clip_stack: Vec::new(),
         }
     }
 
@@ -347,12 +358,52 @@ impl DisplayList {
         self.commands.push(DrawCommand::Image(image));
     }
 
-    pub fn push_text(&mut self, run: TextRun) {
+    pub fn push_text(&mut self, mut run: TextRun) {
+        // Nested clips intersect, so a child can never draw outside its parent.
+        run.clip = self.clip();
         self.texts.push(run);
+    }
+
+    /// Restrict subsequent drawing to `rect` until [`Self::pop_clip`].
+    pub fn push_clip(&mut self, rect: Rect) {
+        let rect = match self.clip_stack.last() {
+            Some(parent) => intersect(*parent, rect),
+            None => rect,
+        };
+        self.clip_stack.push(rect);
+        self.commands.push(DrawCommand::PushClip(rect));
+    }
+
+    /// End the most recent clip.
+    pub fn pop_clip(&mut self) {
+        if self.clip_stack.pop().is_some() {
+            self.commands.push(DrawCommand::PopClip);
+        }
+    }
+
+    /// The clip currently in effect, if any.
+    pub fn clip(&self) -> Option<Rect> {
+        self.clip_stack.last().copied()
     }
 
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty() && self.texts.is_empty()
+    }
+}
+
+/// Intersection of two rects; an empty rect when they do not overlap.
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    let right = (a.x + a.width).min(b.x + b.width);
+    let bottom = (a.y + a.height).min(b.y + b.height);
+    Rect {
+        x,
+        y,
+        width: (right - x).max(0.0),
+        height: (bottom - y).max(0.0),
+        radius: 0.0,
+        color: Color::TRANSPARENT,
     }
 }
 

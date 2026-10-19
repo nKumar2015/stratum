@@ -77,8 +77,16 @@ impl Config {
             .get(&self.theme)
             .or_else(|| self.themes.get(&self.theme.to_lowercase()));
         match named {
-            Some(theme) => theme.to_theme(),
-            None => Theme::default(),
+            Some(theme) => {
+                let mut resolved = theme.to_theme();
+                resolved.name = self.theme.clone();
+                resolved
+            }
+            None => {
+                let mut resolved = Theme::default();
+                resolved.name = "carbon".to_string();
+                resolved
+            }
         }
     }
 }
@@ -192,6 +200,7 @@ impl ThemeConfig {
             ),
             on_primary: parse_color(self.on_primary.as_deref().unwrap_or(&self.bg_main), f),
             on_surface: parse_color(self.on_surface.as_deref().unwrap_or(&self.text_main), f),
+            name: String::new(),
         }
     }
 }
@@ -441,6 +450,8 @@ pub struct Theme {
     pub on_primary: Color,
     /// Foreground that reads on surface colours.
     pub on_surface: Color,
+    /// Name of the theme, for pages that display it.
+    pub name: String,
 }
 
 impl Default for Theme {

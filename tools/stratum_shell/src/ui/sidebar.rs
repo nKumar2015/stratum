@@ -1,17 +1,21 @@
 //! The sidebar: widgets from the configuration, laid out on a rail.
+//!
+//! This module owns placement only. Each widget lives in [`super::widgets`] and
+//! knows how to measure, paint, and hit-test itself, so the same widget can be
+//! used in a rail, a bar, or inside a container.
 
 use std::sync::Arc;
 
 use crate::config::{Axis, Config, SidebarPosition, WidgetConfig, WidgetKind};
-use crate::render::display_list::{Color, DisplayList, Rect, TextRun};
-use crate::sys_state::SystemState;
-use crate::ui::control_center::Page;
-use crate::ui::{self, Action, InputState, PaintCtx, Widget};
+use crate::render::display_list::{Color, DisplayList, Point, Rect};
+use crate::ui::widgets::{
+    AppTitle, Battery, Clock, Icon, IconKind, Launcher, QuickPanel, Spacer, Tray, Workspaces,
+};
+use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 /// The sidebar surface for one output.
 pub struct Sidebar {
     pub config: Arc<Config>,
-    pub width: f32,
     pub padding: f32,
     pub spacing: f32,
     pub position: SidebarPosition,
@@ -28,11 +32,10 @@ impl Sidebar {
         let widgets = sidebar
             .widgets
             .iter()
-            .map(|entry| build_widget(entry, Arc::clone(&config)))
+            .map(|entry| build_widget(entry))
             .collect();
 
         Self {
-            width: sidebar.width as f32,
             padding: sidebar.padding as f32,
             spacing: sidebar.spacing as f32,
             position: sidebar.position,
@@ -82,14 +85,34 @@ impl Sidebar {
     }
 
     /// Route a click to a widget, using the same geometry as the last paint.
+    ///
+    /// The output name is passed through because a shared widget tree is painted
+    /// on every monitor: a workspace click belongs to the monitor it landed on.
     pub fn on_click(
         &mut self,
-        point: crate::render::display_list::Point,
+        point: Point,
+        output_name: &str,
         input: &InputState,
-    ) -> Option<crate::ui::Action> {
-        self.widgets
-            .iter_mut()
-            .find_map(|widget| widget.on_click(point, input))
+    ) -> Option<Action> {
+        let ctx = ClickCtx {
+            point,
+            output_name,
+            input,
+        };
+        self.widgets.iter_mut().find_map(|widget| widget.on_click(&ctx))
+    }
+
+    /// Advance widget animations. Returns true while anything is moving.
+    pub fn tick(&mut self, dt: f32) -> bool {
+        ui::tick_all(&mut self.widgets, dt)
+    }
+
+    /// Whether any widget is currently animating.
+    ///
+    /// Used by the event loop to decide the frame cadence without paying for a
+    /// `tick` first.
+    pub fn animating(&self) -> bool {
+        self.widgets.iter().any(|widget| widget.animating())
     }
 
     /// Classic vertical rail: widgets stacked, flexible ones absorb the slack.
@@ -140,9 +163,6 @@ impl Sidebar {
     }
 
     /// Horizontal bar: widgets in a row, each as wide as it needs.
-    ///
-    /// The bar stretches across the whole edge, so flexible widgets (which
-    /// return no width) split the leftover horizontal space.
     fn paint_horizontal(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -187,775 +207,25 @@ impl Sidebar {
     }
 }
 
-fn build_widget(entry: &WidgetConfig, config: Arc<Config>) -> Box<dyn Widget> {
+/// Build one configured widget tree.
+fn build_widget(entry: &WidgetConfig) -> Box<dyn Widget> {
     match entry.kind {
-        WidgetKind::Launcher => Box::new(LauncherWidget),
-        WidgetKind::Workspaces => Box::new(WorkspacesWidget { cells: Vec::new() }),
-        WidgetKind::AppTitle => Box::new(AppTitleWidget {
-            fallback: "Desktop".to_string(),
-        }),
-        WidgetKind::Tray => Box::new(TrayWidget { cells: Vec::new() }),
-        WidgetKind::QuickPanel => Box::new(QuickPanelWidget {
-            framed: entry.framed,
-            height: entry.height.unwrap_or(86) as f32,
-            children: entry
-                .children
-                .iter()
-                .map(|child| build_widget(child, Arc::clone(&config)))
-                .collect(),
-        }),
-        WidgetKind::Audio => Box::new(IconWidget {
-            glyph: "\u{f0581}".to_string(),
-            kind: IconKind::Audio,
-            size: 20.0,
-            last_rect: Rect::EMPTY,
-        }),
-        WidgetKind::Bluetooth => Box::new(IconWidget {
-            glyph: "\u{f00b1}".to_string(),
-            kind: IconKind::Bluetooth,
-            size: 20.0,
-            last_rect: Rect::EMPTY,
-        }),
-        WidgetKind::Wifi => Box::new(IconWidget {
-            glyph: "\u{f05a9}".to_string(),
-            kind: IconKind::Wifi,
-            size: 20.0,
-            last_rect: Rect::EMPTY,
-        }),
-        WidgetKind::Battery => Box::new(BatteryWidget { last_rect: Rect::EMPTY }),
-        WidgetKind::Clock => Box::new(ClockWidget),
-        WidgetKind::Spacer => Box::new(SpacerWidget {
-            height: entry.height.unwrap_or(12) as f32,
+        WidgetKind::Launcher => Box::new(Launcher),
+        WidgetKind::Workspaces => Box::new(Workspaces::new()),
+        WidgetKind::AppTitle => Box::new(AppTitle::new()),
+        WidgetKind::Tray => Box::new(Tray::new()),
+        WidgetKind::QuickPanel => Box::new(QuickPanel::new(
+            entry.framed,
+            entry.height.unwrap_or(86) as f32,
+            entry.children.iter().map(build_widget).collect(),
+        )),
+        WidgetKind::Audio => Box::new(Icon::new(IconKind::Audio)),
+        WidgetKind::Bluetooth => Box::new(Icon::new(IconKind::Bluetooth)),
+        WidgetKind::Wifi => Box::new(Icon::new(IconKind::Wifi)),
+        WidgetKind::Battery => Box::new(Battery::new()),
+        WidgetKind::Clock => Box::new(Clock::new()),
+        WidgetKind::Spacer => Box::new(Spacer {
+            size: entry.height.unwrap_or(12) as f32,
         }),
     }
 }
-
-// ---------------------------------------------------------------------------
-
-struct LauncherWidget;
-
-impl Widget for LauncherWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(24.0)
-    }
-
-    fn width(&self, height: f32) -> Option<f32> {
-        Some(height.max(24.0))
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        ui::paint_text_centered(ctx, list, "\u{f313}", rect, 20.0, ctx.theme.primary);
-    }
-}
-
-struct WorkspacesWidget {
-    /// Cells from the last paint, paired with workspace ids, for hit-testing.
-    cells: Vec<(Rect, i32)>,
-}
-
-impl Widget for WorkspacesWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        // Five visible rows, matching the QML shell's scrolling window.
-        Some(5.0 * 20.0 + 4.0 * 3.0)
-    }
-
-    fn width(&self, height: f32) -> Option<f32> {
-        // Five cells side by side in a horizontal bar.
-        Some(5.0 * (height.min(24.0) + 6.0))
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        let hypr = ctx.state.hypr.get();
-        let active = hypr.active.get(ctx.output_name).copied().unwrap_or(-1);
-
-        // A workspace "page" is ten ids; show a five-row window that scrolls to
-        // keep the active workspace visible, biased two rows above centre —
-        // the same window the QML shell used.
-        const PAGE: i32 = 10;
-        const VISIBLE: usize = 5;
-        let (page_ids, active_index) = if active > 0 {
-            let start = ((active - 1) / PAGE) * PAGE + 1;
-            let ids: Vec<i32> = (0..PAGE).map(|offset| start + offset).collect();
-            let index = ids.iter().position(|id| *id == active).unwrap_or(0);
-            (ids, index)
-        } else {
-            ((1..=PAGE).collect(), 0)
-        };
-
-        let start_index = active_index
-            .saturating_sub(2)
-            .min(page_ids.len().saturating_sub(VISIBLE));
-        let ids: Vec<i32> = page_ids
-            .iter()
-            .skip(start_index)
-            .take(VISIBLE)
-            .copied()
-            .collect();
-        let active_index = active_index.saturating_sub(start_index);
-
-        self.cells.clear();
-        let vertical = ctx.is_vertical();
-        let step = if vertical { 23.0 } else { rect.height.min(24.0) + 6.0 };
-        let cell = if vertical {
-            Rect { height: 20.0, ..rect }
-        } else {
-            Rect {
-                width: step,
-                ..rect
-            }
-        };
-
-        for (index, id) in ids.iter().enumerate() {
-            let row = if vertical {
-                Rect { y: rect.y + index as f32 * step, ..cell }
-            } else {
-                Rect { x: rect.x + index as f32 * step, ..cell }
-            };
-            let is_active = index == active_index;
-            let occupied = hypr.occupied.contains(id);
-            let color = if is_active {
-                ctx.theme.primary
-            } else if occupied {
-                ctx.theme.secondary
-            } else {
-                ctx.theme.text_muted
-            };
-            ui::paint_text_centered(ctx, list, &id.to_string(), row, 15.0, color);
-            self.cells.push((row, *id));
-        }
-    }
-
-    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
-        // Switch workspaces directly; it is a cheap socket write, so it does not
-        // need the action queue.
-        if let Some((_, id)) = self.cells.iter().find(|(rect, _)| rect.contains(point)) {
-            let _ = crate::hyprland::focus_workspace(*id);
-        }
-        None
-    }
-}
-
-struct AppTitleWidget {
-    /// Fallback shown when no window is focused.
-    fallback: String,
-}
-
-impl Widget for AppTitleWidget {
-    /// Flexible: consumes the leftover vertical space so the widgets after it
-    /// sit at the bottom of the rail, as `Layout.fillHeight` did in QML.
-    fn height(&self, _width: f32) -> Option<f32> {
-        None
-    }
-
-    /// In a horizontal bar the title is ordinary inline text, and it is the
-    /// widget that absorbs slack, so it reports no intrinsic width.
-    fn width(&self, _height: f32) -> Option<f32> {
-        None
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        let live_title = ctx
-            .state
-            .hypr
-            .get()
-            .title
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| self.fallback.clone());
-
-        if !ctx.is_vertical() {
-            // Horizontal bar: a single line, left-aligned after a small inset.
-            let style = crate::text::TextStyle {
-                family: Arc::from(ctx.theme.font.as_str()),
-                size: 13.0,
-                weight: 500,
-                color: ctx.theme.text_main,
-            };
-            let insets = 6.0;
-            let available = rect.width - insets * 2.0;
-            if available <= 0.0 {
-                return;
-            }
-            let text = self.elide_text(&live_title, &style, ctx, available);
-            if text.is_empty() {
-                return;
-            }
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &text,
-                rect.x + insets,
-                rect,
-                style.size,
-                style.weight,
-                style.color,
-            );
-            return;
-        }
-
-        // Vertical label, matching the QML app-title. The run advances upward;
-        // `line_height` is its cross-axis extent, which must fit the rail.
-        let mut size = 14.0_f32;
-        let max_thickness = (rect.width - 12.0).max(6.0);
-
-        // Shrink until the rotated line height fits the rail.
-        while size > 7.0 && size * 1.25 > max_thickness {
-            size -= 0.5;
-        }
-
-        let style = crate::text::TextStyle {
-            family: Arc::from(ctx.theme.font.as_str()),
-            size,
-            weight: 600,
-            color: ctx.theme.text_main,
-        };
-
-        // Prefer the focused window's title, like the QML app-title.
-        let live = ctx
-            .state
-            .hypr
-            .get()
-            .title
-            .filter(|t| !t.trim().is_empty())
-            .unwrap_or_else(|| self.fallback.clone());
-        let full_title = live;
-
-        // Truncate to whatever height the widget actually has.
-        let available = rect.height - 16.0;
-        let title = self.elide_text(&full_title, &style, ctx, available);
-        if title.is_empty() {
-            return;
-        }
-
-        let mut run = ctx.text.shape(&title, &style, 0.0, 0.0);
-        let line_height = size * 1.2;
-
-        // The run is centred in the widget, like QML's `anchors.centerIn` on the
-        // rotated item. Rotated -90 degrees the run advances upward from its
-        // baseline, so its vertical span is [baseline - length, baseline];
-        // centring means baseline = centre + length/2.
-        let length = ctx.text.measure(&title, &style).0;
-        let baseline_y = rect.y + rect.height * 0.5 + length * 0.5;
-
-        // Cross-axis: the line box spans +x from the baseline, so bias the
-        // baseline by half the line height to centre it.
-        run.transform = ui::vertical_text_transform(
-            rect.x + (rect.width - line_height) * 0.5 + line_height,
-            baseline_y,
-        );
-        list.push_text(run);
-    }
-}
-
-impl AppTitleWidget {
-    /// Shorten the title with an ellipsis until it fits `available` pixels of
-    /// run length, mirroring QML's `elide: Text.ElideRight`.
-    fn elide_text(
-        &self,
-        text: &str,
-        style: &crate::text::TextStyle,
-        ctx: &mut PaintCtx<'_>,
-        available: f32,
-    ) -> String {
-        if available <= 0.0 {
-            return String::new();
-        }
-        let full = ctx.text.measure(text, style).0;
-        if full <= available {
-            return text.to_string();
-        }
-        let ellipsis = "\u{2026}";
-        let mut chars: Vec<char> = text.chars().collect();
-        while !chars.is_empty() {
-            chars.pop();
-            let candidate: String = chars.iter().collect::<String>() + ellipsis;
-            if ctx.text.measure(&candidate, style).0 <= available {
-                return candidate;
-            }
-        }
-        String::new()
-    }
-}
-
-struct QuickPanelWidget {
-    framed: bool,
-    height: f32,
-    children: Vec<Box<dyn Widget>>,
-}
-
-impl Widget for QuickPanelWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(self.height)
-    }
-
-    /// In a horizontal bar the panel sizes to its children side by side.
-    fn width(&self, height: f32) -> Option<f32> {
-        let slot = height - 8.0;
-        let count = self.children.len().max(1) as f32;
-        Some(slot * count + 6.0 * (count - 1.0) + 8.0)
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        input: &InputState,
-    ) {
-        if !ctx.is_vertical() {
-            self.paint_horizontal(ctx, list, rect, input);
-            return;
-        }
-        const PANEL_WIDTH: f32 = 30.0;
-        const INNER_MARGIN: f32 = 6.0;
-        const CHILD_SPACING: f32 = 4.0;
-
-        // The panel is narrower than the rail and centred in it, matching the
-        // QML layout (`quickPanelWidth: 30` inside a 40px rail).
-        let width = PANEL_WIDTH.min(rect.width);
-        let panel = Rect {
-            x: rect.x + (rect.width - width) * 0.5,
-            y: rect.y,
-            width,
-            height: rect.height,
-            radius: ctx.appearance.corner_radius,
-            color: ctx.theme.bg_widget,
-        };
-        if self.framed {
-            ui::paint_frame(
-                list,
-                panel,
-                ctx.theme.bg_widget,
-                ctx.theme.border_active,
-                ctx.appearance.framed_border,
-            );
-        }
-
-        let count = self.children.len();
-        if count == 0 {
-            return;
-        }
-
-        // Vertical stack inside the frame with fixed spacing, like the QML
-        // ColumnLayout with `quickPanelSpacing`.
-        let inner_height = (panel.height - INNER_MARGIN * 2.0).max(0.0);
-        let gaps = CHILD_SPACING * (count.saturating_sub(1)) as f32;
-        let slot = ((inner_height - gaps) / count as f32).max(0.0);
-
-        let mut y = panel.y + INNER_MARGIN;
-        for child in self.children.iter_mut() {
-            let slot_rect = Rect {
-                x: panel.x,
-                y,
-                width: panel.width,
-                height: slot,
-                radius: 0.0,
-                color: Color::TRANSPARENT,
-            };
-            child.paint(ctx, list, slot_rect, input);
-            y += slot + CHILD_SPACING;
-        }
-    }
-
-    fn on_click(&mut self, point: crate::render::display_list::Point, input: &InputState) -> Option<Action> {
-        self.children
-            .iter_mut()
-            .find_map(|child| child.on_click(point, input))
-    }
-}
-
-impl QuickPanelWidget {
-    fn click_children(
-        &mut self,
-        point: crate::render::display_list::Point,
-        input: &InputState,
-    ) -> Option<Action> {
-        self.children
-            .iter_mut()
-            .find_map(|child| child.on_click(point, input))
-    }
-
-    /// Row layout for a horizontal bar: children side by side inside the frame.
-    fn paint_horizontal(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        input: &InputState,
-    ) {
-        const INNER_MARGIN: f32 = 4.0;
-        const CHILD_SPACING: f32 = 6.0;
-
-        if self.framed {
-            ui::paint_frame(
-                list,
-                rect,
-                ctx.theme.bg_widget,
-                ctx.theme.border_active,
-                ctx.appearance.framed_border,
-            );
-        }
-
-        let count = self.children.len();
-        if count == 0 {
-            return;
-        }
-        let inner_width = (rect.width - INNER_MARGIN * 2.0).max(0.0);
-        let gaps = CHILD_SPACING * (count.saturating_sub(1)) as f32;
-        let slot = ((inner_width - gaps) / count as f32).max(0.0);
-
-        let mut x = rect.x + INNER_MARGIN;
-        for child in self.children.iter_mut() {
-            let slot_rect = Rect {
-                x,
-                y: rect.y,
-                width: slot,
-                height: rect.height,
-                radius: 0.0,
-                color: Color::TRANSPARENT,
-            };
-            child.paint(ctx, list, slot_rect, input);
-            x += slot + CHILD_SPACING;
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum IconKind {
-    Audio,
-    Bluetooth,
-    Wifi,
-}
-
-struct IconWidget {
-    glyph: String,
-    kind: IconKind,
-    size: f32,
-    /// Rect from the last paint, used for click hit-testing.
-    last_rect: Rect,
-}
-
-impl Widget for IconWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(self.size + 4.0)
-    }
-
-    fn width(&self, height: f32) -> Option<f32> {
-        Some(height.max(self.size + 4.0))
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        self.last_rect = rect;
-        // Enabled state mirrors the real subsystem state; disabled icons use
-        // the muted colour, matching the QML sidebar.
-        let (enabled, color) = match self.kind {
-            IconKind::Bluetooth => {
-                let bt = ctx.state.bluetooth.get();
-                let on = bt["state"].as_str() != Some("off");
-                (on, if on { ctx.theme.primary } else { ctx.theme.text_muted })
-            }
-            IconKind::Wifi => {
-                let net = ctx.state.net.get();
-                let on = net["enabled"].as_bool().unwrap_or(true);
-                (on, if on { ctx.theme.primary } else { ctx.theme.text_muted })
-            }
-            IconKind::Audio => {
-                let audio = ctx.state.audio.get();
-                let muted = audio["mute"].as_str() == Some("yes");
-                (!muted, if muted { ctx.theme.error } else { ctx.theme.primary })
-            }
-        };
-        let _ = enabled;
-        ui::paint_text_centered(ctx, list, &self.glyph, rect, self.size, color);
-    }
-
-    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
-        // Icons are only meaningful when the pointer is over them; the bar
-        // routes every click, so hit-test against the last painted slot.
-        if !self.last_rect.contains(point) {
-            return None;
-        }
-        Some(Action::OpenPanel(match self.kind {
-            IconKind::Audio => Page::Audio,
-            IconKind::Bluetooth => Page::Bluetooth,
-            IconKind::Wifi => Page::Wifi,
-        }))
-    }
-}
-
-struct BatteryWidget {
-    last_rect: Rect,
-}
-
-impl Widget for BatteryWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(24.0)
-    }
-
-    fn width(&self, height: f32) -> Option<f32> {
-        Some(height.max(24.0))
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        self.last_rect = rect;
-        // Live percentage and charging state from stratum_sys.
-        let battery = ctx.state.battery.get();
-        let percent = battery["battery"]["pct"]
-            .as_u64()
-            .or_else(|| battery["battery"]["percentage"].as_f64().map(|p| p as u64))
-            .unwrap_or(0)
-            .min(100) as u8;
-        let state_text = battery["battery"]["state"].as_str().unwrap_or("");
-        let charging = matches!(state_text, "charging" | "pending-charge" | "fully-charged");
-
-        // Codepoints from the QML battery widget's level buckets.
-        let glyph = if charging {
-            "\u{f0084}"
-        } else {
-            match percent {
-                90..=100 => "\u{f0079}",
-                80..=89 => "\u{f007a}",
-                70..=79 => "\u{f007b}",
-                60..=69 => "\u{f007c}",
-                50..=59 => "\u{f007d}",
-                40..=49 => "\u{f007e}",
-                30..=39 => "\u{f007f}",
-                20..=29 => "\u{f0080}",
-                10..=19 => "\u{f0081}",
-                _ => "\u{f0082}",
-            }
-        };
-        let color = if percent <= 20 {
-            ctx.theme.error
-        } else {
-            ctx.theme.success
-        };
-        ui::paint_text_centered(ctx, list, glyph, rect, 24.0, color);
-    }
-
-    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
-        self.last_rect
-            .contains(point)
-            .then_some(Action::OpenPanel(Page::Battery))
-    }
-}
-
-struct ClockWidget;
-
-impl Widget for ClockWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(64.0)
-    }
-
-    /// In a bar the clock is one line; width is measured at paint time, so use
-    /// a stable estimate.
-    fn width(&self, _height: f32) -> Option<f32> {
-        Some(84.0)
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        if !ctx.is_vertical() {
-            // Single line: "04:20 PM".
-            let now = chrono::Local::now();
-            let text = now.format("%I:%M %p").to_string();
-            let style = crate::text::TextStyle {
-                family: Arc::from(ctx.theme.font.as_str()),
-                size: 13.0,
-                weight: 500,
-                color: ctx.theme.primary,
-            };
-            let width = ctx.text.measure(&text, &style).0;
-            let x = rect.x + (rect.width - width) * 0.5;
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &text,
-                x,
-                rect,
-                style.size,
-                style.weight,
-                style.color,
-            );
-            return;
-        }
-
-        // Three stacked lines: hour, minute, meridiem — matching the QML clock.
-        let now = chrono::Local::now();
-        let hour = now.format("%I").to_string();
-        let minute = now.format("%M").to_string();
-        let meridiem = now.format("%p").to_string();
-
-        let line = rect.height / 3.0;
-        let lines: [(String, Color); 3] = [
-            (hour, ctx.theme.primary),
-            (minute, ctx.theme.secondary),
-            (meridiem, ctx.theme.tertiary),
-        ];
-        for (index, (value, color)) in lines.into_iter().enumerate() {
-            let row = Rect {
-                x: rect.x,
-                y: rect.y + line * index as f32,
-                width: rect.width,
-                height: line,
-                radius: 0.0,
-                color: Color::TRANSPARENT,
-            };
-            ui::paint_text_centered(ctx, list, &value, row, 18.0, color);
-        }
-    }
-}
-
-/// Tray icons from the StatusNotifier watcher.
-struct TrayWidget {
-    cells: Vec<(Rect, String)>,
-}
-
-impl Widget for TrayWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        // One icon per row in a rail.
-        Some(26.0)
-    }
-
-    fn width(&self, height: f32) -> Option<f32> {
-        Some((height.max(24.0)) * 1.4)
-    }
-
-    fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        rect: Rect,
-        _input: &InputState,
-    ) {
-        let items = ctx.state.tray.get();
-        self.cells.clear();
-
-        if items.is_empty() {
-            // Nothing registered: keep a small gap so the layout is stable.
-            return;
-        }
-
-        if ctx.is_vertical() {
-            let mut y = rect.y;
-            for item in items.iter().take(6) {
-                let cell = Rect {
-                    y,
-                    height: 24.0,
-                    ..rect
-                };
-                self.paint_item(ctx, list, cell, item);
-                self.cells.push((cell, item.id.clone()));
-                y += 26.0;
-            }
-        } else {
-            let mut x = rect.x;
-            for item in items.iter().take(8) {
-                let cell = Rect {
-                    x,
-                    width: 24.0,
-                    ..rect
-                };
-                self.paint_item(ctx, list, cell, item);
-                self.cells.push((cell, item.id.clone()));
-                x += 28.0;
-            }
-        }
-    }
-
-    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
-        // Activation is handled by the shell, which owns the D-Bus connection.
-        if let Some((_, id)) = self.cells.iter().find(|(rect, _)| rect.contains(point)) {
-            return Some(Action::ActivateTray(id.clone()));
-        }
-        None
-    }
-}
-
-impl TrayWidget {
-    fn paint_item(
-        &self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        cell: Rect,
-        item: &crate::tray::TrayItem,
-    ) {
-        // Without an icon decoder in this path, show the item's first letter as
-        // a stable placeholder; real pixmaps are decoded by the tray module and
-        // will be uploaded once the icon pipeline is wired to them.
-        let label = item
-            .title
-            .chars()
-            .next()
-            .or_else(|| item.id.chars().next())
-            .unwrap_or('?')
-            .to_string();
-        let color = match item.status.as_str() {
-            "NeedsAttention" => ctx.theme.warning,
-            "Passive" => ctx.theme.text_muted,
-            _ => ctx.theme.text_main,
-        };
-        ui::paint_text_centered(ctx, list, &label, cell, 13.0, color);
-    }
-}
-
-struct SpacerWidget {
-    height: f32,
-}
-
-impl Widget for SpacerWidget {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(self.height)
-    }
-
-    fn width(&self, _height: f32) -> Option<f32> {
-        Some(self.height)
-    }
-
-    fn paint(
-        &mut self,
-        _ctx: &mut PaintCtx<'_>,
-        _list: &mut DisplayList,
-        _rect: Rect,
-        _input: &InputState,
-    ) {
-    }
-}
-
-/// Keep the unused-import lint quiet while `TextRun` is only used indirectly.
-#[allow(dead_code)]
-fn _keep(_: &TextRun) {}

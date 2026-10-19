@@ -6,12 +6,14 @@
 //! rebuilds a `DisplayList` from state only when something changes.
 
 use crate::render::display_list::{
-    Color, DisplayList, Paint, Path, PathCommand, Point, Rect, TextRun, Transform,
+    Color, DisplayList, Paint, Path, PathCommand, Point, Rect, Transform,
 };
 pub mod animation;
 pub mod control_center;
 pub mod controls;
+pub mod pages;
 pub mod sidebar;
+pub mod widgets;
 
 use crate::text::{TextEngine, TextStyle};
 
@@ -20,12 +22,18 @@ pub struct PaintCtx<'a> {
     pub theme: &'a crate::config::Theme,
     pub appearance: &'a crate::config::AppearanceConfig,
     pub text: &'a mut TextEngine,
+    /// Decoded icons, for widgets that display themed artwork.
+    pub icons: &'a mut crate::icons::IconTheme,
     /// Live system state, read by widgets that display real data.
     pub state: &'a crate::sys_state::SystemState,
+    /// Theme definitions, for the theme picker.
+    pub themes: &'a std::collections::BTreeMap<String, crate::config::ThemeConfig>,
     /// Which output's bar is being painted (for per-monitor workspace focus).
     pub output_name: &'a str,
     /// Orientation of the bar being painted.
     pub axis: crate::config::Axis,
+    /// Seconds since the previous paint, for widgets that animate themselves.
+    pub dt: f32,
 }
 
 impl PaintCtx<'_> {
@@ -99,6 +107,21 @@ pub enum Action {
     ClosePanel,
     /// Activate a tray item by id.
     ActivateTray(String),
+    /// Focus a workspace. The shell applies it to the output whose surface was
+    /// clicked and updates its local state immediately, so the bar reflects the
+    /// change before the compositor's event arrives.
+    FocusWorkspace(i32),
+}
+
+/// Everything a widget needs to interpret a click.
+///
+/// The output name matters because the shell owns one widget tree but paints it
+/// on every monitor: a click on the left monitor's workspaces must move that
+/// monitor, not whichever output happens to be focused.
+pub struct ClickCtx<'a> {
+    pub point: Point,
+    pub output_name: &'a str,
+    pub input: &'a InputState,
 }
 
 /// A bar widget.
@@ -121,9 +144,32 @@ pub trait Widget {
     fn paint(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, input: &InputState);
 
     /// Handle a click at `point`, optionally returning an action for the shell.
-    fn on_click(&mut self, _point: Point, _input: &InputState) -> Option<Action> {
+    fn on_click(&mut self, _ctx: &ClickCtx<'_>) -> Option<Action> {
         None
     }
+
+    /// Advance animations by `dt` seconds. Returns true while still moving, so
+    /// the shell knows to request another frame.
+    fn tick(&mut self, _dt: f32) -> bool {
+        false
+    }
+
+    /// Whether an animation is currently in flight, without advancing it.
+    ///
+    /// The event loop needs this to choose a frame cadence before it knows how
+    /// much time has passed.
+    fn animating(&self) -> bool {
+        false
+    }
+}
+
+/// Advance every widget's animation. Returns true while anything is moving.
+pub fn tick_all(widgets: &mut [Box<dyn Widget>], dt: f32) -> bool {
+    let mut animating = false;
+    for widget in widgets {
+        animating |= widget.tick(dt);
+    }
+    animating
 }
 
 /// A vertical stack with fixed spacing, used by the sidebar.
@@ -182,10 +228,25 @@ impl Column {
     }
 
     /// Route a click to the first child that returns an action.
-    pub fn on_click(&mut self, point: Point, input: &InputState) -> Option<Action> {
+    pub fn on_click(
+        &mut self,
+        point: Point,
+        output_name: &str,
+        input: &InputState,
+    ) -> Option<Action> {
+        let ctx = ClickCtx {
+            point,
+            output_name,
+            input,
+        };
         self.widgets
             .iter_mut()
-            .find_map(|widget| widget.on_click(point, input))
+            .find_map(|widget| widget.on_click(&ctx))
+    }
+
+    /// Advance child animations.
+    pub fn tick(&mut self, dt: f32) -> bool {
+        tick_all(&mut self.widgets, dt)
     }
 }
 

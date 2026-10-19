@@ -18,7 +18,7 @@ use zbus::zvariant::OwnedValue;
 use zbus::Connection;
 
 /// One live notification.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,

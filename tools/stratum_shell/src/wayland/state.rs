@@ -31,6 +31,7 @@ use wayland_client::{Connection, QueueHandle};
 use super::surfaces::SurfaceEntry;
 use super::display_ptr;
 use crate::config::{Config, SidebarPosition};
+use crate::render::display_list::Color;
 use crate::render::Gpu;
 use crate::sys_state::SystemState;
 use crate::text::TextEngine;
@@ -51,6 +52,7 @@ pub struct App {
     display: NonNull<std::ffi::c_void>,
     surfaces: Vec<SurfaceEntry>,
     text: TextEngine,
+    icons: crate::icons::IconTheme,
     config: Arc<Config>,
     state: Arc<SystemState>,
     sidebar: Sidebar,
@@ -81,6 +83,10 @@ pub struct App {
     config_path: Option<std::path::PathBuf>,
     config_mtime: Option<std::time::SystemTime>,
     last_reload_check: std::time::Instant,
+    /// Poke used by worker threads to wake the event loop out of its poll.
+    /// Held so the ping source's channel stays open for the shell's lifetime.
+    #[allow(dead_code)]
+    wake: Option<calloop::ping::Ping>,
 
     #[allow(dead_code)]
     pub should_exit: bool,
@@ -140,6 +146,7 @@ impl App {
             display,
             surfaces: Vec::new(),
             text: TextEngine::new(),
+            icons: crate::icons::IconTheme::load(&["Papirus", "Adwaita", "breeze"]),
             config,
             state,
             sidebar,
@@ -163,8 +170,34 @@ impl App {
             config_path: path,
             config_mtime,
             last_reload_check: std::time::Instant::now(),
+            wake: None,
             should_exit: false,
         };
+
+        // Worker threads (actions, pollers, D-Bus) have no way to signal the
+        // event loop. Install a ping source so a state change wakes the loop
+        // immediately instead of waiting for the poll timeout — this is what
+        // makes a click feel instant rather than up to a second late.
+        let (ping, ping_source) = calloop::ping::make_ping()
+            .map_err(|err| format!("failed to create wake pipe: {err}"))?;
+        event_loop
+            .handle()
+            .insert_source(ping_source, move |(), _, app: &mut App| {
+                for entry in &mut app.surfaces {
+                    entry.dirty = true;
+                }
+                if app.control_center.visible() {
+                    if let Some(settings) = &mut app.settings {
+                        settings.dirty = true;
+                    }
+                }
+            })
+            .map_err(|err| format!("failed to insert wake source: {err}"))?;
+        // The waker is shared: every publisher and the action worker notify
+        // through it. Keep one clone on the App so it stays alive.
+        let wake_for_state = ping.clone();
+        app.state.set_waker(Arc::new(move || wake_for_state.ping()));
+        app.wake = Some(ping);
 
         app.create_surfaces(&qh);
         app.start_monitors();
@@ -182,6 +215,25 @@ impl App {
             .map_err(|err| format!("failed to insert Wayland source: {err}"))?;
 
         Ok((app, event_loop, conn))
+    }
+
+    /// How long the event loop may block before the next frame.
+    ///
+    /// Animations need a steady cadence; an idle shell should sleep as long as
+    /// possible. Asking for a new frame every 16 ms all the time would show up
+    /// immediately in idle CPU, so the timeout follows what is actually moving.
+    pub fn frame_timeout(&self) -> std::time::Duration {
+        // A redraw already queued means we want to paint right away.
+        if self.sidebar.animating()
+            || self.osd.visible()
+            || self.toasts.animating()
+            || self.control_center.animating()
+        {
+            return std::time::Duration::from_millis(16);
+        }
+        // The clock changes once a minute; a one-second wakeup is enough to
+        // catch it without spinning.
+        std::time::Duration::from_secs(1)
     }
 
     /// Redraw every dirty surface. Called after each loop iteration.
@@ -203,6 +255,17 @@ impl App {
             .as_secs_f32()
             .min(0.1);
         self.last_frame = now;
+
+        // Widget animations (the workspace strip's scroll, the clock's minute
+        // hand) run on the frame clock. While anything is moving every surface
+        // stays dirty, so the next loop iteration paints again.
+        let animating = self.sidebar.tick(dt);
+        if animating {
+            for entry in &mut self.surfaces {
+                entry.dirty = true;
+            }
+        }
+
         self.osd.observe_audio(&self.state);
         self.osd.observe_brightness(self.state.brightness.get());
 
@@ -242,10 +305,30 @@ impl App {
         if self.control_center.open {
             self.ensure_settings_window();
         }
+        // The open/close animation needs frames of its own, independent of
+        // state changes.
+        let cc_animating = self.control_center.tick(dt);
+        if cc_animating {
+            if let Some(settings) = &mut self.settings {
+                settings.dirty = true;
+            }
+        }
+
+        // Once the close animation has finished, destroy the toplevel. Dropping
+        // the window unmaps it; leaving it alive would keep the last frame on
+        // screen forever, since nothing repaints a hidden surface.
+        if !self.control_center.visible() {
+            if let Some(window) = self.settings.take() {
+                debug!("closing settings window");
+                drop(window);
+            }
+        }
+
         if self.control_center.visible() {
             let theme = self.config.active_theme();
             if let Some(mut window) = self.settings.take() {
                 if window.configured {
+                    // The window can be on any output; show the one it is on.
                     let output_name = self
                         .surfaces
                         .first()
@@ -263,9 +346,12 @@ impl App {
                         theme: &theme,
                         appearance: &self.config.appearance,
                         text: &mut self.text,
+                        icons: &mut self.icons,
                         state: &self.state,
+                        themes: &self.config.themes,
                         output_name: &output_name,
                         axis: self.config.sidebar.axis(),
+                        dt,
                     };
                     if let Err(err) = window.render(
                         &self.gpu,
@@ -328,6 +414,60 @@ impl App {
         }
 
         let theme = self.config.active_theme();
+
+        // OSD overlay. It shares the sidebar's paint context but draws its own
+        // display list, since it has nothing to do with the rail layout.
+        for entry in &mut self.osd_surfaces {
+            if !entry.dirty || !entry.configured {
+                continue;
+            }
+            let output_name = entry.output_name.clone();
+            let mut ctx = crate::ui::PaintCtx {
+                theme: &theme,
+                appearance: &self.config.appearance,
+                text: &mut self.text,
+                icons: &mut self.icons,
+                state: &self.state,
+                themes: &self.config.themes,
+                output_name: &output_name,
+                axis: self.config.sidebar.axis(),
+                dt,
+            };
+            let rect = entry.logical_rect();
+            let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+            self.osd.paint(&mut ctx, &mut list, rect);
+            entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+            entry.dirty = false;
+        }
+
+        // Toast stack. Hits are collected so a click on a card can dismiss it.
+        self.toast_hits.clear();
+        for entry in &mut self.toast_surfaces {
+            if !entry.dirty || !entry.configured {
+                continue;
+            }
+            let output_name = entry.output_name.clone();
+            let mut ctx = crate::ui::PaintCtx {
+                theme: &theme,
+                appearance: &self.config.appearance,
+                text: &mut self.text,
+                icons: &mut self.icons,
+                state: &self.state,
+                themes: &self.config.themes,
+                output_name: &output_name,
+                axis: self.config.sidebar.axis(),
+                dt,
+            };
+            let rect = entry.logical_rect();
+            let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+            let hits = self.toasts.paint(&mut ctx, &mut list, rect);
+            // Only the surface the pointer is over can receive a click, so
+            // merging the stacks is safe: at most one output is interactive.
+            self.toast_hits.extend(hits);
+            entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+            entry.dirty = false;
+        }
+
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
                 continue;
@@ -347,9 +487,12 @@ impl App {
                 theme: &theme,
                 appearance: &self.config.appearance,
                 text: &mut self.text,
+                icons: &mut self.icons,
                 state: &self.state,
+                themes: &self.config.themes,
                 output_name: &output_name,
                 axis: self.config.sidebar.axis(),
+                dt,
             };
             entry.render_with(
                 &self.gpu,
@@ -372,7 +515,7 @@ impl App {
         use stratum_sys::managers;
 
         let publisher = SystemState::publisher(&self.state);
-        self.actions.start_worker();
+        self.actions.start_worker(Arc::clone(&self.state));
 
         // The managers' async entry points expect a Tokio runtime. The shell's
         // UI thread runs calloop, so give them a small dedicated runtime.
@@ -399,18 +542,27 @@ impl App {
             })
             .ok();
 
+        // Safety-net poller. User-initiated changes refresh their own domain
+        // synchronously (see `actions`), so this only has to catch changes made
+        // outside the shell. A slow cadence is fine and keeps idle CPU low.
         let state = Arc::clone(&self.state);
+        let poll_ms = self.config.behavior.poll_ms.max(250);
         std::thread::Builder::new()
             .name("stratum-poll".into())
-            .spawn(move || {
-                let poll = std::time::Duration::from_secs(3);
-                loop {
-                    state.net.set(managers::net::status());
-                    state.wifi.set(managers::wifi::state());
-                    state.bluetooth.set(managers::bluetooth::status());
-                    state.battery.set(managers::battery::status());
-                    std::thread::sleep(poll);
+            .spawn(move || loop {
+                state.net.set(managers::net::status());
+                let wifi = managers::wifi::state();
+                let wifi_enabled = wifi["enabled"].as_bool().unwrap_or(false);
+                state.wifi.set(wifi);
+                if wifi_enabled {
+                    // Re-read the cache only: forcing a rescan here would put
+                    // radio work on a timer for no reason.
+                    state.wifi_networks.set(managers::wifi::list(false));
                 }
+                state.bluetooth.set(managers::bluetooth::status());
+                state.battery.set(managers::battery::status());
+                state.notify();
+                std::thread::sleep(std::time::Duration::from_millis(poll_ms));
             })
             .ok();
 
@@ -418,7 +570,11 @@ impl App {
         if self.config.behavior.tray {
             let sink_state = Arc::clone(&self.state);
             let sink: crate::tray::TraySink =
-                Arc::new(move |items| sink_state.tray.set(items));
+                Arc::new(move |items| {
+                    if sink_state.tray.set(items) {
+                        sink_state.notify();
+                    }
+                });
             let tray = crate::tray::Tray::new(sink);
             self.tray = Some(Arc::clone(&tray));
             std::thread::Builder::new()
@@ -446,7 +602,11 @@ impl App {
         if self.config.behavior.notifications {
             let sink_state = Arc::clone(&self.state);
             let sink: crate::notifications::NotificationSink =
-                Arc::new(move |list| sink_state.notifications.set(list));
+                Arc::new(move |list| {
+                    if sink_state.notifications.set(list) {
+                        sink_state.notify();
+                    }
+                });
             let server = crate::notifications::NotificationServer::new(sink);
             self.notifications = Some(Arc::clone(&server));
             std::thread::Builder::new()
@@ -469,16 +629,26 @@ impl App {
                 .ok();
         }
 
-        // Brightness has no push source; poll it slowly. The reading is stored
-        // in SystemState so the OSD can react to changes.
+        // Brightness has no push source, so it is polled. `brightnessctl` is
+        // two short-lived processes per reading; at 350 ms that was the largest
+        // remaining idle cost (and it spawned a process just to discover there
+        // is no backlight). Read the sysfs node directly when possible and fall
+        // back to one polling cadence that is cheap enough to keep.
         let brightness_state = Arc::clone(&self.state);
         std::thread::Builder::new()
             .name("stratum-brightness".into())
-            .spawn(move || loop {
-                if let Some(percent) = read_brightness_percent() {
-                    brightness_state.brightness.set(percent);
+            .spawn(move || {
+                let mut last: Option<i64> = None;
+                loop {
+                    if let Some(percent) = read_brightness_percent() {
+                        if last != Some(percent) {
+                            last = Some(percent);
+                            brightness_state.brightness.set(percent);
+                            brightness_state.notify();
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(350));
             })
             .ok();
 
@@ -486,6 +656,7 @@ impl App {
         let state = Arc::clone(&self.state);
         crate::hyprland::HyprState::spawn_watcher(move || {
             state.hypr.set(crate::hyprland::HyprState::read());
+            state.notify();
         });
         // Seed once so the first frame is correct.
         self.state.hypr.set(crate::hyprland::HyprState::read());
@@ -550,27 +721,66 @@ impl App {
         let outputs: Vec<_> = self.output_state.outputs().collect();
         info!("found {} output(s)", outputs.len());
 
+        // Output info (name, scale) arrives asynchronously. Creating a surface
+        // before it is known would key the surface to an empty output name,
+        // which silently breaks per-monitor state such as workspaces. Outputs
+        // still missing info are created later from `OutputHandler`.
+        let mut deferred = 0;
         for output in outputs {
-            let info = self.output_state.info(&output);
-            // SCTK reports an integer scale. For fractional outputs (Hyprland
-            // reports 1.6) an integer buffer scale of 2 is correct for sharpness;
-            // the compositor downsamples the buffer to the logical size.
-            let scale = info.as_ref().map(|i| i.scale_factor).unwrap_or(1).max(1);
-            let output_name = info.as_ref().map(|i| i.model.clone()).unwrap_or_default();
+            if !self.create_output_surfaces(qh, &output) {
+                deferred += 1;
+            }
+        }
+        if deferred > 0 {
+            debug!("{deferred} output(s) awaiting info; surfaces will be created on update");
+        }
+    }
 
+    /// Create the bar, OSD, and toast surfaces for `output`.
+    ///
+    /// Returns false when the output's information has not arrived yet, in
+    /// which case the caller should retry when it does.
+    fn create_output_surfaces(
+        &mut self,
+        qh: &QueueHandle<Self>,
+        output: &wl_output::WlOutput,
+    ) -> bool {
+        // Already handled?
+        if self.surfaces.iter().any(|entry| entry.output.as_ref() == Some(output)) {
+            return true;
+        }
+
+        let Some(info) = self.output_state.info(output) else {
+            return false;
+        };
+        // Without a name there is nothing to key per-output state by. The
+        // model is a poor fallback but better than an empty string.
+        let output_name = info
+            .name
+            .clone()
+            .or_else(|| (!info.model.is_empty()).then(|| info.model.clone()))
+            .unwrap_or_default();
+        if output_name.is_empty() {
+            return false;
+        }
+        // SCTK reports an integer scale. For fractional outputs (Hyprland
+        // reports 1.6) an integer buffer scale of 2 is correct for sharpness;
+        // the compositor downsamples the buffer to the logical size.
+        let scale = info.scale_factor.max(1);
+        info!("output '{}' (model '{}', scale {})", output_name, info.model, scale);
+
+        {
             let wl_surface = self.compositor_state.create_surface(qh);
             let layer = self.layer_shell.create_layer_surface(
                 qh,
                 wl_surface,
                 Layer::Top,
                 Some("stratum-sidebar"),
-                Some(&output),
+                Some(output),
             );
 
             // Placement and width come from the configuration.
-            let width = self.config.sidebar.width.max(1);
             let config = &self.config.sidebar;
-            let vertical = config.is_vertical();
             let (anchor, size) = match config.position {
                 SidebarPosition::Left => (
                     Anchor::TOP | Anchor::LEFT | Anchor::BOTTOM,
@@ -589,7 +799,6 @@ impl App {
                     (0, config.height),
                 ),
             };
-            let _ = vertical;
             layer.set_anchor(anchor);
             layer.set_exclusive_zone(match config.position {
                 SidebarPosition::Top | SidebarPosition::Bottom => config.height as i32,
@@ -600,7 +809,9 @@ impl App {
             layer.set_size(size.0, size.1);
             layer.commit();
 
-            self.surfaces.push(SurfaceEntry::new(layer, scale, output_name.clone()));
+            self.surfaces.push(
+                SurfaceEntry::new(layer, scale, output_name.clone()).with_output(output.clone()),
+            );
 
             // OSD: an overlay-layer surface anchored bottom-centre with no
             // exclusive zone, so it floats above windows without reserving
@@ -611,7 +822,7 @@ impl App {
                 osd_wl,
                 Layer::Overlay,
                 Some("stratum-osd"),
-                Some(&output),
+                Some(output),
             );
             osd_layer.set_anchor(Anchor::BOTTOM);
             osd_layer.set_exclusive_zone(-1);
@@ -619,7 +830,9 @@ impl App {
             osd_layer.set_margin(0, 0, 72, 0);
             osd_layer.set_size(320, 94);
             osd_layer.commit();
-            self.osd_surfaces.push(SurfaceEntry::new(osd_layer, scale, output_name.clone()));
+            self.osd_surfaces.push(
+                SurfaceEntry::new(osd_layer, scale, output_name.clone()).with_output(output.clone()),
+            );
 
             // Toast stack: overlay layer, top-right, full height, no exclusive
             // zone. It ignores input so clicks reach the window underneath.
@@ -629,7 +842,7 @@ impl App {
                 toast_wl,
                 Layer::Overlay,
                 Some("stratum-toasts"),
-                Some(&output),
+                Some(output),
             );
             // A zero height requires anchoring both top and bottom; the toast
             // column then sizes itself between the margins.
@@ -639,10 +852,13 @@ impl App {
             toast_layer.set_margin(12, 12, 12, 12);
             toast_layer.set_size(344, 0);
             toast_layer.commit();
-            self.toast_surfaces.push(SurfaceEntry::new(toast_layer, scale, output_name));
+            self.toast_surfaces.push(
+                SurfaceEntry::new(toast_layer, scale, output_name.clone()).with_output(output.clone()),
+            );
 
-            debug!("created layer surface on output (scale {scale}x)");
+            debug!("created layer surface on output '{}' (scale {scale}x)", output_name);
         }
+        true
     }
 }
 
@@ -651,11 +867,55 @@ impl App {
 /// Using xdg-shell rather than a layer surface means the compositor owns the
 /// window: it gets normal focus, workspace placement, alt-tab, and stacking,
 /// so it feels like part of the shell rather than an overlay.
-/// Read the backlight percentage via `brightnessctl`.
+/// Read the backlight percentage.
+///
+/// Prefers the sysfs `brightness`/`max_brightness` nodes, which cost a single
+/// file read. `brightnessctl` is only used when those are unavailable, and the
+/// result is cached for the process lifetime because a machine without a
+/// backlight will never grow one and each probe spawns two processes.
 ///
 /// Returns `None` when no backlight backend is available, which is normal on
 /// desktops; the OSD then simply never shows brightness.
 fn read_brightness_percent() -> Option<i64> {
+    static TOOL_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+    if let Some(percent) = read_brightness_sysfs() {
+        return Some(percent);
+    }
+    if !*TOOL_AVAILABLE.get_or_init(brightnessctl_available) {
+        return None;
+    }
+    read_brightnessctl()
+}
+
+/// Read `brightness`/`max_brightness` from the first `/sys/class/backlight`
+/// device that exposes both.
+fn read_brightness_sysfs() -> Option<i64> {
+    let entries = std::fs::read_dir("/sys/class/backlight").ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let current = std::fs::read_to_string(path.join("brightness")).ok()?;
+        let max = std::fs::read_to_string(path.join("max_brightness")).ok()?;
+        let current = current.trim().parse::<i64>().ok()?;
+        let max = max.trim().parse::<i64>().ok()?;
+        if max > 0 {
+            return Some(((current as f64 * 100.0) / max as f64).round() as i64);
+        }
+    }
+    None
+}
+
+fn brightnessctl_available() -> bool {
+    std::process::Command::new("brightnessctl")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn read_brightnessctl() -> Option<i64> {
     let current = std::process::Command::new("brightnessctl")
         .arg("get")
         .output()
@@ -685,10 +945,12 @@ struct SettingsWindow {
     dirty: bool,
     /// Whether we have asked for focus in response to an open request.
     activated: bool,
+    /// Output the window prefers to open on, used for per-output display info.
+    output: Option<wl_output::WlOutput>,
 }
 
 impl SettingsWindow {
-    fn new(window: Window, scale: i32) -> Self {
+    fn new(window: Window, scale: i32, output: Option<wl_output::WlOutput>) -> Self {
         Self {
             window,
             renderer: None,
@@ -698,6 +960,7 @@ impl SettingsWindow {
             configured: false,
             dirty: true,
             activated: false,
+            output,
         }
     }
 
@@ -795,13 +1058,13 @@ impl App {
 
         // Match the scale of an existing bar surface so the window is as sharp
         // as the rest of the shell on this output.
-        let scale = self
+        let (scale, output) = self
             .surfaces
             .iter()
-            .map(|s| s.scale)
-            .max()
-            .unwrap_or(1);
-        self.settings = Some(SettingsWindow::new(window, scale));
+            .max_by_key(|s| s.scale)
+            .map(|s| (s.scale, s.output.clone()))
+            .unwrap_or((1, None));
+        self.settings = Some(SettingsWindow::new(window, scale, output));
     }
 
     fn apply_action(&mut self, action: crate::ui::Action) {
@@ -813,6 +1076,14 @@ impl App {
                 // Activation needs the tray's bus connection; hand it to the
                 // running watcher through the action queue.
                 tracing::debug!("tray activate requested: {id}");
+            }
+            Action::FocusWorkspace(id) => {
+                // Dispatch to the compositor. The widget has already marked the
+                // workspace active locally, so the bar updates on this frame;
+                // the Hyprland event confirms it a moment later.
+                if !crate::hyprland::focus_workspace(id) {
+                    tracing::warn!("failed to focus workspace {id}");
+                }
             }
         }
         for entry in &mut self.surfaces {
@@ -893,19 +1164,24 @@ impl OutputHandler for App {
         &mut self,
         _conn: &Connection,
         qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        output: wl_output::WlOutput,
     ) {
-        // Outputs are enumerated at startup in M1; hotplug handling lands with
-        // the sidebar work in M4.
-        let _ = qh;
+        // The output's name and scale arrive in a later event, so this often
+        // fails on the first try. `update_output` retries once the info is
+        // complete.
+        if !self.create_output_surfaces(qh, &output) {
+            debug!("new output awaiting info; deferring surface creation");
+        }
     }
 
     fn update_output(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _output: wl_output::WlOutput,
+        qh: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
     ) {
+        // Second chance for an output that was created without complete info.
+        self.create_output_surfaces(qh, &output);
     }
 
     fn output_destroyed(
@@ -1002,7 +1278,7 @@ impl SeatHandler for App {
     ) {
         if capability == Capability::Pointer {
             match self.seat_state.get_pointer(qh, &seat) {
-                Ok(pointer) => info!("pointer capability acquired"),
+                Ok(_pointer) => info!("pointer capability acquired"),
                 Err(err) => tracing::warn!("failed to create pointer: {err}"),
             }
         }
@@ -1029,6 +1305,7 @@ impl PointerHandler for App {
         events: &[PointerEvent],
     ) {
         let mut clicked_at: Option<(wl_surface::WlSurface, f32, f32)> = None;
+        let mut scroll_at: Option<(wl_surface::WlSurface, f32, f32, f32)> = None;
         let mut changed = false;
 
         for event in events {
@@ -1056,7 +1333,21 @@ impl PointerHandler for App {
                         changed = true;
                     }
                 }
-                PointerEventKind::Axis { .. } => {}
+                PointerEventKind::Axis { vertical, .. } => {
+                    // Wheel input scrolls list pages. `value120` is the
+                    // high-resolution step count on modern compositors;
+                    // `discrete` is the fallback for older ones.
+                    let step = if vertical.value120 != 0 {
+                        vertical.value120 as f32
+                    } else if vertical.discrete != 0 {
+                        vertical.discrete as f32 * 120.0
+                    } else {
+                        vertical.absolute as f32
+                    };
+                    if step != 0.0 {
+                        scroll_at = Some((event.surface.clone(), x, y, step));
+                    }
+                }
             }
         }
 
@@ -1115,8 +1406,38 @@ impl PointerHandler for App {
                     }
                     changed = true;
                 }
-            } else if let Some(action) = self.sidebar.on_click(point, &input) {
-                self.apply_action(action);
+            } else {
+                // The widget tree is shared across outputs, so the click has to
+                // be attributed to the surface it landed on: a workspace click
+                // on the left monitor must move that monitor.
+                let output_name = self
+                    .surfaces
+                    .iter()
+                    .find(|entry| entry.layer.wl_surface() == &surface)
+                    .map(|entry| entry.output_name.clone())
+                    .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
+                    .unwrap_or_default();
+                if let Some(action) = self.sidebar.on_click(point, &output_name, &input) {
+                    self.apply_action(action);
+                    changed = true;
+                }
+            }
+        }
+
+        if let Some((surface, x, y, delta)) = scroll_at {
+            let in_settings = self
+                .settings
+                .as_ref()
+                .map(|w| w.window.wl_surface() == &surface)
+                .unwrap_or(false);
+            if in_settings {
+                self.control_center.on_scroll(
+                    crate::render::display_list::Point::new(x, y),
+                    delta,
+                );
+                if let Some(settings) = &mut self.settings {
+                    settings.dirty = true;
+                }
                 changed = true;
             }
         }

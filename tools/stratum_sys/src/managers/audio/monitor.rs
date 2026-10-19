@@ -169,6 +169,14 @@ fn refresh_from_system(publisher: &Publisher) {
     }
 }
 
+/// The snapshot shape this module publishes, read synchronously.
+///
+/// Exposed so the UI can refresh immediately after it changes something,
+/// rather than waiting for the PipeWire event loop to deliver the change.
+pub(crate) fn current_status() -> Option<Value> {
+    fetch_current_status()
+}
+
 fn fetch_current_status() -> Option<Value> {
     let fresh = parser::fetch_current_audio_status();
     if !fresh.get("ok").and_then(Value::as_bool).unwrap_or(false) {

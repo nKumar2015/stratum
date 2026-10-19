@@ -65,6 +65,14 @@ pub(crate) fn refresh_device_cache() -> Value {
     result
 }
 
+/// The snapshot shape the monitor publishes, produced synchronously.
+///
+/// The UI uses this after a user action so the change is visible on the next
+/// frame instead of waiting for the PipeWire event loop to notice.
+pub fn snapshot() -> Option<Value> {
+    monitor::current_status()
+}
+
 pub fn set_volume(percent: i64) -> Value {
     let target = percent.clamp(0, 150) as f64;
     let mut sink_ctrl = match SinkController::create() {
@@ -94,6 +102,36 @@ pub fn set_volume(percent: i64) -> Value {
 
     refresh_device_cache();
     serde_json::json!({"ok": true, "volume": target.round() as i64})
+}
+
+/// Mute or unmute the default sink.
+///
+/// Volume is deliberately left alone: muting used to be implemented as
+/// "set volume to 0", which destroyed the level the user had set. The sink's
+/// own mute flag is the right control and is what `pactl`/`wpctl` use too.
+pub fn set_mute(muted: bool) -> Value {
+    let mut sink_ctrl = match SinkController::create() {
+        Ok(ctrl) => ctrl,
+        Err(err) => {
+            return json!({"ok": false, "error": format!("sink controller unavailable: {}", err)});
+        }
+    };
+
+    let default_device = match sink_ctrl.get_default_device() {
+        Ok(device) => device,
+        Err(err) => {
+            return json!({"ok": false, "error": format!("failed to query default sink: {}", err)});
+        }
+    };
+
+    // `set_device_mute_by_index` returns `()`, so a failure to look the device
+    // up beforehand is the only signal that the sink is unreachable.
+    if let Err(err) = sink_ctrl.get_device_by_index(default_device.index) {
+        return json!({"ok": false, "error": format!("failed to read default sink: {}", err)});
+    }
+    sink_ctrl.set_device_mute_by_index(default_device.index, muted);
+    refresh_device_cache();
+    json!({"ok": true, "mute": if muted { "yes" } else { "no" }})
 }
 
 pub fn set_input(target: &str) -> Value {

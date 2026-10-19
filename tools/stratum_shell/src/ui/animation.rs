@@ -48,13 +48,18 @@ impl Easing {
 
 /// A fixed-duration eased transition.
 #[derive(Clone, Debug)]
-pub struct Tween {
-    from: f32,
+pub struct Tween {    from: f32,
     to: f32,
     duration: f32,
     elapsed: f32,
     easing: Easing,
     value: f32,
+}
+
+impl Default for Tween {
+    fn default() -> Self {
+        Self::new(0.0)
+    }
 }
 
 impl Tween {
@@ -90,6 +95,15 @@ impl Tween {
 
     pub fn target(&self) -> f32 {
         self.to
+    }
+
+    /// Jump to `value`, cancelling any motion.
+    pub fn snap(&mut self, value: f32) {
+        self.from = value;
+        self.to = value;
+        self.elapsed = 0.0;
+        self.duration = 0.0;
+        self.value = value;
     }
 
     /// Advance by `dt` seconds. Returns true while still animating.

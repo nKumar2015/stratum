@@ -16,7 +16,7 @@ use tracing::{debug, info};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
 /// A tray item as reported by its D-Bus properties.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TrayItem {
     /// Bus name and object path used to talk to it.
     pub service: String,

@@ -32,6 +32,80 @@ use crate::text::{RasterGlyph, TextEngine};
 const ATLAS_SIZE: u32 = 1024;
 const SHADER: &str = include_str!("shader.wgsl");
 
+/// A contiguous run of vertices sharing one scissor rectangle.
+///
+/// Scissor state lives on the render pass, so a clip is expressed by splitting
+/// the frame into batches rather than by per-vertex data. Draw order is
+/// preserved because every batch is a contiguous slice of the vertex buffer.
+struct Batch {
+    vertices: Vec<Vertex>,
+    segments: Vec<Segment>,
+    clip: Option<Rect>,
+}
+
+#[derive(Clone, Copy)]
+struct Segment {
+    start: u32,
+    end: u32,
+    clip: Option<Rect>,
+}
+
+impl Batch {
+    fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            segments: Vec::new(),
+            clip: None,
+        }
+    }
+
+    fn set_clip(&mut self, clip: Option<Rect>) {
+        self.clip = clip;
+    }
+
+    fn push(&mut self, vertex: Vertex) {
+        let index = self.vertices.len() as u32;
+        match self.segments.last_mut() {
+            Some(last) if last.end == index && same_clip(last.clip, self.clip) => {
+                last.end = index + 1;
+            }
+            _ => self.segments.push(Segment {
+                start: index,
+                end: index + 1,
+                clip: self.clip,
+            }),
+        }
+        self.vertices.push(vertex);
+    }
+
+    fn extend_from_slice(&mut self, vertices: &[Vertex]) {
+        for vertex in vertices {
+            self.push(*vertex);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.vertices.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.vertices.len()
+    }
+}
+
+fn same_clip(a: Option<Rect>, b: Option<Rect>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            (a.x - b.x).abs() < 0.01
+                && (a.y - b.y).abs() < 0.01
+                && (a.width - b.width).abs() < 0.01
+                && (a.height - b.height).abs() < 0.01
+        }
+        _ => false,
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -320,19 +394,19 @@ impl SurfaceRenderer {
 
     /// Draw and present one frame.
     pub fn submit(&mut self, gpu: &Gpu, list: &DisplayList, text: &mut TextEngine) -> Result<(), String> {
-        let mut vertices = Vec::new();
+        let mut batch = Batch::new();
 
         for command in &list.commands {
             match command {
-                DrawCommand::Rect(rect) => self.append_rect(&mut vertices, rect),
+                DrawCommand::Rect(rect) => self.append_rect(&mut batch, rect),
                 DrawCommand::Path(path) => {
                     let key = path_hash(path);
                     if let Some(cached) = self.path_cache.get(&key) {
-                        vertices.extend_from_slice(cached);
+                        batch.extend_from_slice(cached);
                     } else {
                         let tessellated = tessellate_path(path, self.scale);
                         self.path_cache.insert(key, tessellated.clone());
-                        vertices.extend_from_slice(&tessellated);
+                        batch.extend_from_slice(&tessellated);
                     }
                 }
                 DrawCommand::Image(image) => {
@@ -343,7 +417,7 @@ impl SurfaceRenderer {
                         image.height,
                     ) {
                         append_textured(
-                            &mut vertices,
+                            &mut batch,
                             image.x,
                             image.y,
                             image.width_logical,
@@ -354,18 +428,30 @@ impl SurfaceRenderer {
                         );
                     }
                 }
+                DrawCommand::PushClip(clip) => batch.set_clip(Some(*clip)),
+                DrawCommand::PopClip => batch.set_clip(None),
             }
         }
 
-        // Glyphs last so text sits above geometry in the same draw.
+        // Glyphs last so text sits above geometry in the same draw. Each run
+        // carries the clip that was active when it was pushed.
         let mut glyph_uploads = Vec::new();
         for run in &list.texts {
             let rasterized = text.rasterize_run(run, self.scale);
             for (glyph, raster) in rasterized {
-                glyph_uploads.push((glyph, run.x, run.y, run.size, run.color, run.transform, raster));
+                glyph_uploads.push((
+                    glyph,
+                    run.x,
+                    run.y,
+                    run.size,
+                    run.color,
+                    run.transform,
+                    run.clip,
+                    raster,
+                ));
             }
         }
-        for (glyph, run_x, run_y, run_size, color, transform, raster) in glyph_uploads {
+        for (glyph, run_x, run_y, run_size, color, transform, clip, raster) in glyph_uploads {
             if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
                 // `run_x`/`run_y` place the run's baseline origin; glyph
                 // offsets are relative to it. Swash's bitmap origin is
@@ -377,8 +463,9 @@ impl SurfaceRenderer {
                 let ly = pen_y - raster.top as f32 / scale;
                 let lw = raster.width as f32 / scale;
                 let lh = raster.height as f32 / scale;
+                batch.set_clip(clip);
                 append_quad_transformed(
-                    &mut vertices,
+                    &mut batch,
                     transform,
                     scale,
                     lx,
@@ -400,8 +487,8 @@ impl SurfaceRenderer {
             }),
         );
 
-        if !vertices.is_empty() {
-            let needed = std::mem::size_of_val(vertices.as_slice()) as u64;
+        if !batch.is_empty() {
+            let needed = std::mem::size_of_val(batch.vertices.as_slice()) as u64;
             if needed > self.vertex_capacity {
                 self.vertex_capacity = needed.next_power_of_two();
                 self.vertex_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -412,7 +499,7 @@ impl SurfaceRenderer {
                 });
             }
             gpu.queue
-                .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+                .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&batch.vertices));
         }
 
         let frame = match self.surface.get_current_texture() {
@@ -465,12 +552,28 @@ impl SurfaceRenderer {
                 multiview_mask: None,
             });
 
-            if !vertices.is_empty() {
+            if !batch.is_empty() {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_bind_group(1, &self.atlas.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.draw(0..vertices.len() as u32, 0..1);
+                for segment in &batch.segments {
+                    match segment.clip {
+                        Some(clip) => {
+                            let Some(scissor) = scissor_rect(clip, self.scale, self.size) else {
+                                continue;
+                            };
+                            pass.set_scissor_rect(
+                                scissor.0,
+                                scissor.1,
+                                scissor.2,
+                                scissor.3,
+                            );
+                        }
+                        None => pass.set_scissor_rect(0, 0, self.size.0, self.size.1),
+                    }
+                    pass.draw(segment.start..segment.end, 0..1);
+                }
             }
         }
 
@@ -479,7 +582,7 @@ impl SurfaceRenderer {
         Ok(())
     }
 
-    fn append_rect(&self, out: &mut Vec<Vertex>, rect: &Rect) {
+    fn append_rect(&self, out: &mut Batch, rect: &Rect) {
         let scale = self.scale;
         let (x, y) = (rect.x * scale, rect.y * scale);
         let (w, h) = (rect.width * scale, rect.height * scale);
@@ -500,8 +603,25 @@ impl SurfaceRenderer {
     }
 }
 
+/// Convert a logical clip rect into a physical scissor rectangle.
+///
+/// Returns `None` when the clip is empty or entirely outside the surface, so
+/// the caller can skip the draw instead of issuing invalid scissor state.
+fn scissor_rect(rect: Rect, scale: f32, surface: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    let x = (rect.x * scale).round().clamp(0.0, surface.0 as f32);
+    let y = (rect.y * scale).round().clamp(0.0, surface.1 as f32);
+    let right = ((rect.x + rect.width) * scale).round().clamp(0.0, surface.0 as f32);
+    let bottom = ((rect.y + rect.height) * scale).round().clamp(0.0, surface.1 as f32);
+    let width = (right - x).max(0.0);
+    let height = (bottom - y).max(0.0);
+    if width < 1.0 || height < 1.0 {
+        return None;
+    }
+    Some((x as u32, y as u32, width as u32, height as u32))
+}
+
 fn append_textured(
-    out: &mut Vec<Vertex>,
+    out: &mut Batch,
     x: f32,
     y: f32,
     w: f32,
@@ -514,7 +634,7 @@ fn append_textured(
 }
 
 fn append_textured_px(
-    out: &mut Vec<Vertex>,
+    out: &mut Batch,
     x: f32,
     y: f32,
     w: f32,
@@ -540,7 +660,7 @@ fn append_textured_px(
 
 /// Emit a textured quad whose corners are transformed by `t`.
 fn append_quad_transformed(
-    out: &mut Vec<Vertex>,
+    out: &mut Batch,
     t: Transform,
     scale: f32,
     x: f32,
