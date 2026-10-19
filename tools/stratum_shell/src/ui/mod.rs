@@ -97,6 +97,8 @@ pub enum Action {
     OpenPanel(crate::ui::control_center::Page),
     /// Close the control centre.
     ClosePanel,
+    /// Activate a tray item by id.
+    ActivateTray(String),
 }
 
 /// A bar widget.

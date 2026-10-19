@@ -58,6 +58,8 @@ pub struct SystemState {
     /// Compositor state (workspaces, active window), refreshed by the event
     /// watcher rather than polled.
     pub hypr: Cell<crate::hyprland::HyprState>,
+    /// System tray items, refreshed by the tray watcher.
+    pub tray: Cell<Vec<crate::tray::TrayItem>>,
     /// Backlight percentage, polled because there is no push source.
     pub brightness: Cell<i64>,
     /// Live notifications, newest last, published by the notification server.
@@ -75,6 +77,7 @@ impl SystemState {
             dashboard: Cell::new(serde_json::Value::Null),
             polkit: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
+            tray: Cell::new(Vec::new()),
             brightness: Cell::new(0),
             notifications: Cell::new(Vec::new()),
         })

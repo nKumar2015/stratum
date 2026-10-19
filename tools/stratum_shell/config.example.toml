@@ -23,6 +23,9 @@ reload_on_change = true # watch this file and redraw when it changes
 # daemon (for example Quickshell) is running, or the shell will log that the
 # name is taken. Enable it once this shell is the only one.
 notifications = false
+# Own org.kde.StatusNotifierWatcher and show tray icons. Same caveat as
+# notifications: only one host can own it.
+tray = false
 
 [sidebar]
 position = "left"       # "left" or "right"

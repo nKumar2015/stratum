@@ -19,6 +19,7 @@ mod hyprland;
 mod notifications;
 mod osd;
 mod toasts;
+mod tray;
 #[allow(dead_code)]
 mod icons;
 mod render;

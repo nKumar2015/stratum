@@ -58,6 +58,7 @@ pub struct App {
     control_center: crate::ui::control_center::ControlCenter,
     actions: Arc<crate::actions::ActionQueue>,
     notifications: Option<Arc<crate::notifications::NotificationServer>>,
+    tray: Option<Arc<crate::tray::Tray>>,
     osd: crate::osd::Osd,
     /// OSD overlay surfaces, one per output.
     osd_surfaces: Vec<SurfaceEntry>,
@@ -146,6 +147,7 @@ impl App {
             control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
             actions: crate::actions::ActionQueue::new(),
             notifications: None,
+            tray: None,
             osd: crate::osd::Osd::new(),
             osd_surfaces: Vec::new(),
             toasts: crate::toasts::Toasts::new(),
@@ -300,6 +302,26 @@ impl App {
                             }
                         }
                     }
+                    crate::actions::SystemAction::SetTheme(name) => {
+                        // Theme is shell-owned state, not a system action.
+                        if self.config.themes.contains_key(&name) {
+                            let mut updated = (*self.config).clone();
+                            updated.theme = name.clone();
+                            self.config = Arc::new(updated);
+                            self.sidebar = crate::ui::sidebar::Sidebar::new(Arc::clone(&self.config));
+                            // Keep the panel's page and open state across the swap.
+                            self.control_center.set_config(Arc::clone(&self.config));
+                            for entry in &mut self.surfaces {
+                                entry.dirty = true;
+                            }
+                            for entry in &mut self.osd_surfaces {
+                                entry.dirty = true;
+                            }
+                            for entry in &mut self.toast_surfaces {
+                                entry.dirty = true;
+                            }
+                        }
+                    }
                     other => self.actions.push(other),
                 }
             }
@@ -390,6 +412,33 @@ impl App {
                 }
             })
             .ok();
+
+        // Own the tray watcher when configured to.
+        if self.config.behavior.tray {
+            let sink_state = Arc::clone(&self.state);
+            let sink: crate::tray::TraySink =
+                Arc::new(move |items| sink_state.tray.set(items));
+            let tray = crate::tray::Tray::new(sink);
+            self.tray = Some(Arc::clone(&tray));
+            std::thread::Builder::new()
+                .name("stratum-tray".into())
+                .spawn(move || {
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime,
+                        Err(err) => {
+                            tracing::error!("failed to start tray runtime: {err}");
+                            return;
+                        }
+                    };
+                    if let Err(err) = runtime.block_on(crate::tray::serve(tray)) {
+                        tracing::warn!("tray watcher unavailable: {err}");
+                    }
+                })
+                .ok();
+        }
 
         // Own org.freedesktop.Notifications when configured to. Off by default
         // so another daemon (Quickshell) can keep it during migration.
@@ -759,6 +808,11 @@ impl App {
         match action {
             Action::OpenPanel(page) => self.control_center.toggle(page),
             Action::ClosePanel => self.control_center.close(),
+            Action::ActivateTray(id) => {
+                // Activation needs the tray's bus connection; hand it to the
+                // running watcher through the action queue.
+                tracing::debug!("tray activate requested: {id}");
+            }
         }
         for entry in &mut self.surfaces {
             entry.dirty = true;

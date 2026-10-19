@@ -44,6 +44,8 @@ pub enum SystemAction {
     Dismiss(u32),
     /// Close every notification.
     DismissAll,
+    /// Switch the active theme by name.
+    SetTheme(String),
 }
 
 /// A queue the UI writes to and a worker drains.
@@ -138,7 +140,7 @@ fn execute(action: &SystemAction) -> Result<(), String> {
                 .map_err(|err| format!("failed to set power profile: {err}"))?;
             serde_json::json!({ "ok": true })
         }
-        SystemAction::Dismiss(_) | SystemAction::DismissAll => {
+        SystemAction::Dismiss(_) | SystemAction::DismissAll | SystemAction::SetTheme(_) => {
             // Handled by the shell, which owns the notification server; the
             // worker has nothing to do.
             return Ok(());

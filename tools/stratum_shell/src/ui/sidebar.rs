@@ -194,7 +194,7 @@ fn build_widget(entry: &WidgetConfig, config: Arc<Config>) -> Box<dyn Widget> {
         WidgetKind::AppTitle => Box::new(AppTitleWidget {
             fallback: "Desktop".to_string(),
         }),
-        WidgetKind::Tray => Box::new(SpacerWidget { height: 24.0 }),
+        WidgetKind::Tray => Box::new(TrayWidget { cells: Vec::new() }),
         WidgetKind::QuickPanel => Box::new(QuickPanelWidget {
             framed: entry.framed,
             height: entry.height.unwrap_or(86) as f32,
@@ -824,6 +824,99 @@ impl Widget for ClockWidget {
             };
             ui::paint_text_centered(ctx, list, &value, row, 18.0, color);
         }
+    }
+}
+
+/// Tray icons from the StatusNotifier watcher.
+struct TrayWidget {
+    cells: Vec<(Rect, String)>,
+}
+
+impl Widget for TrayWidget {
+    fn height(&self, _width: f32) -> Option<f32> {
+        // One icon per row in a rail.
+        Some(26.0)
+    }
+
+    fn width(&self, height: f32) -> Option<f32> {
+        Some((height.max(24.0)) * 1.4)
+    }
+
+    fn paint(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        list: &mut DisplayList,
+        rect: Rect,
+        _input: &InputState,
+    ) {
+        let items = ctx.state.tray.get();
+        self.cells.clear();
+
+        if items.is_empty() {
+            // Nothing registered: keep a small gap so the layout is stable.
+            return;
+        }
+
+        if ctx.is_vertical() {
+            let mut y = rect.y;
+            for item in items.iter().take(6) {
+                let cell = Rect {
+                    y,
+                    height: 24.0,
+                    ..rect
+                };
+                self.paint_item(ctx, list, cell, item);
+                self.cells.push((cell, item.id.clone()));
+                y += 26.0;
+            }
+        } else {
+            let mut x = rect.x;
+            for item in items.iter().take(8) {
+                let cell = Rect {
+                    x,
+                    width: 24.0,
+                    ..rect
+                };
+                self.paint_item(ctx, list, cell, item);
+                self.cells.push((cell, item.id.clone()));
+                x += 28.0;
+            }
+        }
+    }
+
+    fn on_click(&mut self, point: crate::render::display_list::Point, _input: &InputState) -> Option<Action> {
+        // Activation is handled by the shell, which owns the D-Bus connection.
+        if let Some((_, id)) = self.cells.iter().find(|(rect, _)| rect.contains(point)) {
+            return Some(Action::ActivateTray(id.clone()));
+        }
+        None
+    }
+}
+
+impl TrayWidget {
+    fn paint_item(
+        &self,
+        ctx: &mut PaintCtx<'_>,
+        list: &mut DisplayList,
+        cell: Rect,
+        item: &crate::tray::TrayItem,
+    ) {
+        // Without an icon decoder in this path, show the item's first letter as
+        // a stable placeholder; real pixmaps are decoded by the tray module and
+        // will be uploaded once the icon pipeline is wired to them.
+        let label = item
+            .title
+            .chars()
+            .next()
+            .or_else(|| item.id.chars().next())
+            .unwrap_or('?')
+            .to_string();
+        let color = match item.status.as_str() {
+            "NeedsAttention" => ctx.theme.warning,
+            "Passive" => ctx.theme.text_muted,
+            _ => ctx.theme.text_main,
+        };
+        ui::paint_text_centered(ctx, list, &label, cell, 13.0, color);
     }
 }
 

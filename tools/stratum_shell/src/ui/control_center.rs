@@ -118,6 +118,13 @@ impl ControlCenter {
         }
     }
 
+    /// Replace the configuration after a live reload or theme switch, keeping
+    /// window state (page, open flag, animation) intact.
+    pub fn set_config(&mut self, config: Arc<Config>) {
+        self.width = config.control_center.width as f32;
+        self.config = config;
+    }
+
     /// Take any actions produced by the last paint.
     pub fn take_actions(&mut self) -> Vec<crate::actions::SystemAction> {
         std::mem::take(&mut self.pending)
@@ -428,7 +435,7 @@ impl ControlCenter {
             Page::Wifi => self.paint_wifi(ctx, list, body, input),
             Page::Battery => self.paint_battery(ctx, list, body, input),
             Page::Notifications => self.paint_notifications(ctx, list, body, input),
-            Page::Display => self.paint_display(ctx, list, body),
+            Page::Display => self.paint_display(ctx, list, body, input),
             Page::Power => self.paint_power(ctx, list, body, input),
         }
     }
@@ -999,17 +1006,56 @@ impl ControlCenter {
         }
     }
 
-    fn paint_display(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, area: Rect) {
-        self.stat_row(ctx, list, area, 0, "Theme", &self.config.theme);
-        self.stat_row(
+    fn paint_display(
+        &mut self,
+        ctx: &mut PaintCtx<'_>,
+        list: &mut DisplayList,
+        area: Rect,
+        input: &InputState,
+    ) {
+        self.stat_row(ctx, list, area, 0, "Font size", &self.config.appearance.font_size.to_string());
+        self.stat_row(ctx, list, area, 1, "Output", ctx.output_name);
+
+        ui::paint_text_vcentered(
             ctx,
             list,
-            area,
-            1,
-            "Font size",
-            &self.config.appearance.font_size.to_string(),
+            "Theme",
+            area.x,
+            Rect { y: area.y + 84.0, height: 20.0, ..area },
+            12.0,
+            600,
+            ctx.theme.text_muted,
         );
-        self.stat_row(ctx, list, area, 2, "Output", ctx.output_name);
+
+        let mut y = area.y + 108.0;
+        let mut names: Vec<String> = self.config.themes.keys().cloned().collect();
+        names.sort();
+        for name in names {
+            let row = Rect {
+                x: area.x,
+                y,
+                width: area.width.min(320.0),
+                height: 34.0,
+                radius: 8.0,
+                color: Color::TRANSPARENT,
+            };
+            let selected = name == self.config.theme;
+            if crate::ui::controls::selectable_row(
+                ctx,
+                list,
+                row,
+                &name,
+                "",
+                selected,
+                input,
+                self.clicked_this_frame,
+            ) && !selected
+            {
+                self.pending
+                    .push(crate::actions::SystemAction::SetTheme(name.clone()));
+            }
+            y += 38.0;
+        }
     }
 
     fn paint_power(
@@ -1194,5 +1240,32 @@ mod tests {
         }
         assert!(center.progress.abs() < 1e-3);
         assert!(!center.visible());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn set_config_preserves_open_state_and_page() {
+        let mut config = Config::default();
+        config.theme = "carbon".into();
+        let mut center = ControlCenter::new(Arc::new(config));
+
+        center.toggle(Page::Display);
+        assert!(center.open);
+        assert_eq!(center.page, Page::Display);
+
+        // Simulate a theme switch delivering a new config.
+        let mut next = Config::default();
+        next.theme = "gruvbox".into();
+        next.control_center.width = 640;
+        center.set_config(Arc::new(next));
+
+        assert!(center.open, "open state must survive a config swap");
+        assert_eq!(center.page, Page::Display, "page must survive");
+        assert_eq!(center.width, 640.0, "new width should apply");
+        assert_eq!(center.config.theme, "gruvbox");
     }
 }

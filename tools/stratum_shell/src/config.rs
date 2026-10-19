@@ -390,6 +390,9 @@ pub struct BehaviorConfig {
     pub poll_ms: u64,
     /// Watch the config file and reload on change.
     pub reload_on_change: bool,
+    /// Own `org.kde.StatusNotifierWatcher` and display tray icons. Off by
+    /// default for the same reason as notifications: only one host can.
+    pub tray: bool,
     /// Own `org.freedesktop.Notifications`. Off by default so the shell can run
     /// beside another notification daemon (including Quickshell) during
     /// migration; enable it once this shell is the only one.
@@ -401,6 +404,7 @@ impl Default for BehaviorConfig {
         Self {
             poll_ms: 3000,
             reload_on_change: true,
+            tray: false,
             notifications: false,
         }
     }
