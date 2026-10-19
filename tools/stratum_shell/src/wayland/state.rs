@@ -61,6 +61,10 @@ pub struct App {
     osd: crate::osd::Osd,
     /// OSD overlay surfaces, one per output.
     osd_surfaces: Vec<SurfaceEntry>,
+    toasts: crate::toasts::Toasts,
+    toast_surfaces: Vec<SurfaceEntry>,
+    /// Toast rects from the last paint, for click-to-dismiss.
+    toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -144,6 +148,9 @@ impl App {
             notifications: None,
             osd: crate::osd::Osd::new(),
             osd_surfaces: Vec::new(),
+            toasts: crate::toasts::Toasts::new(),
+            toast_surfaces: Vec::new(),
+            toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -180,7 +187,8 @@ impl App {
         self.maybe_reload_config();
         // Polled managers update state asynchronously; when anything changed,
         // redraw every surface even without pointer input.
-        if self.state.take_dirty() {
+        let state_changed = self.state.take_dirty();
+        if state_changed {
             for entry in &mut self.surfaces {
                 entry.dirty = true;
             }
@@ -195,6 +203,27 @@ impl App {
         self.last_frame = now;
         self.osd.observe_audio(&self.state);
         self.osd.observe_brightness(self.state.brightness.get());
+
+        // Toasts follow the notification list and expire on their own timers.
+        // `take_dirty` above already consumed the aggregate flag, so sync on any
+        // state change rather than on the notification cell alone.
+        if state_changed {
+            let list = self.state.notifications.get();
+            self.toasts.sync(&list);
+        }
+        let expired = self.toasts.tick(dt);
+        if !expired.is_empty() {
+            if let Some(server) = &self.notifications {
+                for id in expired {
+                    server.close(id, 1);
+                }
+            }
+        }
+        if self.toasts.animating() || !self.toasts.is_empty() {
+            for entry in &mut self.toast_surfaces {
+                entry.dirty = true;
+            }
+        }
         if self.osd.tick(dt) {
             for entry in &mut self.osd_surfaces {
                 entry.dirty = true;
@@ -540,7 +569,27 @@ impl App {
             osd_layer.set_margin(0, 0, 72, 0);
             osd_layer.set_size(320, 94);
             osd_layer.commit();
-            self.osd_surfaces.push(SurfaceEntry::new(osd_layer, scale, output_name));
+            self.osd_surfaces.push(SurfaceEntry::new(osd_layer, scale, output_name.clone()));
+
+            // Toast stack: overlay layer, top-right, full height, no exclusive
+            // zone. It ignores input so clicks reach the window underneath.
+            let toast_wl = self.compositor_state.create_surface(qh);
+            let toast_layer = self.layer_shell.create_layer_surface(
+                qh,
+                toast_wl,
+                Layer::Overlay,
+                Some("stratum-toasts"),
+                Some(&output),
+            );
+            // A zero height requires anchoring both top and bottom; the toast
+            // column then sizes itself between the margins.
+            toast_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT);
+            toast_layer.set_exclusive_zone(-1);
+            toast_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            toast_layer.set_margin(12, 12, 12, 12);
+            toast_layer.set_size(344, 0);
+            toast_layer.commit();
+            self.toast_surfaces.push(SurfaceEntry::new(toast_layer, scale, output_name));
 
             debug!("created layer surface on output (scale {scale}x)");
         }
@@ -820,6 +869,7 @@ impl LayerShellHandler for App {
         _qh: &QueueHandle<Self>,
         layer: &LayerSurface,
     ) {
+        self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
@@ -835,6 +885,17 @@ impl LayerShellHandler for App {
     ) {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
+
+        if let Some(entry) = self.toast_surfaces.iter_mut().find(|e| &e.layer == layer) {
+            let (width, height) = configure.new_size;
+            entry.resize(
+                &self.gpu,
+                if width == 0 { 344 } else { width },
+                if height == 0 { 480 } else { height },
+            );
+            entry.dirty = true;
+            return;
+        }
 
         if let Some(entry) = self.osd_surfaces.iter_mut().find(|e| &e.layer == layer) {
             let (width, height) = configure.new_size;
@@ -959,7 +1020,25 @@ impl PointerHandler for App {
                 .map(|w| w.window.wl_surface() == &surface)
                 .unwrap_or(false);
 
-            if in_settings {
+            // Toasts are on their own surface; a click dismisses the card.
+            let on_toast = self
+                .toast_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == &surface);
+            if on_toast {
+                if let Some((_, id)) = self
+                    .toast_hits
+                    .iter()
+                    .find(|(rect, _)| rect.contains(point))
+                    .copied()
+                {
+                    self.toasts.dismiss(id);
+                    if let Some(server) = &self.notifications {
+                        server.close(id, 2);
+                    }
+                }
+                changed = true;
+            } else if in_settings {
                 if let Some(window) = self.settings.as_ref() {
                     let rect = crate::render::display_list::Rect {
                         x: 0.0,
