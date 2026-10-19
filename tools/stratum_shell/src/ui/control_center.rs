@@ -739,8 +739,10 @@ impl ControlCenter {
         area: Rect,
         input: &InputState,
     ) {
-        let net = ctx.state.net.get();
-        let enabled = net["enabled"].as_bool().unwrap_or(true);
+        // The radio state lives in `wifi.state` ("enabled"/"disabled"), not in
+        // `net.status`, which only lists active connections.
+        let wifi = ctx.state.wifi.get();
+        let enabled = wifi["state"].as_str() != Some("disabled");
 
         let toggle_rect = Rect {
             x: area.x,
@@ -764,6 +766,7 @@ impl ControlCenter {
         }
 
         let mut y = area.y + 48.0;
+        let net = ctx.state.net.get();
         let connections = net["connections"].as_array().cloned().unwrap_or_default();
         if connections.is_empty() {
             ui::paint_text_vcentered(

@@ -50,6 +50,8 @@ impl<T: Clone> Cell<T> {
 pub struct SystemState {
     pub audio: Cell<serde_json::Value>,
     pub net: Cell<serde_json::Value>,
+    /// Radio state from `wifi.state`; `net` only lists connections.
+    pub wifi: Cell<serde_json::Value>,
     pub bluetooth: Cell<serde_json::Value>,
     pub battery: Cell<serde_json::Value>,
     pub music: Cell<serde_json::Value>,
@@ -71,6 +73,7 @@ impl SystemState {
         Arc::new(Self {
             audio: Cell::new(serde_json::Value::Null),
             net: Cell::new(serde_json::Value::Null),
+            wifi: Cell::new(serde_json::Value::Null),
             bluetooth: Cell::new(serde_json::Value::Null),
             battery: Cell::new(serde_json::Value::Null),
             music: Cell::new(serde_json::Value::Null),
@@ -87,6 +90,7 @@ impl SystemState {
     pub fn take_dirty(&self) -> bool {
         self.audio.take_dirty()
             | self.net.take_dirty()
+            | self.wifi.take_dirty()
             | self.bluetooth.take_dirty()
             | self.battery.take_dirty()
             | self.music.take_dirty()
@@ -102,6 +106,7 @@ impl SystemState {
         Publisher::new(move |channel, payload| match channel {
             "audio" => state.audio.set(payload),
             "net" => state.net.set(payload),
+            "wifi" => state.wifi.set(payload),
             "bluetooth" => state.bluetooth.set(payload),
             "battery" => state.battery.set(payload),
             "music" => state.music.set(payload),

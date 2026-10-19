@@ -102,6 +102,18 @@ impl Default for ActionQueue {
 }
 
 /// Execute one action. Returns an error message for logging.
+/// Run `nmcli` and report whether it succeeded.
+fn run_nmcli(args: &[&str]) -> serde_json::Value {
+    match std::process::Command::new("nmcli").args(args).output() {
+        Ok(output) if output.status.success() => serde_json::json!({ "ok": true }),
+        Ok(output) => serde_json::json!({
+            "ok": false,
+            "error": String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        }),
+        Err(err) => serde_json::json!({ "ok": false, "error": err.to_string() }),
+    }
+}
+
 fn execute(action: &SystemAction) -> Result<(), String> {
     let result = match action {
         SystemAction::SetVolume(percent) => managers::audio::set_volume(*percent),
@@ -128,7 +140,10 @@ fn execute(action: &SystemAction) -> Result<(), String> {
         }
         SystemAction::BluetoothScan => managers::bluetooth::scan(),
         SystemAction::WifiToggle(on) => {
-            managers::wifi::toggle(if *on { "on" } else { "off" })
+            // NetworkManager directly: the manager's CLI wrapper shells out to
+            // stratum-cli, which blocks past the action worker's patience.
+            let target = if *on { "on" } else { "off" };
+            run_nmcli(&["radio", "wifi", target])
         }
         SystemAction::WifiConnect { ssid, password } => {
             managers::wifi::connect(ssid, password.as_deref())

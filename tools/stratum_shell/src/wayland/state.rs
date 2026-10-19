@@ -406,6 +406,7 @@ impl App {
                 let poll = std::time::Duration::from_secs(3);
                 loop {
                     state.net.set(managers::net::status());
+                    state.wifi.set(managers::wifi::state());
                     state.bluetooth.set(managers::bluetooth::status());
                     state.battery.set(managers::battery::status());
                     std::thread::sleep(poll);
@@ -1104,8 +1105,15 @@ impl PointerHandler for App {
                     };
                     if let Some(action) = self.control_center.on_click(point, rect, &input) {
                         self.apply_action(action);
-                        changed = true;
                     }
+                    // Every click in the window needs a redraw: controls are
+                    // immediate-mode and read the pointer state on the next
+                    // frame, so without this the slider and buttons never
+                    // observe a press.
+                    if let Some(settings) = &mut self.settings {
+                        settings.dirty = true;
+                    }
+                    changed = true;
                 }
             } else if let Some(action) = self.sidebar.on_click(point, &input) {
                 self.apply_action(action);

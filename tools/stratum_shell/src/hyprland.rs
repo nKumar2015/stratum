@@ -55,8 +55,11 @@ pub fn dispatch(command: &str) -> bool {
 }
 
 /// Focus a workspace by id, creating it if necessary.
+///
+/// Hyprland 0.56 routes dispatch through Lua, so the argument is a Lua call
+/// expression rather than the older `workspace <id>` shorthand.
 pub fn focus_workspace(id: i32) -> bool {
-    dispatch(&format!("workspace {id}"))
+    dispatch(&format!("hl.dsp.focus({{ workspace = \"{id}\" }})"))
 }
 
 impl HyprState {

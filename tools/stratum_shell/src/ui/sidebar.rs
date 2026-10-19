@@ -261,14 +261,13 @@ struct WorkspacesWidget {
 
 impl Widget for WorkspacesWidget {
     fn height(&self, _width: f32) -> Option<f32> {
-        // Room for ten workspaces plus gaps; the rail's flexible widget takes
-        // whatever is left.
-        Some(10.0 * 20.0 + 9.0 * 3.0)
+        // Five visible rows, matching the QML shell's scrolling window.
+        Some(5.0 * 20.0 + 4.0 * 3.0)
     }
 
     fn width(&self, height: f32) -> Option<f32> {
-        // Ten cells side by side in a horizontal bar.
-        Some(10.0 * (height.min(24.0) + 6.0))
+        // Five cells side by side in a horizontal bar.
+        Some(5.0 * (height.min(24.0) + 6.0))
     }
 
     fn paint(
@@ -281,16 +280,30 @@ impl Widget for WorkspacesWidget {
         let hypr = ctx.state.hypr.get();
         let active = hypr.active.get(ctx.output_name).copied().unwrap_or(-1);
 
-        // Show the ten-workspace window around the active workspace, matching
-        // the QML shell's grouping.
-        let (ids, active_index) = if active > 0 {
-            let start = ((active - 1) / 10) * 10 + 1;
-            let ids: Vec<i32> = (0..10).map(|offset| start + offset).collect();
+        // A workspace "page" is ten ids; show a five-row window that scrolls to
+        // keep the active workspace visible, biased two rows above centre —
+        // the same window the QML shell used.
+        const PAGE: i32 = 10;
+        const VISIBLE: usize = 5;
+        let (page_ids, active_index) = if active > 0 {
+            let start = ((active - 1) / PAGE) * PAGE + 1;
+            let ids: Vec<i32> = (0..PAGE).map(|offset| start + offset).collect();
             let index = ids.iter().position(|id| *id == active).unwrap_or(0);
             (ids, index)
         } else {
-            ((1..=10).collect(), 0)
+            ((1..=PAGE).collect(), 0)
         };
+
+        let start_index = active_index
+            .saturating_sub(2)
+            .min(page_ids.len().saturating_sub(VISIBLE));
+        let ids: Vec<i32> = page_ids
+            .iter()
+            .skip(start_index)
+            .take(VISIBLE)
+            .copied()
+            .collect();
+        let active_index = active_index.saturating_sub(start_index);
 
         self.cells.clear();
         let vertical = ctx.is_vertical();
