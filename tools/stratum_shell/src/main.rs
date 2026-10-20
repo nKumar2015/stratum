@@ -22,6 +22,7 @@ mod osd;
 mod power_menu;
 mod toasts;
 mod tray;
+mod tray_menu;
 #[allow(dead_code)]
 mod icons;
 mod render;

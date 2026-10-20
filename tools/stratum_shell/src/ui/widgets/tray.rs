@@ -8,7 +8,8 @@ use crate::render::display_list::{DisplayList, Rect};
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 pub struct Tray {
-    cells: Vec<(Rect, String)>,
+    /// Hit rects and the item each one belongs to, from the last paint.
+    cells: Vec<(Rect, crate::tray::TrayItem)>,
 }
 
 impl Tray {
@@ -78,16 +79,31 @@ impl Widget for Tray {
                 }
             };
             self.paint_item(ctx, list, cell, item);
-            self.cells.push((cell, item.id.clone()));
+            self.cells.push((cell, item.clone()));
             cursor += tray.cell + tray.gap;
         }
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {
-        self.cells
+        let (rect, item) = self
+            .cells
             .iter()
-            .find(|(rect, _)| rect.contains(ctx.point))
-            .map(|(_, id)| Action::ActivateTray(id.clone()))
+            .find(|(rect, _)| rect.contains(ctx.point))?;
+        match ctx.button {
+            crate::ui::MouseButton::Left => Some(Action::ActivateTray(item.service.clone())),
+            // Middle-click is SNI's SecondaryActivate, which some apps use to
+            // toggle a window.
+            crate::ui::MouseButton::Middle => {
+                Some(Action::SecondaryActivateTray(item.service.clone()))
+            }
+            crate::ui::MouseButton::Right => {
+                item.menu.as_ref().map(|path| Action::OpenTrayMenu {
+                    service: item.service.clone(),
+                    path: path.clone(),
+                    y: rect.y,
+                })
+            }
+        }
     }
 }
 

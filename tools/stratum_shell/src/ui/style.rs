@@ -21,6 +21,7 @@ pub struct Metrics {
     pub osd: OsdMetrics,
     pub toasts: ToastMetrics,
     pub power_menu: PowerMenuMetrics,
+    pub tray_menu: TrayMenuMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -35,6 +36,7 @@ impl Default for Metrics {
             osd: OsdMetrics::default(),
             toasts: ToastMetrics::default(),
             power_menu: PowerMenuMetrics::default(),
+            tray_menu: TrayMenuMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -288,6 +290,52 @@ impl Default for PowerMenuMetrics {
             icon: 48.0,
             label: 10.0,
             scrim_alpha: 0.63,
+        }
+    }
+}
+
+/// A tray item's context menu.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TrayMenuMetrics {
+    /// Width of the menu panel.
+    pub width: f32,
+    /// Height of one row.
+    pub row_height: f32,
+    /// Inner padding.
+    pub padding: f32,
+    /// Corner radius.
+    pub radius: f32,
+    /// Extra width added per nesting level.
+    pub indent: f32,
+    /// Font size for entries.
+    pub text: f32,
+    /// Maximum rows drawn before the list is truncated.
+    pub max_rows: usize,
+    /// Distance from the screen edge. The menu is anchored top-left, so the
+    /// left and top margins place it; the others are kept for symmetry.
+    pub margin_top: i32,
+    pub margin_right: i32,
+    pub margin_bottom: i32,
+    pub margin_left: i32,
+}
+
+impl Default for TrayMenuMetrics {
+    fn default() -> Self {
+        Self {
+            width: 200.0,
+            row_height: 28.0,
+            padding: 6.0,
+            radius: 6.0,
+            indent: 12.0,
+            text: 13.0,
+            max_rows: 24,
+            // Clears a 40 px vertical rail; a user with a top bar will set
+            // margin_top instead.
+            margin_top: 0,
+            margin_right: 0,
+            margin_bottom: 0,
+            margin_left: 44,
         }
     }
 }

@@ -95,12 +95,27 @@ impl Sidebar {
         output_name: &str,
         input: &InputState,
     ) -> Option<Action> {
+        self.on_click_with(point, output_name, input, ui::MouseButton::Left)
+    }
+
+    /// Route a click with an explicit button. The tray uses right-click for its
+    /// context menu.
+    pub fn on_click_with(
+        &mut self,
+        point: Point,
+        output_name: &str,
+        input: &InputState,
+        button: ui::MouseButton,
+    ) -> Option<Action> {
         let ctx = ClickCtx {
             point,
             output_name,
             input,
+            button,
         };
-        self.widgets.iter_mut().find_map(|widget| widget.on_click(&ctx))
+        self.widgets
+            .iter_mut()
+            .find_map(|widget| widget.on_click(&ctx))
     }
 
     /// Advance widget animations. Returns true while anything is moving.

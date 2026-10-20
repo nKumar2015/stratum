@@ -55,8 +55,15 @@ live theme switching, config hot reload, keyboard input, the power menu overlay,
 and the IPC socket.
 
 Not implemented: lock screen, polkit dialog, theme switcher overlay, audio EQ
-panel, notification actions/inline reply, tray activation and DBusMenu,
-screenshots, dashboard. See `docs/native-shell-parity.md`.
+panel, notification actions/inline reply, screenshots, dashboard. See
+`docs/native-shell-parity.md`.
+
+**Tray activation** works: left click sends `Activate`, middle click
+`SecondaryActivate`, and right click fetches the item's `com.canonical.dbusmenu`
+layout (calling `AboutToShow` first, or many menus come back empty) and shows it
+in an overlay surface beside the icon. Nested menus are drawn inline rather than
+as flyouts, and hover-out auto-close is not implemented yet. The D-Bus calls run
+on the action worker through `SystemState::tray_handle`.
 
 The **power menu** is a fullscreen overlay surface per output. Only the output
 it opened on is mapped and given `KeyboardInteractivity::Exclusive`, so keys

@@ -76,6 +76,9 @@ pub struct SystemState {
     pub hypr: Cell<crate::hyprland::HyprState>,
     /// System tray items, refreshed by the tray watcher.
     pub tray: Cell<Vec<crate::tray::TrayItem>>,
+    /// The open tray context menu, if any. The shell fetches it on right-click
+    /// and publishes it here so the overlay can paint it.
+    pub tray_menu: Cell<Option<crate::tray::TrayMenu>>,
     /// Backlight percentage, polled because there is no push source.
     pub brightness: Cell<i64>,
     /// Live notifications, newest last, published by the notification server.
@@ -85,6 +88,9 @@ pub struct SystemState {
     /// Called after any snapshot changes, so a sleeping event loop wakes up and
     /// repaints instead of waiting for its poll timeout.
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// The running tray, so the action worker can call it. Set once at startup
+    /// when the tray is enabled.
+    tray_handle: Mutex<Option<Arc<crate::tray::Tray>>>,
 }
 
 impl SystemState {
@@ -101,11 +107,24 @@ impl SystemState {
             polkit: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
             tray: Cell::new(Vec::new()),
+            tray_menu: Cell::new(None),
             brightness: Cell::new(0),
             notifications: Cell::new(Vec::new()),
             dnd: Cell::new(false),
             waker: Mutex::new(None),
+            tray_handle: Mutex::new(None),
         })
+    }
+
+    /// Install the running tray so actions can reach it.
+    pub fn set_tray_handle(&self, tray: Arc<crate::tray::Tray>) {
+        if let Ok(mut slot) = self.tray_handle.lock() {
+            *slot = Some(tray);
+        }
+    }
+
+    pub fn tray_handle(&self) -> Option<Arc<crate::tray::Tray>> {
+        self.tray_handle.lock().ok().and_then(|slot| slot.clone())
     }
 
     /// Install the callback that pokes the event loop. Set once at startup.
@@ -135,6 +154,8 @@ impl SystemState {
             | self.dashboard.take_dirty()
             | self.polkit.take_dirty()
             | self.hypr.take_dirty()
+            | self.tray.take_dirty()
+            | self.tray_menu.take_dirty()
             | self.notifications.take_dirty()
             | self.dnd.take_dirty()
     }

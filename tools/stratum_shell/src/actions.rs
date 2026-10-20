@@ -57,6 +57,20 @@ pub enum SystemAction {
     DismissAll,
     /// Switch the active theme by name.
     SetTheme(String),
+    /// Left-click a tray item.
+    TrayActivate { service: String, path: String },
+    /// Middle-click a tray item.
+    TraySecondaryActivate { service: String, path: String },
+    /// Fetch a tray item's DBusMenu and publish it.
+    TrayMenuOpen { service: String, path: String },
+    /// Invoke one entry of the open tray menu.
+    TrayMenuEvent {
+        service: String,
+        path: String,
+        id: i32,
+    },
+    /// Hide the tray menu.
+    TrayMenuClose,
 }
 
 /// A queue the UI writes to and a worker drains.
@@ -208,6 +222,62 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             // Handled by the shell, which owns the notification server; the
             // worker has nothing to do.
             return Ok(());
+        }
+        SystemAction::TrayActivate { service, path }
+        | SystemAction::TraySecondaryActivate { service, path } => {
+            let tray = state
+                .tray_handle()
+                .ok_or_else(|| "tray watcher is not running".to_string())?;
+            let result = if matches!(action, SystemAction::TrayActivate { .. }) {
+                tray.activate(service, path)
+            } else {
+                tray.secondary_activate(service, path)
+            };
+            match result {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(err) => serde_json::json!({ "ok": false, "error": err }),
+            }
+        }
+        SystemAction::TrayMenuOpen { service, path } => {
+            let tray = state
+                .tray_handle()
+                .ok_or_else(|| "tray watcher is not running".to_string())?;
+            match tray.menu(service, path) {
+                Ok(entries) => {
+                    state.tray_menu.set(Some(crate::tray::TrayMenu {
+                        service: service.clone(),
+                        path: path.clone(),
+                        entries,
+                    }));
+                    state.notify();
+                    serde_json::json!({ "ok": true })
+                }
+                Err(err) => {
+                    // A menu that fails to load must still dismiss, or the
+                    // overlay stays on screen with stale content.
+                    state.tray_menu.set(None);
+                    state.notify();
+                    serde_json::json!({ "ok": false, "error": err })
+                }
+            }
+        }
+        SystemAction::TrayMenuEvent { service, path, id } => {
+            let tray = state
+                .tray_handle()
+                .ok_or_else(|| "tray watcher is not running".to_string())?;
+            let result = tray.menu_event(service, path, *id);
+            // Any click closes the menu, the way the QML did.
+            state.tray_menu.set(None);
+            state.notify();
+            match result {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(err) => serde_json::json!({ "ok": false, "error": err }),
+            }
+        }
+        SystemAction::TrayMenuClose => {
+            state.tray_menu.set(None);
+            state.notify();
+            serde_json::json!({ "ok": true })
         }
         SystemAction::Spawn(argv) => {
             let Some((program, args)) = argv.split_first() else {

@@ -12,7 +12,7 @@ use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::registry_handlers;
 use smithay_client_toolkit::seat::pointer::{
-    PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT,
+    PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
 };
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::seat::keyboard::{
@@ -74,6 +74,13 @@ pub struct App {
     /// The power menu overlay and its per-output surfaces.
     power_menu: crate::power_menu::PowerMenu,
     power_surfaces: Vec<SurfaceEntry>,
+    /// A tray item's context menu, and its per-output surfaces.
+    tray_menu: crate::tray_menu::TrayMenuOverlay,
+    tray_menu_surfaces: Vec<SurfaceEntry>,
+    /// Last applied menu geometry, so the layer is only reconfigured on change.
+    /// Placement is part of the key: two menus with the same row count still
+    /// open beside different icons.
+    tray_menu_geometry: Option<((u32, u32), crate::tray_menu::Placement)>,
     /// Toast rects from the last paint, for click-to-dismiss.
     toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
@@ -175,6 +182,9 @@ impl App {
             toast_surfaces: Vec::new(),
             power_menu: crate::power_menu::PowerMenu::new(),
             power_surfaces: Vec::new(),
+            tray_menu: crate::tray_menu::TrayMenuOverlay::new(),
+            tray_menu_surfaces: Vec::new(),
+            tray_menu_geometry: None,
             toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
@@ -561,6 +571,76 @@ impl App {
             }
         }
 
+        // Tray context menu. It is sized to its contents, so the layer's size
+        // and margin are set from the published menu whenever that changes; the
+        // surface is unmapped when no menu is open.
+        self.tray_menu.set_metrics(&self.config.metrics.tray_menu);
+        let open_menu = self.state.tray_menu.get();
+        let menu_target = self.tray_menu.target().map(str::to_string);
+        let menu_size = self.tray_menu.size(open_menu.as_ref());
+        let placement = self.tray_menu.placement();
+        let geometry = menu_size.map(|(width, height)| {
+            (
+                (width.round() as u32, height.round() as u32),
+                placement,
+            )
+        });
+        if geometry != self.tray_menu_geometry {
+            self.tray_menu_geometry = geometry;
+            if let Some(((width, height), placement)) = geometry {
+                for surface in &self.tray_menu_surfaces {
+                    surface.layer.set_size(width, height);
+                    surface.layer.set_margin(
+                        placement.y.round() as i32,
+                        self.config.metrics.tray_menu.margin_right,
+                        self.config.metrics.tray_menu.margin_bottom,
+                        placement.x.round() as i32,
+                    );
+                    surface.layer.commit();
+                }
+            }
+        }
+        for entry in &mut self.tray_menu_surfaces {
+            let active = menu_target
+                .as_deref()
+                .map(|name| name == entry.output_name)
+                .unwrap_or(false)
+                && menu_size.is_some();
+            if !active {
+                entry.set_keyboard_exclusive(false);
+                entry.unmap();
+                continue;
+            }
+            if !entry.configured {
+                continue;
+            }
+            let output_name = entry.output_name.clone();
+            let mut ctx = crate::ui::PaintCtx {
+                theme: &theme,
+                appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
+                text: &mut self.text,
+                icons: &mut self.icons,
+                state: &self.state,
+                themes: &self.config.themes,
+                output_name: &output_name,
+                axis: self.config.sidebar.axis(),
+                dt,
+            };
+            let rect = entry.logical_rect();
+            let pointer = self
+                .pointer
+                .as_ref()
+                .filter(|(surface, _, _)| surface == entry.layer.wl_surface())
+                .map(|(_, x, y)| (*x, *y));
+            let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+            if let Some(menu) = &open_menu {
+                self.tray_menu.paint(&mut ctx, &mut list, rect, menu, pointer);
+            }
+            entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+            entry.dirty = false;
+        }
+
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
                 continue;
@@ -811,6 +891,8 @@ impl App {
                 });
             let tray = crate::tray::Tray::new(sink);
             self.tray = Some(Arc::clone(&tray));
+            // The action worker uses this for activation and menu requests.
+            self.state.set_tray_handle(Arc::clone(&tray));
             std::thread::Builder::new()
                 .name("stratum-tray".into())
                 .spawn(move || {
@@ -1113,6 +1195,31 @@ impl App {
                     .with_output(output.clone()),
             );
 
+            // Tray context menu: a small overlay pinned just inside the rail.
+            // It is sized to its contents, so it starts hidden and is mapped
+            // only while a menu is open.
+            let menu_wl = self.compositor_state.create_surface(qh);
+            let menu_layer = self.layer_shell.create_layer_surface(
+                qh,
+                menu_wl,
+                Layer::Overlay,
+                Some("stratum-traymenu"),
+                Some(output),
+            );
+            menu_layer.set_anchor(Anchor::TOP | Anchor::LEFT);
+            menu_layer.set_exclusive_zone(-1);
+            menu_layer.set_margin(
+                self.config.metrics.tray_menu.margin_top,
+                self.config.metrics.tray_menu.margin_right,
+                self.config.metrics.tray_menu.margin_bottom,
+                self.config.metrics.tray_menu.margin_left,
+            );
+            menu_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            self.tray_menu_surfaces.push(
+                SurfaceEntry::new(menu_layer, scale, output_name.clone())
+                    .with_output(output.clone()),
+            );
+
             debug!("created layer surface on output '{}' (scale {scale}x)", output_name);
         }
         true
@@ -1338,10 +1445,63 @@ impl App {
         match action {
             Action::OpenPanel(page) => self.control_center.toggle(page),
             Action::ClosePanel => self.control_center.close(),
-            Action::ActivateTray(id) => {
-                // Activation needs the tray's bus connection; hand it to the
-                // running watcher through the action queue.
-                tracing::debug!("tray activate requested: {id}");
+            Action::ActivateTray(service) => {
+                if let Some(item) = self
+                    .state
+                    .tray
+                    .get()
+                    .into_iter()
+                    .find(|item| item.service == service)
+                {
+                    self.actions.push(crate::actions::SystemAction::TrayActivate {
+                        service: item.service,
+                        path: item.path,
+                    });
+                }
+            }
+            Action::SecondaryActivateTray(service) => {
+                if let Some(item) = self
+                    .state
+                    .tray
+                    .get()
+                    .into_iter()
+                    .find(|item| item.service == service)
+                {
+                    self.actions.push(
+                        crate::actions::SystemAction::TraySecondaryActivate {
+                            service: item.service,
+                            path: item.path,
+                        },
+                    );
+                }
+            }
+            Action::OpenTrayMenu { service, path, y } => {
+                // Pin the menu to the output whose bar was clicked, then fetch
+                // its contents off-thread. The overlay appears when the menu
+                // publishes.
+                let output = self
+                    .pointer
+                    .as_ref()
+                    .and_then(|(surface, _, _)| {
+                        self.surfaces
+                            .iter()
+                            .find(|entry| entry.layer.wl_surface() == surface)
+                            .map(|entry| entry.output_name.clone())
+                    })
+                    .unwrap_or_else(|| self.focused_output());
+                let placement = crate::tray_menu::Placement {
+                    x: self.config.metrics.tray_menu.margin_left as f32,
+                    y,
+                };
+                self.tray_menu.open(&output, placement);
+                self.tray_menu_geometry = None;
+                self.actions.push(crate::actions::SystemAction::TrayMenuOpen {
+                    service,
+                    path,
+                });
+                for entry in &mut self.tray_menu_surfaces {
+                    entry.dirty = true;
+                }
             }
             Action::FocusWorkspace(id) => {
                 // Dispatch to the compositor. The widget has already marked the
@@ -1469,6 +1629,7 @@ impl LayerShellHandler for App {
         self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.power_surfaces.retain(|entry| &entry.layer != layer);
+        self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
     }
@@ -1491,6 +1652,19 @@ impl LayerShellHandler for App {
                 &self.gpu,
                 if width == 0 { 1920 } else { width },
                 if height == 0 { 1080 } else { height },
+            );
+            entry.dirty = true;
+            return;
+        }
+
+        if let Some(entry) = self.tray_menu_surfaces.iter_mut().find(|e| &e.layer == layer) {
+            // The compositor may grant a different size than requested; keep
+            // whatever it gave so the panel is drawn to fit.
+            let (width, height) = configure.new_size;
+            entry.resize(
+                &self.gpu,
+                width.max(1),
+                height.max(1),
             );
             entry.dirty = true;
             return;
@@ -1589,7 +1763,7 @@ impl PointerHandler for App {
         _pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
-        let mut clicked_at: Option<(wl_surface::WlSurface, f32, f32)> = None;
+        let mut clicked_at: Option<(wl_surface::WlSurface, f32, f32, crate::ui::MouseButton)> = None;
         let mut scroll_at: Option<(wl_surface::WlSurface, f32, f32, f32)> = None;
         let mut changed = false;
 
@@ -1606,9 +1780,17 @@ impl PointerHandler for App {
                     changed = true;
                 }
                 PointerEventKind::Press { button, .. } => {
-                    if button == BTN_LEFT {
-                        self.pointer_pressed = true;
-                        clicked_at = Some((event.surface.clone(), x, y));
+                    let mapped = match button {
+                        BTN_LEFT => Some(crate::ui::MouseButton::Left),
+                        BTN_RIGHT => Some(crate::ui::MouseButton::Right),
+                        BTN_MIDDLE => Some(crate::ui::MouseButton::Middle),
+                        _ => None,
+                    };
+                    if let Some(mapped) = mapped {
+                        if mapped == crate::ui::MouseButton::Left {
+                            self.pointer_pressed = true;
+                        }
+                        clicked_at = Some((event.surface.clone(), x, y, mapped));
                         changed = true;
                     }
                 }
@@ -1636,7 +1818,7 @@ impl PointerHandler for App {
             }
         }
 
-        if let Some((surface, x, y)) = clicked_at {
+        if let Some((surface, x, y, button)) = clicked_at {
             let input = crate::ui::InputState {
                 pointer: Some((x, y)),
                 pressed: true,
@@ -1661,7 +1843,29 @@ impl PointerHandler for App {
                 .power_surfaces
                 .iter()
                 .any(|p| p.layer.wl_surface() == &surface);
-            if on_power {
+            // A click inside the open tray menu either runs an entry or
+            // dismisses the menu.
+            let on_tray_menu = self
+                .tray_menu_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == &surface);
+            if on_tray_menu {
+                let menu = self.state.tray_menu.get();
+                if let Some(menu) = menu {
+                    if let Some(id) = self.tray_menu.on_click(point, &menu) {
+                        self.actions.push(crate::actions::SystemAction::TrayMenuEvent {
+                            service: menu.service,
+                            path: menu.path,
+                            id,
+                        });
+                    } else {
+                        self.actions.push(crate::actions::SystemAction::TrayMenuClose);
+                    }
+                }
+                self.tray_menu.close();
+                self.tray_menu_geometry = None;
+                changed = true;
+            } else if on_power {
                 if let Some(entry) = self
                     .power_surfaces
                     .iter()
@@ -1709,6 +1913,13 @@ impl PointerHandler for App {
                     changed = true;
                 }
             } else {
+                // A click elsewhere dismisses an open tray menu, the way
+                // clicking away from a popup does in the QML shell.
+                if self.tray_menu.target().is_some() {
+                    self.actions.push(crate::actions::SystemAction::TrayMenuClose);
+                    self.tray_menu.close();
+                    self.tray_menu_geometry = None;
+                }
                 // The widget tree is shared across outputs, so the click has to
                 // be attributed to the surface it landed on: a workspace click
                 // on the left monitor must move that monitor.
@@ -1719,7 +1930,10 @@ impl PointerHandler for App {
                     .map(|entry| entry.output_name.clone())
                     .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
                     .unwrap_or_default();
-                if let Some(action) = self.sidebar.on_click(point, &output_name, &input) {
+                if let Some(action) =
+                    self.sidebar
+                        .on_click_with(point, &output_name, &input, button)
+                {
                     self.apply_action(action);
                     changed = true;
                 }

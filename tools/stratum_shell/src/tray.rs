@@ -41,6 +41,10 @@ pub type TraySink = Arc<dyn Fn(Vec<TrayItem>) + Send + Sync>;
 pub struct Tray {
     items: Mutex<Vec<TrayItem>>,
     sink: TraySink,
+    /// The session connection, stored when `serve` takes the watcher name.
+    /// Activation and menu calls use it; requests run on the action worker, so
+    /// they are synchronous `block_on` calls over zbus's async API.
+    connection: Mutex<Option<Connection>>,
 }
 
 impl Tray {
@@ -48,7 +52,113 @@ impl Tray {
         Arc::new(Self {
             items: Mutex::new(Vec::new()),
             sink,
+            connection: Mutex::new(None),
         })
+    }
+
+    fn connection(&self) -> Result<Connection, String> {
+        self.connection
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .ok_or_else(|| "tray watcher is not running".to_string())
+    }
+
+    /// Left-click activation (`org.kde.StatusNotifierItem.Activate`).
+    ///
+    /// The position arguments are for items that open a menu at the cursor;
+    /// zero is what most hosts send.
+    pub fn activate(&self, service: &str, path: &str) -> Result<(), String> {
+        let connection = self.connection()?;
+        pollster::block_on(async {
+            connection
+                .call_method(
+                    Some(service),
+                    path,
+                    Some("org.kde.StatusNotifierItem"),
+                    "Activate",
+                    &(0i32, 0i32),
+                )
+                .await
+                .map_err(|err| err.to_string())
+        })
+        .map(|_| ())
+    }
+
+    /// Secondary activation (middle click), used by some applications to toggle
+    /// a window.
+    pub fn secondary_activate(&self, service: &str, path: &str) -> Result<(), String> {
+        let connection = self.connection()?;
+        pollster::block_on(async {
+            connection
+                .call_method(
+                    Some(service),
+                    path,
+                    Some("org.kde.StatusNotifierItem"),
+                    "SecondaryActivate",
+                    &(0i32, 0i32),
+                )
+                .await
+                .map_err(|err| err.to_string())
+        })
+        .map(|_| ())
+    }
+
+    /// Fetch and flatten the item's DBusMenu.
+    ///
+    /// `AboutToShow` is called first, which is what lets applications populate
+    /// their menu lazily; without it many menus come back empty.
+    pub fn menu(&self, service: &str, menu_path: &str) -> Result<Vec<MenuEntry>, String> {
+        let connection = self.connection()?;
+        pollster::block_on(async {
+            let _ = connection
+                .call_method(
+                    Some(service),
+                    menu_path,
+                    Some("com.canonical.dbusmenu"),
+                    "AboutToShow",
+                    &(0i32,),
+                )
+                .await;
+
+            let reply = connection
+                .call_method(
+                    Some(service),
+                    menu_path,
+                    Some("com.canonical.dbusmenu"),
+                    "GetLayout",
+                    &(0i32, -1i32, Vec::<String>::new()),
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+
+            let body = reply.body();
+            let (_revision, layout): (u32, OwnedValue) =
+                body.deserialize().map_err(|err| err.to_string())?;
+            let mut entries = Vec::new();
+            decode_layout(&layout, &mut entries, 0, "0");
+            Ok(entries)
+        })
+    }
+
+    /// Send a menu item's `clicked` event.
+    pub fn menu_event(&self, service: &str, menu_path: &str, id: i32) -> Result<(), String> {
+        let connection = self.connection()?;
+        pollster::block_on(async {
+            let data = OwnedValue::try_from(zbus::zvariant::Value::from(0i32))
+                .map_err(|err| err.to_string())?;
+            connection
+                .call_method(
+                    Some(service),
+                    menu_path,
+                    Some("com.canonical.dbusmenu"),
+                    "Event",
+                    &(id, "clicked", &data, 0u32),
+                )
+                .await
+                .map_err(|err| err.to_string())
+        })
+        .map(|_| ())
     }
 
     pub fn snapshot(&self) -> Vec<TrayItem> {
@@ -150,6 +260,40 @@ impl Watcher {
     ) -> zbus::Result<()>;
 }
 
+/// One entry in a tray item's context menu.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuEntry {
+    /// DBusMenu id, used both as an identifier and (in the QML shell's model)
+    /// as the node path. Kept separately so nested items stay distinct.
+    pub id: i32,
+    /// Node path, e.g. `0/1/2`.
+    pub path: String,
+    pub label: String,
+    pub enabled: bool,
+    pub visible: bool,
+    pub separator: bool,
+    /// Nesting depth, for indentation.
+    pub depth: usize,
+    /// Whether this entry has visible children.
+    pub has_children: bool,
+}
+
+impl MenuEntry {
+    /// Whether the entry should be drawn and can be clicked.
+    pub fn selectable(&self) -> bool {
+        self.visible && !self.separator && self.enabled && !self.has_children
+    }
+}
+
+/// A snapshot for the UI, published through [`crate::sys_state::SystemState`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TrayMenu {
+    pub service: String,
+    /// Object path of the DBusMenu interface.
+    pub path: String,
+    pub entries: Vec<MenuEntry>,
+}
+
 /// Split `org.kde.StatusNotifierItem-1234-1/StatusNotifierItem` into bus and path.
 fn split_service(value: &str) -> (String, String) {
     match value.find('/') {
@@ -158,6 +302,59 @@ fn split_service(value: &str) -> (String, String) {
             value[index..].to_string(),
         ),
         None => (value.to_string(), "/StatusNotifierItem".to_string()),
+    }
+}
+
+/// Recursively decode a DBusMenu layout node.
+///
+/// The wire type is `(ia{sv}av)` for the node, where the `av` holds child
+/// nodes in the same shape.
+fn decode_layout(value: &OwnedValue, out: &mut Vec<MenuEntry>, depth: usize, path: &str) {
+    let Ok(clone) = value.try_clone() else {
+        return;
+    };
+    let Ok((id, properties, children)) =
+        <(i32, std::collections::HashMap<String, OwnedValue>, Vec<OwnedValue>)>::try_from(clone)
+    else {
+        return;
+    };
+
+    let text = |key: &str| {
+        properties
+            .get(key)
+            .and_then(|value| <&str>::try_from(value).ok())
+            .map(str::to_string)
+    };
+    let flag = |key: &str| {
+        properties
+            .get(key)
+            .and_then(|value| bool::try_from(value).ok())
+    };
+
+    // The root node (id 0) is a container with no label; skip it but keep its
+    // children, which is what the QML shell's menu opener shows.
+    let is_root = path == "0";
+    if !is_root {
+        out.push(MenuEntry {
+            id,
+            path: path.to_string(),
+            label: text("label").unwrap_or_default().replace('&', ""),
+            enabled: flag("enabled").unwrap_or(true),
+            visible: flag("visible").unwrap_or(true),
+            separator: text("type").as_deref() == Some("separator"),
+            depth,
+            has_children: !children.is_empty(),
+        });
+    }
+
+    for (index, child) in children.iter().enumerate() {
+        let child_path = format!("{path}/{index}");
+        decode_layout(
+            child,
+            out,
+            if is_root { depth } else { depth + 1 },
+            &child_path,
+        );
     }
 }
 
@@ -172,6 +369,9 @@ pub async fn serve(tray: Arc<Tray>) -> zbus::Result<()> {
         .at("/StatusNotifierWatcher", Watcher { inner: Arc::clone(&tray) })
         .await?;
     connection.request_name("org.kde.StatusNotifierWatcher").await?;
+    if let Ok(mut slot) = tray.connection.lock() {
+        *slot = Some(connection.clone());
+    }
     info!("tray watcher listening on org.kde.StatusNotifierWatcher");
 
     // Refresh item properties periodically; SNI exposes no signal for them.
@@ -377,5 +577,229 @@ mod tests {
         let json = to_json(&items);
         assert_eq!(json["items"][0]["id"], "app");
         assert_eq!(json["items"][0]["icon"], "app-icon");
+    }
+
+    /// Build a DBusMenu layout node in the wire shape `(ia{sv}av)`.
+    fn node(
+        id: i32,
+        props: &[(&str, zbus::zvariant::Value<'static>)],
+        children: Vec<OwnedValue>,
+    ) -> OwnedValue {
+        let properties: std::collections::HashMap<String, OwnedValue> = props
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    OwnedValue::try_from(value.try_clone().unwrap()).unwrap(),
+                )
+            })
+            .collect();
+        let children: Vec<OwnedValue> = children;
+        // DBusMenu nodes reach us as a serialized struct; build the same shape
+        // here so the decoder is exercised against real wire types.
+        let mut builder = zbus::zvariant::StructureBuilder::new();
+        builder.push_value(zbus::zvariant::Value::from(id));
+        builder.push_value(zbus::zvariant::Value::from(properties));
+        builder.push_value(zbus::zvariant::Value::from(children));
+        let structure = builder.build().unwrap();
+        OwnedValue::try_from(zbus::zvariant::Value::from(structure)).unwrap()
+    }
+
+    #[test]
+    fn decodes_menu_tree_and_skips_the_root() {
+        let child = node(10, &[("label", zbus::zvariant::Value::from("Open"))], vec![]);
+        let disabled = node(
+            11,
+            &[
+                ("label", zbus::zvariant::Value::from("Disabled")),
+                ("enabled", zbus::zvariant::Value::from(false)),
+            ],
+            vec![],
+        );
+        let separator = node(
+            12,
+            &[("type", zbus::zvariant::Value::from("separator"))],
+            vec![],
+        );
+        let root = node(0, &[], vec![child, disabled, separator]);
+
+        let mut entries = Vec::new();
+        decode_layout(&root, &mut entries, 0, "0");
+
+        // The container itself is not shown; its three children are.
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].label, "Open");
+        assert!(entries[0].enabled);
+        assert_eq!(entries[0].path, "0/0");
+        assert!(!entries[1].enabled);
+        assert!(entries[2].separator);
+        assert!(!entries[2].selectable());
+        assert!(!entries[1].selectable(), "disabled entries must not be clickable");
+    }
+
+    #[test]
+    fn nested_items_get_depth_and_children_flag() {
+        let leaf = node(21, &[("label", zbus::zvariant::Value::from("Nested"))], vec![]);
+        let parent = node(20, &[("label", zbus::zvariant::Value::from("More"))], vec![leaf]);
+        let root = node(0, &[], vec![parent]);
+
+        let mut entries = Vec::new();
+        decode_layout(&root, &mut entries, 0, "0");
+
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].has_children);
+        assert!(!entries[0].selectable(), "a submenu parent does not activate");
+        assert_eq!(entries[1].depth, 1);
+        assert_eq!(entries[1].path, "0/0/0");
+        assert_eq!(entries[1].label, "Nested");
+    }
+
+    /// A fake StatusNotifierItem served on the session bus.
+    ///
+    /// This exercises the real call paths (`Activate`, `GetLayout`) rather than
+    /// only the decoder, which is the part most likely to break against a real
+    /// application.
+    struct FakeItem {
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[zbus::interface(name = "org.kde.StatusNotifierItem")]
+    impl FakeItem {
+        fn activate(&self, _x: i32, _y: i32) {
+            if let Ok(mut calls) = self.calls.lock() {
+                calls.push("activate".into());
+            }
+        }
+
+        fn secondary_activate(&self, _x: i32, _y: i32) {
+            if let Ok(mut calls) = self.calls.lock() {
+                calls.push("secondary".into());
+            }
+        }
+
+        #[zbus(property)]
+        fn menu(&self) -> OwnedObjectPath {
+            OwnedObjectPath::try_from("/Menu").unwrap()
+        }
+    }
+
+    /// The DBusMenu half. zbus generates one `Interface` impl per annotated
+    /// block, so the two interfaces need distinct types.
+    struct FakeMenu {
+        calls: Arc<Mutex<Vec<String>>>,
+        layout: OwnedValue,
+    }
+
+    #[zbus::interface(name = "com.canonical.dbusmenu")]
+    impl FakeMenu {
+        fn about_to_show(&self, _id: i32) -> bool {
+            if let Ok(mut calls) = self.calls.lock() {
+                calls.push("about_to_show".into());
+            }
+            true
+        }
+
+        fn get_layout(
+            &self,
+            _parent: i32,
+            _depth: i32,
+            _properties: Vec<String>,
+        ) -> (u32, OwnedValue) {
+            (1, self.layout.clone())
+        }
+    }
+
+    #[test]
+    fn activation_and_menu_work_over_dbus() {
+        let name = format!("org.stratum.FakeTray{}", std::process::id());
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let layout = node(
+            0,
+            &[],
+            vec![node(
+                1,
+                &[("label", zbus::zvariant::Value::from("Open"))],
+                vec![],
+            )],
+        );
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+
+        // Serve the fake item on a dedicated thread. Incoming method calls need
+        // an executor to dispatch them; `block_on` provides one, and the client
+        // below uses `pollster::block_on` on a *different* thread, which must not
+        // inherit this one's async context.
+        let calls_for_server = Arc::clone(&calls);
+        let name_for_server = name.clone();
+        let server = std::thread::spawn(move || {
+            pollster::block_on(async move {
+                let Ok(connection) = zbus::Connection::session().await else {
+                    return;
+                };
+                if connection.request_name(name_for_server.as_str()).await.is_err() {
+                    return;
+                }
+                if connection
+                    .object_server()
+                    .at(
+                        "/StatusNotifierItem",
+                        FakeItem {
+                            calls: Arc::clone(&calls_for_server),
+                        },
+                    )
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                if connection
+                    .object_server()
+                    .at(
+                        "/Menu",
+                        FakeMenu {
+                            calls: Arc::clone(&calls_for_server),
+                            layout,
+                        },
+                    )
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                let _ = ready_tx.send(());
+                // Keep dispatching until the test process exits.
+                std::future::pending::<()>().await;
+            });
+        });
+
+        if ready_rx.recv_timeout(std::time::Duration::from_secs(5)).is_err() {
+            // No session bus or the objects could not be served; nothing to
+            // assert (the decoder tests still run).
+            eprintln!("skipping: could not serve the fake tray item");
+            return;
+        }
+
+        let Ok(client) = pollster::block_on(zbus::Connection::session()) else {
+            return;
+        };
+        let tray = Tray::new(Arc::new(|_| {}));
+        *tray.connection.lock().unwrap() = Some(client);
+
+        tray.activate(&name, "/StatusNotifierItem")
+            .expect("Activate should succeed");
+        tray.secondary_activate(&name, "/StatusNotifierItem")
+            .expect("SecondaryActivate should succeed");
+
+        let entries = tray.menu(&name, "/Menu").expect("GetLayout should succeed");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].label, "Open");
+
+        let calls = calls.lock().unwrap().clone();
+        assert!(calls.contains(&"activate".to_string()));
+        assert!(calls.contains(&"secondary".to_string()));
+        assert!(
+            calls.contains(&"about_to_show".to_string()),
+            "menus must be asked to populate before the layout is read"
+        );
+        drop(server);
     }
 }

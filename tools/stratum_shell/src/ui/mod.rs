@@ -103,7 +103,7 @@ pub struct InputState {
 }
 
 /// Something a widget asks the shell to do when clicked.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     /// Open the control centre on a specific page.
     OpenPanel(crate::ui::control_center::Page),
@@ -111,10 +111,28 @@ pub enum Action {
     ClosePanel,
     /// Activate a tray item by id.
     ActivateTray(String),
+    /// Open a tray item's context menu. `service` and `menu_path` come from the
+    /// item the widget drew; `y` is the icon's top edge in bar coordinates, so
+    /// the menu can open beside it.
+    OpenTrayMenu {
+        service: String,
+        path: String,
+        y: f32,
+    },
+    /// Activate a tray item with the secondary (middle) button.
+    SecondaryActivateTray(String),
     /// Focus a workspace. The shell applies it to the output whose surface was
     /// clicked and updates its local state immediately, so the bar reflects the
     /// change before the compositor's event arrives.
     FocusWorkspace(i32),
+}
+
+/// Which mouse button produced a click.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
 }
 
 /// Everything a widget needs to interpret a click.
@@ -126,6 +144,8 @@ pub struct ClickCtx<'a> {
     pub point: Point,
     pub output_name: &'a str,
     pub input: &'a InputState,
+    /// Primary unless the shell reports otherwise.
+    pub button: MouseButton,
 }
 
 /// A bar widget.
@@ -243,6 +263,26 @@ impl Column {
             point,
             output_name,
             input,
+            button: MouseButton::Left,
+        };
+        self.widgets
+            .iter_mut()
+            .find_map(|widget| widget.on_click(&ctx))
+    }
+
+    /// Route a click with an explicit button, used for the tray's context menu.
+    pub fn on_click_with(
+        &mut self,
+        point: Point,
+        output_name: &str,
+        input: &InputState,
+        button: MouseButton,
+    ) -> Option<Action> {
+        let ctx = ClickCtx {
+            point,
+            output_name,
+            input,
+            button,
         };
         self.widgets
             .iter_mut()
