@@ -7,11 +7,6 @@
 use crate::render::display_list::{DisplayList, Rect};
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
-/// Size of one tray cell, in logical pixels.
-const CELL: f32 = 24.0;
-/// Gap between cells.
-const GAP: f32 = 4.0;
-
 pub struct Tray {
     cells: Vec<(Rect, String)>,
 }
@@ -29,12 +24,12 @@ impl Default for Tray {
 }
 
 impl Widget for Tray {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(CELL)
+    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(metrics.tray.cell)
     }
 
-    fn width(&self, height: f32) -> Option<f32> {
-        Some((height.max(CELL) + GAP) * 1.4)
+    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some((height.max(metrics.tray.cell) + metrics.tray.gap) * 1.4)
     }
 
     fn paint(
@@ -55,7 +50,12 @@ impl Widget for Tray {
         // Vertical rails show one column, bars show a row. Both bound the count
         // so a misbehaving application cannot push the rest of the bar off
         // screen.
-        let limit = if vertical { 6 } else { 8 };
+        let tray = &ctx.metrics.tray;
+        let limit = if vertical {
+            tray.vertical_limit
+        } else {
+            tray.horizontal_limit
+        };
 
         for item in items.iter().take(limit) {
             let cell = if vertical {
@@ -63,7 +63,7 @@ impl Widget for Tray {
                     x: rect.x,
                     y: cursor,
                     width: rect.width,
-                    height: CELL,
+                    height: tray.cell,
                     radius: 0.0,
                     color: crate::render::display_list::Color::TRANSPARENT,
                 }
@@ -71,7 +71,7 @@ impl Widget for Tray {
                 Rect {
                     x: cursor,
                     y: rect.y,
-                    width: CELL,
+                    width: tray.cell,
                     height: rect.height,
                     radius: 0.0,
                     color: crate::render::display_list::Color::TRANSPARENT,
@@ -79,7 +79,7 @@ impl Widget for Tray {
             };
             self.paint_item(ctx, list, cell, item);
             self.cells.push((cell, item.id.clone()));
-            cursor += CELL + GAP;
+            cursor += tray.cell + tray.gap;
         }
     }
 
@@ -99,6 +99,7 @@ impl Tray {
         cell: Rect,
         item: &crate::tray::TrayItem,
     ) {
+        let tray = &ctx.metrics.tray;
         let color = match item.status.as_str() {
             "NeedsAttention" => ctx.theme.warning,
             "Passive" => ctx.theme.text_muted,
@@ -118,24 +119,24 @@ impl Tray {
                     width: *width,
                     height: *height,
                     pixels: std::sync::Arc::from(pixels.as_slice()),
-                    x: cell.x + (cell.width - CELL) * 0.5,
-                    y: cell.y + (cell.height - CELL) * 0.5,
-                    width_logical: CELL,
-                    height_logical: CELL,
+                    x: cell.x + (cell.width - tray.cell) * 0.5,
+                    y: cell.y + (cell.height - tray.cell) * 0.5,
+                    width_logical: tray.cell,
+                    height_logical: tray.cell,
                 });
                 return;
             }
         }
 
-        if let Some(icon) = ctx.icons.load_icon(&item.icon_name, CELL as u32, 2) {
+        if let Some(icon) = ctx.icons.load_icon(&item.icon_name, tray.cell as u32, 2) {
             list.push_image(crate::render::display_list::Image {
                 width: icon.width,
                 height: icon.height,
                 pixels: icon.pixels,
-                x: cell.x + (cell.width - CELL) * 0.5,
-                y: cell.y + (cell.height - CELL) * 0.5,
-                width_logical: CELL,
-                height_logical: CELL,
+                x: cell.x + (cell.width - tray.cell) * 0.5,
+                y: cell.y + (cell.height - tray.cell) * 0.5,
+                width_logical: tray.cell,
+                height_logical: tray.cell,
             });
             return;
         }
@@ -147,6 +148,6 @@ impl Tray {
             .or_else(|| item.id.chars().next())
             .unwrap_or('?')
             .to_string();
-        ui::paint_text_centered(ctx, list, &label, cell, 13.0, color);
+        ui::paint_text_centered(ctx, list, &label, cell, ctx.metrics.typography.tray, color);
     }
 }

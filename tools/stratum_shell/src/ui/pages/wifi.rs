@@ -67,7 +67,7 @@ impl WifiPage {
             x: area.x,
             y: area.y + 2.0,
             width: area.width,
-            height: 30.0,
+            height: ctx.metrics.page.button_height,
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
@@ -96,8 +96,8 @@ impl WifiPage {
                 "Not connected",
                 area.x,
                 Rect { y, height: 24.0, ..area },
-                13.0,
-                400,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
             y += 32.0;
@@ -112,8 +112,8 @@ impl WifiPage {
                     x: area.x,
                     y,
                     width: area.width,
-                    height: 40.0,
-                    radius: 8.0,
+                    height: ctx.metrics.page.row_height,
+                    radius: ctx.metrics.page.button_radius,
                     color: Color::TRANSPARENT,
                 };
                 if controls::selectable_row(
@@ -122,7 +122,7 @@ impl WifiPage {
                 {
                     pending.push(SystemAction::WifiDisconnect(device));
                 }
-                y += 44.0;
+                y += ctx.metrics.page.row_spacing;
             }
         }
 
@@ -137,8 +137,8 @@ impl WifiPage {
                     height: 24.0,
                     ..area
                 },
-                13.0,
-                400,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
             return;
@@ -157,8 +157,8 @@ impl WifiPage {
                 "Scanning…",
                 area.x,
                 Rect { y, height: 24.0, ..area },
-                13.0,
-                400,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
             return;
@@ -201,7 +201,7 @@ impl WifiPage {
                 y: y + rows as f32 * row_height,
                 width: area.width,
                 height: 36.0,
-                radius: 8.0,
+                radius: ctx.metrics.page.button_radius,
                 color: Color::TRANSPARENT,
             };
             if controls::selectable_row(

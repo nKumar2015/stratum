@@ -68,16 +68,17 @@ impl Sidebar {
         }
 
         if self.axis == Axis::Vertical && self.inverted_corners {
+            let corner = ctx.metrics.bar.corner_size;
             let edge_x = match self.position {
                 SidebarPosition::Left => surface.x + surface.width,
-                _ => surface.x - 20.0,
+                _ => surface.x - corner,
             };
-            ui::paint_inverted_corner(list, edge_x, surface.y, 20.0, false, ctx.theme.bg_main);
+            ui::paint_inverted_corner(list, edge_x, surface.y, corner, false, ctx.theme.bg_main);
             ui::paint_inverted_corner(
                 list,
                 edge_x,
-                surface.y + surface.height - 20.0,
-                20.0,
+                surface.y + surface.height - corner,
+                corner,
                 true,
                 ctx.theme.bg_main,
             );
@@ -133,7 +134,7 @@ impl Sidebar {
         let heights: Vec<Option<f32>> = self
             .widgets
             .iter()
-            .map(|widget| widget.height(content_width))
+            .map(|widget| widget.height(content_width, &ctx.metrics))
             .collect();
 
         let fixed_total: f32 = heights.iter().flatten().sum();
@@ -177,7 +178,7 @@ impl Sidebar {
         let widths: Vec<Option<f32>> = self
             .widgets
             .iter()
-            .map(|widget| widget.width(height))
+            .map(|widget| widget.width(height, &ctx.metrics))
             .collect();
 
         let fixed_total: f32 = widths.iter().flatten().sum();

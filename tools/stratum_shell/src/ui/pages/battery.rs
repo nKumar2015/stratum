@@ -56,8 +56,8 @@ impl BatteryPage {
                 x: area.x,
                 y,
                 width: area.width.min(320.0),
-                height: 34.0,
-                radius: 8.0,
+                height: ctx.metrics.page.row_height,
+                radius: ctx.metrics.page.button_radius,
                 color: Color::TRANSPARENT,
             };
             let selected = profile == option;
@@ -68,7 +68,7 @@ impl BatteryPage {
                 self.profile.set(option.to_string());
                 pending.push(SystemAction::SetPowerProfile(option.to_string()));
             }
-            y += 38.0;
+            y += ctx.metrics.page.stat_spacing;
         }
     }
 }

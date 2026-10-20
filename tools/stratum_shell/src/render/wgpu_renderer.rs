@@ -231,6 +231,21 @@ impl SurfaceRenderer {
             .find(|f| matches!(f, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm))
             .unwrap_or(caps.formats[0]);
 
+        // Overlays (OSD, toasts) are cleared to transparent every frame, so the
+        // surface must actually honour the alpha channel. `Auto` often resolves
+        // to `Opaque` on Vulkan/Wayland, which is what turned a faded-out
+        // overlay into an opaque black rectangle. Prefer a transparent mode and
+        // fall back only when the compositor offers nothing better.
+        let order = [
+            wgpu::CompositeAlphaMode::PreMultiplied,
+            wgpu::CompositeAlphaMode::PostMultiplied,
+            wgpu::CompositeAlphaMode::Inherit,
+        ];
+        let alpha_mode = order
+            .into_iter()
+            .find(|mode| caps.alpha_modes.contains(mode))
+            .unwrap_or(caps.alpha_modes[0]);
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -238,7 +253,7 @@ impl SurfaceRenderer {
             height: size.1.max(1),
             present_mode: wgpu::PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
@@ -659,6 +674,7 @@ fn append_textured_px(
 }
 
 /// Emit a textured quad whose corners are transformed by `t`.
+#[allow(clippy::too_many_arguments)] // Geometry, UVs, transform, and tint.
 fn append_quad_transformed(
     out: &mut Batch,
     t: Transform,

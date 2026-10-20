@@ -258,11 +258,11 @@ pub(crate) fn heading(
         title,
         area.x,
         Rect {
-            height: 30.0,
+            height: ctx.metrics.page.button_height,
             ..area
         },
-        18.0,
-        700,
+        ctx.metrics.typography.heading,
+ctx.metrics.typography.weight_bold,
         ctx.theme.text_main,
     );
     Rect {
@@ -295,8 +295,8 @@ pub(crate) fn stat_row(
         label,
         rect.x,
         rect,
-        13.0,
-        400,
+        ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
         ctx.theme.text_muted,
     );
     crate::ui::paint_text_vcentered(
@@ -305,8 +305,8 @@ pub(crate) fn stat_row(
         value,
         rect.x + rect.width * 0.45,
         rect,
-        13.0,
-        500,
+        ctx.metrics.typography.body,
+ctx.metrics.typography.weight_medium,
         ctx.theme.text_main,
     );
 }
@@ -329,8 +329,8 @@ pub(crate) fn section_label(
             height: 20.0,
             ..area
         },
-        12.0,
-        600,
+        ctx.metrics.typography.label,
+ctx.metrics.typography.weight_bold,
         ctx.theme.text_muted,
     );
 }

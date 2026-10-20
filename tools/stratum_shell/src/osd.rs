@@ -69,17 +69,14 @@ pub struct Osd {
     opacity: Tween,
     /// Seconds remaining before fading out.
     hold_remaining: f32,
+    /// Sizes and timings, refreshed from the config on each tick.
+    metrics: crate::ui::style::OsdMetrics,
     /// Last observed values, used to detect changes.
     last_volume: Option<i64>,
     last_muted: Option<bool>,
     last_brightness: Option<i64>,
     visible: bool,
 }
-
-/// How long the OSD stays fully visible before fading.
-const HOLD_SECONDS: f32 = 1.2;
-const FADE_IN_SECONDS: f32 = 0.13;
-const FADE_OUT_SECONDS: f32 = 0.22;
 
 impl Osd {
     pub fn new() -> Self {
@@ -88,6 +85,7 @@ impl Osd {
             value: 0,
             muted: false,
             opacity: Tween::new(0.0),
+            metrics: crate::ui::style::OsdMetrics::default(),
             hold_remaining: 0.0,
             last_volume: None,
             last_muted: None,
@@ -101,13 +99,19 @@ impl Osd {
         self.visible || self.opacity.value() > 0.005
     }
 
+    /// Adopt the configured sizes and timings.
+    pub fn set_metrics(&mut self, metrics: &crate::ui::style::OsdMetrics) {
+        self.metrics = metrics.clone();
+    }
+
     /// Show the OSD for a channel, restarting the hold timer.
     fn show(&mut self, channel: Channel, value: i64, muted: bool) {
         self.channel = channel;
         self.value = value.clamp(0, channel.max() as i64);
         self.muted = muted;
-        self.hold_remaining = HOLD_SECONDS;
-        self.opacity.to(1.0, FADE_IN_SECONDS, ui::animation::Easing::EaseOut);
+        self.hold_remaining = self.metrics.hold_seconds;
+        self.opacity
+            .to(1.0, self.metrics.fade_in_seconds, ui::animation::Easing::EaseOut);
         self.visible = true;
     }
 
@@ -156,7 +160,7 @@ impl Osd {
             if self.hold_remaining <= 0.0 {
                 self.visible = false;
                 self.opacity
-                    .to(0.0, FADE_OUT_SECONDS, ui::animation::Easing::EaseIn);
+                    .to(0.0, self.metrics.fade_out_seconds, ui::animation::Easing::EaseIn);
                 animating = true;
             }
         }
@@ -170,15 +174,16 @@ impl Osd {
             return;
         }
 
-        // Panel geometry: 320x94 logical, centred horizontally.
-        let width = 320.0_f32.min(surface.width - 16.0);
-        let height = 94.0_f32.min(surface.height);
+        // Panel geometry, centred horizontally.
+        let m = &self.metrics;
+        let width = (m.width as f32).min(surface.width - 16.0);
+        let height = (m.height as f32).min(surface.height);
         let panel = Rect {
             x: surface.x + (surface.width - width) * 0.5,
             y: surface.y,
             width,
             height,
-            radius: 12.0,
+            radius: m.radius,
             color: Color::rgba(
                 ctx.theme.bg_main.r,
                 ctx.theme.bg_main.g,
@@ -201,7 +206,7 @@ impl Osd {
         .with_alpha(alpha);
         let text = ctx.theme.text_main.with_alpha(alpha);
 
-        let margin = 14.0;
+        let margin = m.padding;
         let row = Rect {
             x: panel.x + margin,
             y: panel.y + margin,
@@ -217,8 +222,8 @@ impl Osd {
             self.channel.glyph(self.value, self.muted),
             row.x,
             row,
-            22.0,
-            400,
+            m.icon,
+            ctx.metrics.typography.weight_regular,
             text,
         );
         ui::paint_text_vcentered(
@@ -227,8 +232,8 @@ impl Osd {
             self.channel.title(),
             row.x + 32.0,
             row,
-            13.0,
-            700,
+            m.title,
+            ctx.metrics.typography.weight_bold,
             text,
         );
 
@@ -241,8 +246,8 @@ impl Osd {
             &value_text,
             &crate::text::TextStyle {
                 family: std::sync::Arc::from(ctx.theme.font.as_str()),
-                size: 12.0,
-                weight: 700,
+                size: m.value,
+                weight: ctx.metrics.typography.weight_bold,
                 color: accent,
             },
         ).0;
@@ -252,8 +257,8 @@ impl Osd {
             &value_text,
             row.x + row.width - value_width,
             row,
-            12.0,
-            700,
+            m.value,
+            ctx.metrics.typography.weight_bold,
             accent,
         );
 
@@ -262,8 +267,8 @@ impl Osd {
             x: panel.x + margin,
             y: panel.y + margin + 40.0,
             width: panel.width - margin * 2.0,
-            height: 9.0,
-            radius: 5.0,
+            height: m.track_height,
+            radius: m.track_height * 0.5,
             color: ctx.theme.bg_widget.with_alpha(alpha),
         };
         list.push_rect(track);

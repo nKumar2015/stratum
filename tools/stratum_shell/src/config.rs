@@ -31,6 +31,8 @@ pub struct Config {
     pub appearance: AppearanceConfig,
     pub behavior: BehaviorConfig,
     pub control_center: ControlCenterConfig,
+    /// Sizes for everything the shell draws. Colours live in `themes`.
+    pub metrics: crate::ui::style::Metrics,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             appearance: AppearanceConfig::default(),
             behavior: BehaviorConfig::default(),
             control_center: ControlCenterConfig::default(),
+            metrics: crate::ui::style::Metrics::default(),
         }
     }
 }

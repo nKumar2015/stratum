@@ -34,8 +34,8 @@ impl NotificationsPage {
                     height: 24.0,
                     ..area
                 },
-                13.0,
-                400,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
             return;
@@ -44,9 +44,9 @@ impl NotificationsPage {
         let clear = Rect {
             x: area.x,
             y: area.y,
-            width: 120.0,
-            height: 30.0,
-            radius: 8.0,
+            width: ctx.metrics.page.button_width - 20.0,
+            height: ctx.metrics.page.button_height,
+            radius: ctx.metrics.page.button_radius,
             color: Color::TRANSPARENT,
         };
         if controls::button(ctx, list, clear, "Clear all", input, clicked, false) {
@@ -60,7 +60,7 @@ impl NotificationsPage {
                 y,
                 width: area.width,
                 height: 66.0,
-                radius: 10.0,
+                radius: ctx.metrics.page.card_radius,
                 color: Color::TRANSPARENT,
             };
             ui::paint_frame(
@@ -92,8 +92,8 @@ impl NotificationsPage {
                     height: 26.0,
                     ..card
                 },
-                13.0,
-                600,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_bold,
                 ctx.theme.text_main,
             );
             let body = if notification.app_name.is_empty() {
@@ -112,8 +112,8 @@ impl NotificationsPage {
                     width: card.width - 90.0,
                     ..card
                 },
-                11.0,
-                400,
+                ctx.metrics.typography.caption,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
 

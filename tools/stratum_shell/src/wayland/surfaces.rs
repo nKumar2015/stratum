@@ -26,6 +26,9 @@ pub struct SurfaceEntry {
     pub output_name: String,
     /// The output this surface belongs to, so hotplug can be matched up.
     pub output: Option<wayland_client::protocol::wl_output::WlOutput>,
+    /// True while a buffer is attached. Layer surfaces stay mapped even when
+    /// nothing is drawn, so this tracks whether `unmap` has work to do.
+    pub mapped: bool,
 }
 
 impl SurfaceEntry {
@@ -42,6 +45,7 @@ impl SurfaceEntry {
             frame_pending: false,
             output_name,
             output: None,
+            mapped: false,
         }
     }
 
@@ -49,6 +53,25 @@ impl SurfaceEntry {
     pub fn with_output(mut self, output: wayland_client::protocol::wl_output::WlOutput) -> Self {
         self.output = Some(output);
         self
+    }
+
+    /// Detach the buffer and commit, hiding the surface.
+    ///
+    /// A layer surface that has finished fading must be unmapped rather than
+    /// left attached with a fully transparent (or, worse, opaque) buffer:
+    /// leaving it mapped keeps a stale frame on screen forever, which is the
+    /// "black rectangle after fading away" bug.
+    pub fn unmap(&mut self) {
+        if !self.mapped {
+            return;
+        }
+        self.layer.attach(None, 0, 0);
+        self.layer.commit();
+        // The swapchain is tied to the mapped state; drop it so the next show
+        // starts clean rather than presenting into a stale surface.
+        self.renderer = None;
+        self.mapped = false;
+        self.dirty = false;
     }
 
     /// Apply a compositor configure and reconfigure the swapchain.
@@ -101,6 +124,7 @@ impl SurfaceEntry {
             .as_mut()
             .ok_or_else(|| "renderer missing".to_string())?;
         renderer.submit(gpu, list, text)?;
+        self.mapped = true;
         self.layer.wl_surface().damage_buffer(
             0,
             0,
@@ -109,6 +133,32 @@ impl SurfaceEntry {
         );
         self.layer.commit();
         Ok(())
+    }
+
+    /// Restrict pointer input to `rect` (logical coordinates) on this surface.
+    ///
+    /// Overlay surfaces are full-height so their contents can grow, but only the
+    /// cards themselves should be clickable. Without an input region the whole
+    /// strip swallows clicks intended for the window underneath.
+    pub fn set_input_region<D>(
+        &self,
+        compositor: &wayland_client::protocol::wl_compositor::WlCompositor,
+        qh: &wayland_client::QueueHandle<D>,
+        rect: Option<crate::render::display_list::Rect>,
+    ) where
+        D: wayland_client::Dispatch<wayland_client::protocol::wl_region::WlRegion, ()> + 'static,
+    {
+        let region = compositor.create_region(qh, ());
+        if let Some(rect) = rect {
+            region.add(
+                rect.x as i32,
+                rect.y as i32,
+                rect.width.max(0.0) as i32,
+                rect.height.max(0.0) as i32,
+            );
+        }
+        self.layer.wl_surface().set_input_region(Some(&region));
+        region.destroy();
     }
 
     /// Convenience rect for this surface in logical coordinates.
@@ -162,6 +212,7 @@ impl SurfaceEntry {
             .as_mut()
             .ok_or_else(|| "renderer missing".to_string())?;
         renderer.submit(gpu, &list, ctx.text)?;
+        self.mapped = true;
 
         // Tell the compositor we are done with this surface state.
         self.layer

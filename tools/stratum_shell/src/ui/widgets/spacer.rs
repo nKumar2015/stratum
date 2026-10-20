@@ -9,11 +9,11 @@ pub struct Spacer {
 }
 
 impl Widget for Spacer {
-    fn height(&self, _width: f32) -> Option<f32> {
+    fn height(&self, _width: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
         Some(self.size)
     }
 
-    fn width(&self, _height: f32) -> Option<f32> {
+    fn width(&self, _height: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
         Some(self.size)
     }
 

@@ -57,8 +57,8 @@ impl DisplayPage {
                 x: area.x,
                 y,
                 width: area.width.min(320.0),
-                height: 34.0,
-                radius: 8.0,
+                height: ctx.metrics.page.row_height,
+                radius: ctx.metrics.page.button_radius,
                 color: Color::TRANSPARENT,
             };
             let selected = name == selected_theme;
@@ -68,7 +68,7 @@ impl DisplayPage {
                 self.theme.set(name.clone());
                 pending.push(SystemAction::SetTheme(name));
             }
-            y += 38.0;
+            y += ctx.metrics.page.stat_spacing;
         }
     }
 }

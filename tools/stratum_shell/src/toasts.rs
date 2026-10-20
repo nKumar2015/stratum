@@ -36,17 +36,21 @@ pub struct Toasts {
     entries: Vec<Toast>,
     /// Ids already dismissed, so a re-publish does not resurrect them.
     dismissed: HashMap<u32, ()>,
-    /// Seconds a normal notification stays on screen when the server does not
-    /// specify a timeout.
-    default_seconds: f32,
+    /// Sizes, timings, and limits, refreshed from the config each frame.
+    metrics: crate::ui::style::ToastMetrics,
 }
 
 impl Toasts {
+    /// Adopt the configured sizes and timing.
+    pub fn set_metrics(&mut self, metrics: &crate::ui::style::ToastMetrics) {
+        self.metrics = metrics.clone();
+    }
+
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
             dismissed: HashMap::new(),
-            default_seconds: 5.0,
+            metrics: crate::ui::style::ToastMetrics::default(),
         }
     }
 
@@ -84,11 +88,15 @@ impl Toasts {
             } else if notification.expire_timeout > 0 {
                 Some(notification.expire_timeout as f32 / 1000.0)
             } else {
-                Some(self.default_seconds)
+                Some(self.metrics.default_seconds)
             };
 
             let mut reveal = Tween::new(0.0);
-            reveal.to(1.0, 0.18, ui::animation::Easing::OutBack);
+            reveal.to(
+                1.0,
+                self.metrics.reveal_seconds,
+                ui::animation::Easing::OutBack,
+            );
             self.entries.push(Toast {
                 notification: notification.clone(),
                 remaining: seconds,
@@ -96,8 +104,7 @@ impl Toasts {
             });
 
             // Bound the stack; the page still shows everything.
-            const MAX_TOASTS: usize = 5;
-            while self.entries.len() > MAX_TOASTS {
+            while self.entries.len() > self.metrics.max_cards.max(1) {
                 let removed = self.entries.remove(0);
                 self.dismissed.insert(removed.notification.id, ());
             }
@@ -143,7 +150,8 @@ impl Toasts {
         list: &mut DisplayList,
         surface: Rect,
     ) -> Vec<(Rect, u32)> {
-        let width = 320.0_f32.min(surface.width - 24.0);
+        let m = &self.metrics;
+        let width = m.card_width.min(surface.width - 24.0);
         let mut y = surface.y + 12.0;
         let mut hits = Vec::new();
 
@@ -153,16 +161,16 @@ impl Toasts {
 
             // Measure the body by wrapping roughly: two lines at most.
             let body_lines = if toast.notification.body.is_empty() { 0 } else { 2 };
-            let height = 52.0 + body_lines as f32 * 16.0;
+            let height = m.header_height + body_lines as f32 * m.body_line_height;
 
             // Slide in from the right.
-            let offset = (1.0 - reveal).max(0.0) * 24.0;
+            let offset = (1.0 - reveal).max(0.0) * m.slide_distance;
             let card = Rect {
                 x: surface.x + surface.width - width - 12.0 + offset,
                 y,
                 width,
                 height,
-                radius: 10.0,
+                radius: m.radius,
                 color: Color::TRANSPARENT,
             };
 
@@ -190,7 +198,7 @@ impl Toasts {
             list.push_rect(Rect {
                 x: card.x,
                 y: card.y,
-                width: 3.0,
+                width: m.stripe_width,
                 height: card.height,
                 radius: 0.0,
                 color: accent,
@@ -210,8 +218,8 @@ impl Toasts {
                         height: 20.0,
                         ..card
                     },
-                    10.0,
-                    600,
+                    ctx.metrics.typography.caption,
+                    ctx.metrics.typography.weight_bold,
                     muted,
                 );
             }
@@ -244,8 +252,8 @@ impl Toasts {
                         width: card.width - 28.0,
                         ..card
                     },
-                    11.0,
-                    400,
+                    m.body,
+                    ctx.metrics.typography.weight_regular,
                     muted,
                 );
             }
@@ -260,13 +268,13 @@ impl Toasts {
                     height: 24.0,
                     ..card
                 },
-                12.0,
-                400,
+                m.icon,
+                ctx.metrics.typography.weight_regular,
                 muted,
             );
 
             hits.push((card, toast.notification.id));
-            y += height + 8.0;
+            y += height + m.gap;
         }
         hits
     }

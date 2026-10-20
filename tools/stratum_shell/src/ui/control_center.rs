@@ -14,15 +14,6 @@ use crate::ui::{InputState, PaintCtx};
 
 pub use crate::ui::pages::Page;
 
-/// Layout constants shared by painting and hit-testing. These must agree, or
-/// clicks land on the wrong row.
-const NAV_WIDTH: f32 = 150.0;
-const NAV_HEADER: f32 = 52.0;
-const NAV_ROW_HEIGHT: f32 = 36.0;
-const NAV_ROW_SPACING: f32 = 40.0;
-const NAV_INSET: f32 = 8.0;
-const NAV_TOP_GAP: f32 = 6.0;
-
 /// Visual state of the control centre.
 pub struct ControlCenter {
     pub open: bool,
@@ -109,11 +100,8 @@ impl ControlCenter {
 
     /// Wheel scrolling for pages that have lists.
     pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
-        match self.page {
-            Page::Wifi => {
-                self.pages.wifi.on_scroll(point, delta);
-            }
-            _ => {}
+        if self.page == Page::Wifi {
+            self.pages.wifi.on_scroll(point, delta);
         }
     }
 
@@ -195,7 +183,7 @@ impl ControlCenter {
         );
 
         self.pages.begin_frame(input, ctx.dt);
-        let nav = NAV_WIDTH.min(132.0);
+        let nav = ctx.metrics.window.nav_width.min(132.0);
         let content = Rect {
             x: panel.x + nav + 8.0,
             y: panel.y,
@@ -210,10 +198,12 @@ impl ControlCenter {
 
     /// Draw the navigation rail and its divider. Returns the rail width.
     fn paint_nav(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect) -> f32 {
+        let win = &ctx.metrics.window;
+        let nav_width = win.nav_width;
         let nav = Rect {
             x: panel.x,
             y: panel.y,
-            width: NAV_WIDTH,
+            width: nav_width,
             height: panel.height,
             radius: 0.0,
             color: Color::TRANSPARENT,
@@ -225,22 +215,22 @@ impl ControlCenter {
             "Settings",
             nav.x + 18.0,
             Rect {
-                height: NAV_HEADER,
+                height: win.nav_header,
                 ..nav
             },
-            15.0,
-            700,
+            ctx.metrics.typography.title,
+            ctx.metrics.typography.weight_bold,
             ctx.theme.text_main,
         );
 
-        let mut y = nav.y + NAV_HEADER + NAV_TOP_GAP;
+        let mut y = nav.y + win.nav_header + win.nav_top_gap;
         for page in Page::ALL {
             let row = Rect {
-                x: nav.x + NAV_INSET,
+                x: nav.x + win.nav_inset,
                 y,
-                width: nav.width - NAV_INSET * 2.0,
-                height: NAV_ROW_HEIGHT,
-                radius: 8.0,
+                width: nav.width - win.nav_inset * 2.0,
+                height: win.nav_row_height,
+                radius: win.nav_row_radius,
                 color: Color::TRANSPARENT,
             };
             let selected = page == self.page;
@@ -256,23 +246,37 @@ impl ControlCenter {
                 ctx.theme.text_muted
             };
             crate::ui::paint_text_vcentered(
-                ctx, list, page.glyph(), row.x + 10.0, row, 15.0, 400, color,
+                ctx,
+                list,
+                page.glyph(),
+                row.x + 10.0,
+                row,
+                ctx.metrics.typography.workspace,
+                ctx.metrics.typography.weight_regular,
+                color,
             );
             crate::ui::paint_text_vcentered(
-                ctx, list, page.title(), row.x + 36.0, row, 13.0, 400, color,
+                ctx,
+                list,
+                page.title(),
+                row.x + 36.0,
+                row,
+                ctx.metrics.typography.body,
+                ctx.metrics.typography.weight_regular,
+                color,
             );
-            y += NAV_ROW_SPACING;
+            y += win.nav_row_spacing;
         }
 
         list.push_rect(Rect {
-            x: panel.x + NAV_WIDTH,
+            x: panel.x + nav_width,
             y: panel.y,
             width: 1.0,
             height: panel.height,
             radius: 0.0,
             color: ctx.theme.border_inactive,
         });
-        NAV_WIDTH
+        nav_width
     }
 
     fn paint_content(
@@ -282,7 +286,7 @@ impl ControlCenter {
         area: Rect,
         input: &InputState,
     ) {
-        let padding = 20.0;
+        let padding = ctx.metrics.window.content_padding;
         let inner = Rect {
             x: area.x + padding,
             y: area.y + padding,
@@ -305,18 +309,22 @@ impl ControlCenter {
             return None;
         }
 
-        // Navigation rail: the same geometry `paint_window` draws.
-        let mut y = surface.y + NAV_HEADER + NAV_TOP_GAP;
-        if point.x >= surface.x + NAV_INSET && point.x <= surface.x + NAV_WIDTH - NAV_INSET {
+        // Navigation rail: the same geometry `paint_window` draws. These come
+        // from the same metrics table, so the two cannot drift apart.
+        let win = &self.config.metrics.window;
+        let mut y = surface.y + win.nav_header + win.nav_top_gap;
+        if point.x >= surface.x + win.nav_inset
+            && point.x <= surface.x + win.nav_width - win.nav_inset
+        {
             for page in Page::ALL {
-                if point.y >= y && point.y <= y + NAV_ROW_HEIGHT {
+                if point.y >= y && point.y <= y + win.nav_row_height {
                     if self.page != page {
                         self.page = page;
                         self.pages.on_page_shown(page);
                     }
                     return None;
                 }
-                y += NAV_ROW_SPACING;
+                y += win.nav_row_spacing;
             }
         }
         None

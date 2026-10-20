@@ -13,20 +13,10 @@ use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::ui::animation::{Easing, Tween};
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
-/// Workspaces per page. Hyprland's ids are global, so a page is a fixed range
-/// of ten rather than a contiguous allocation per monitor.
-const PAGE: i32 = 10;
-
-/// Rows visible in the window.
-const VISIBLE: usize = 5;
-
-/// Row height and gap, matching the QML `itemHeight`/`itemSpacing`.
-const ROW_HEIGHT: f32 = 20.0;
-const ROW_SPACING: f32 = 3.0;
-const STEP: f32 = ROW_HEIGHT + ROW_SPACING;
-
-/// How long the scroll takes. The QML shell used 400 ms with `OutBack`.
-const SCROLL_SECONDS: f32 = 0.4;
+/// Length of the scroll animation, from the configured duration.
+fn scroll_seconds(metrics: &crate::ui::style::WorkspacesMetrics) -> f32 {
+    metrics.scroll_ms as f32 / 1000.0
+}
 
 /// One monitor's view of the strip.
 ///
@@ -58,12 +48,13 @@ impl Workspaces {
     }
 
     /// Ids on the page containing `active`, and the index of `active` within it.
-    fn page(active: i32) -> (Vec<i32>, usize) {
+    fn page(active: i32, metrics: &crate::ui::style::WorkspacesMetrics) -> (Vec<i32>, usize) {
+        let size = metrics.page_size.max(1);
         if active <= 0 {
-            return ((1..=PAGE).collect(), 0);
+            return ((1..=size).collect(), 0);
         }
-        let start = ((active - 1) / PAGE) * PAGE + 1;
-        let ids: Vec<i32> = (0..PAGE).map(|offset| start + offset).collect();
+        let start = ((active - 1) / size) * size + 1;
+        let ids: Vec<i32> = (0..size).map(|offset| start + offset).collect();
         let index = ids
             .iter()
             .position(|id| *id == active)
@@ -73,11 +64,11 @@ impl Workspaces {
         (ids, index)
     }
 
-    /// First visible row for `active`, biased two rows above centre.
-    fn window_start(active: i32) -> f32 {
-        let (ids, index) = Self::page(active);
-        let max_start = ids.len().saturating_sub(VISIBLE);
-        index.saturating_sub(2).min(max_start) as f32
+    /// First visible row for `active`, biased above centre.
+    fn window_start(active: i32, metrics: &crate::ui::style::WorkspacesMetrics) -> f32 {
+        let (ids, index) = Self::page(active, metrics);
+        let max_start = ids.len().saturating_sub(metrics.visible);
+        index.saturating_sub(metrics.bias).min(max_start) as f32
     }
 
     /// Workspace id to treat as active for `output`.
@@ -99,14 +90,15 @@ impl Default for Workspaces {
 }
 
 impl Widget for Workspaces {
-    fn height(&self, width: f32) -> Option<f32> {
+    fn height(&self, width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
         let _ = width;
-        Some(VISIBLE as f32 * STEP - ROW_SPACING)
+        Some(metrics.workspaces.window_height())
     }
 
-    fn width(&self, height: f32) -> Option<f32> {
-        // Five side-by-side cells in a horizontal bar.
-        Some(VISIBLE as f32 * (height.min(ROW_HEIGHT) + 6.0))
+    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        let ws = &metrics.workspaces;
+        // Side-by-side cells in a horizontal bar.
+        Some(ws.visible as f32 * ws.cell_pitch.min(height.max(ws.row_height)))
     }
 
     fn paint(
@@ -119,6 +111,7 @@ impl Widget for Workspaces {
         let hypr = ctx.state.hypr.get();
         let output = ctx.output_name.to_string();
         let view = self.views.entry(output.clone()).or_default();
+        let ws = &ctx.metrics.workspaces;
 
         // First paint for this output: adopt the current window without
         // animating in from nowhere.
@@ -127,6 +120,7 @@ impl Widget for Workspaces {
             view.scroll = Tween::new(0.0);
             view.scroll.snap(Self::window_start(
                 hypr.active.get(&output).copied().unwrap_or(1),
+                ws,
             ));
         }
 
@@ -138,13 +132,14 @@ impl Widget for Workspaces {
             }
         }
 
-        let start = Self::window_start(active);
+        let start = Self::window_start(active, ws);
         if (start - view.target_start).abs() > f32::EPSILON {
             view.target_start = start;
-            view.scroll.to(start.max(0.0), SCROLL_SECONDS, Easing::OutBack);
+            view.scroll
+                .to(start.max(0.0), scroll_seconds(ws), Easing::OutBack);
         }
 
-        let (ids, _) = Self::page(active);
+        let (ids, _) = Self::page(active, ws);
         let vertical = matches!(ctx.axis, Axis::Vertical);
         let offset = view.scroll.value();
 
@@ -157,16 +152,20 @@ impl Widget for Workspaces {
         let origin = if vertical { rect.y } else { rect.x };
         let cross = if vertical { rect.x } else { rect.y };
         let extent = if vertical { rect.height } else { rect.width };
-        let cell_length = if vertical { rect.width } else { extent / VISIBLE as f32 };
+        let cell_length = if vertical {
+            rect.width
+        } else {
+            extent / ws.visible.max(1) as f32
+        };
 
         for (index, id) in ids.iter().enumerate() {
-            let along = origin + (index as f32 - offset) * STEP;
+            let along = origin + (index as f32 - offset) * ws.step();
             let row = if vertical {
                 Rect {
                     x: cross,
                     y: along,
                     width: cell_length,
-                    height: ROW_HEIGHT,
+                    height: ws.row_height,
                     radius: 0.0,
                     color: Color::TRANSPARENT,
                 }
@@ -174,7 +173,7 @@ impl Widget for Workspaces {
                 Rect {
                     x: along,
                     y: cross,
-                    width: STEP,
+                    width: ws.step(),
                     height: rect.height,
                     radius: 0.0,
                     color: Color::TRANSPARENT,
@@ -182,7 +181,7 @@ impl Widget for Workspaces {
             };
             // Cull rows entirely outside the window; they cannot be drawn and
             // would otherwise widen `cells` without being clickable.
-            if along + STEP < origin - STEP || along > origin + extent + STEP {
+            if along + ws.step() < origin - ws.step() || along > origin + extent + ws.step() {
                 continue;
             }
 
@@ -249,36 +248,104 @@ mod tests {
 
     #[test]
     fn page_is_ten_ids_containing_active() {
-        let (ids, index) = Workspaces::page(1);
+        let m = crate::ui::style::WorkspacesMetrics::default();
+        let (ids, index) = Workspaces::page(1, &m);
         assert_eq!(ids, (1..=10).collect::<Vec<_>>());
         assert_eq!(index, 0);
 
-        let (ids, index) = Workspaces::page(11);
+        let (ids, index) = Workspaces::page(11, &m);
         assert_eq!(ids, (11..=20).collect::<Vec<_>>());
         assert_eq!(index, 0);
     }
 
     #[test]
     fn window_keeps_active_two_rows_above_centre() {
-        // The window starts at `index - 2`, clamped to the page bounds.
+        let m = crate::ui::style::WorkspacesMetrics::default();
+        // The window starts at `index - bias`, clamped to the page bounds.
         // Row 1 is the top of the page; the window cannot scroll above it.
-        assert_eq!(Workspaces::window_start(1), 0.0);
-        assert_eq!(Workspaces::window_start(2), 0.0);
-        assert_eq!(Workspaces::window_start(3), 0.0);
-        assert_eq!(Workspaces::window_start(5), 2.0);
+        assert_eq!(Workspaces::window_start(1, &m), 0.0);
+        assert_eq!(Workspaces::window_start(2, &m), 0.0);
+        assert_eq!(Workspaces::window_start(3, &m), 0.0);
+        assert_eq!(Workspaces::window_start(5, &m), 2.0);
         // Near the bottom the window stops rather than scrolling past the page.
-        assert_eq!(Workspaces::window_start(10), 5.0);
+        assert_eq!(Workspaces::window_start(10, &m), 5.0);
         // The next page starts its own window at zero again.
-        assert_eq!(Workspaces::window_start(11), 0.0);
+        assert_eq!(Workspaces::window_start(11, &m), 0.0);
+    }
+
+    #[test]
+    fn window_follows_configured_metrics() {
+        // A seven-row window with a bias of three places the active row
+        // accordingly, so the metrics table really drives layout.
+        let m = crate::ui::style::WorkspacesMetrics {
+            visible: 7,
+            bias: 3,
+            ..Default::default()
+        };
+        // Active id 6 has index 5; biased three rows above gives 2.
+        assert_eq!(Workspaces::window_start(6, &m), 2.0);
+        // Ten ids with seven visible leaves three rows of slack, so the last
+        // row can still sit at the bottom of the window.
+        assert_eq!(Workspaces::window_start(10, &m), 3.0);
     }
 
     #[test]
     fn scroll_tween_settles_on_the_target() {
         let mut tween = Tween::new(0.0);
-        tween.to(3.0, SCROLL_SECONDS, Easing::OutBack);
+        tween.to(3.0, scroll_seconds(&crate::ui::style::WorkspacesMetrics::default()), Easing::OutBack);
         for _ in 0..80 {
             tween.tick(0.016);
         }
         assert!((tween.value() - 3.0).abs() < 1e-3);
+    }
+
+    /// The bug behind "they are not monitor specific": every surface read the
+    /// focused monitor's workspace, so both rails showed the same page.
+    #[test]
+    fn each_output_shows_its_own_active_workspace() {
+        let mut hypr = crate::hyprland::HyprState::default();
+        hypr.active.insert("eDP-2".into(), 1);
+        hypr.active.insert("HDMI-A-1".into(), 11);
+
+        let m = crate::ui::style::WorkspacesMetrics::default();
+        let left = hypr.active.get("eDP-2").copied().unwrap_or(-1);
+        let right = hypr.active.get("HDMI-A-1").copied().unwrap_or(-1);
+        assert_eq!(Workspaces::page(left, &m).0, (1..=10).collect::<Vec<_>>());
+        assert_eq!(Workspaces::page(right, &m).0, (11..=20).collect::<Vec<_>>());
+        assert_ne!(left, right, "monitors must not share an active workspace");
+    }
+
+    /// A click must be visible before the compositor's event arrives, which is
+    /// what "when I click the number it changes, but the widget doesn't update"
+    /// was describing.
+    #[test]
+    fn pending_click_overrides_the_compositor_until_it_agrees() {
+        let view = OutputView {
+            pending: Some(7),
+            ..Default::default()
+        };
+        let mut hypr = crate::hyprland::HyprState::default();
+        hypr.active.insert("eDP-2".into(), 3);
+
+        // The compositor has not caught up yet, so the request is shown.
+        assert_eq!(Workspaces::active_for(&view, &hypr, "eDP-2"), 7);
+
+        // Once it agrees, painting picks up the real value.
+        hypr.active.insert("eDP-2".into(), 7);
+        assert_eq!(Workspaces::active_for(&view, &hypr, "eDP-2"), 7);
+    }
+
+    #[test]
+    fn scroll_state_is_independent_per_output() {
+        let mut widget = Workspaces::new();
+        let mut left = OutputView::default();
+        let mut right = OutputView::default();
+        left.scroll.snap(5.0);
+        right.scroll.snap(0.0);
+        widget.views.insert("eDP-2".into(), left);
+        widget.views.insert("HDMI-A-1".into(), right);
+
+        assert_eq!(widget.views["eDP-2"].scroll.value(), 5.0);
+        assert_eq!(widget.views["HDMI-A-1"].scroll.value(), 0.0);
     }
 }

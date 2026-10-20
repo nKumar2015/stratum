@@ -40,7 +40,7 @@ impl PowerPage {
                 y: area.y + index as f32 * 48.0,
                 width: area.width.min(280.0),
                 height: 38.0,
-                radius: 8.0,
+                radius: ctx.metrics.page.button_radius,
                 color: Color::TRANSPARENT,
             };
             if controls::button(ctx, list, rect, label, input, clicked, *accent) {

@@ -34,11 +34,12 @@ impl Default for Clock {
 }
 
 impl Widget for Clock {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(64.0)
+    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        // Three stacked lines of clock text.
+        Some(metrics.typography.clock * 3.6)
     }
 
-    fn width(&self, _height: f32) -> Option<f32> {
+    fn width(&self, _height: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
         Some(84.0)
     }
 
@@ -56,8 +57,8 @@ impl Widget for Clock {
             let text = now.format("%I:%M %p").to_string();
             let style = TextStyle {
                 family: Arc::from(ctx.theme.font.as_str()),
-                size: 13.0,
-                weight: 500,
+                size: ctx.metrics.typography.clock_bar,
+                weight: ctx.metrics.typography.weight_medium,
                 color: ctx.theme.primary,
             };
             let width = ctx.text.measure(&text, &style).0;
@@ -90,7 +91,7 @@ impl Widget for Clock {
                 radius: 0.0,
                 color: Color::TRANSPARENT,
             };
-            ui::paint_text_centered(ctx, list, &value, row, 18.0, color);
+            ui::paint_text_centered(ctx, list, &value, row, ctx.metrics.typography.clock, color);
         }
     }
 

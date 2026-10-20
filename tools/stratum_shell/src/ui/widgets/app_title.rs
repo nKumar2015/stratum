@@ -31,12 +31,12 @@ impl Default for AppTitle {
 impl Widget for AppTitle {
     /// Flexible: consumes leftover vertical space so later widgets sit at the
     /// bottom of the rail, as `Layout.fillHeight` did in QML.
-    fn height(&self, _width: f32) -> Option<f32> {
+    fn height(&self, _width: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
         None
     }
 
     /// In a horizontal bar the title absorbs slack and reports no width.
-    fn width(&self, _height: f32) -> Option<f32> {
+    fn width(&self, _height: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
         None
     }
 
@@ -58,8 +58,8 @@ impl Widget for AppTitle {
         if !ctx.is_vertical() {
             let style = TextStyle {
                 family: Arc::from(ctx.theme.font.as_str()),
-                size: 13.0,
-                weight: 500,
+                size: ctx.metrics.typography.title_bar,
+                weight: ctx.metrics.typography.weight_medium,
                 color: ctx.theme.text_main,
             };
             let insets = 6.0;
@@ -86,7 +86,7 @@ impl Widget for AppTitle {
 
         // Vertical label. The run advances upward, so its cross-axis extent is
         // the line height and must fit the rail.
-        let mut size = 14.0_f32;
+        let mut size = ctx.metrics.typography.title;
         let max_thickness = (rect.width - 12.0).max(6.0);
         while size > 7.0 && size * 1.25 > max_thickness {
             size -= 0.5;
@@ -95,7 +95,7 @@ impl Widget for AppTitle {
         let style = TextStyle {
             family: Arc::from(ctx.theme.font.as_str()),
             size,
-            weight: 600,
+            weight: ctx.metrics.typography.weight_bold,
             color: ctx.theme.text_main,
         };
 

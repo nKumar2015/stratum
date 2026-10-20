@@ -266,6 +266,8 @@ impl App {
             }
         }
 
+        self.osd.set_metrics(&self.config.metrics.osd);
+        self.toasts.set_metrics(&self.config.metrics.toasts);
         self.osd.observe_audio(&self.state);
         self.osd.observe_brightness(self.state.brightness.get());
 
@@ -345,6 +347,7 @@ impl App {
                     let mut ctx = crate::ui::PaintCtx {
                         theme: &theme,
                         appearance: &self.config.appearance,
+                        metrics: &self.config.metrics,
                         text: &mut self.text,
                         icons: &mut self.icons,
                         state: &self.state,
@@ -417,7 +420,15 @@ impl App {
 
         // OSD overlay. It shares the sidebar's paint context but draws its own
         // display list, since it has nothing to do with the rail layout.
+        // Once it has faded out, detach the buffer: a mapped surface with a
+        // transparent buffer can still composite as black on some compositors,
+        // which is the "OSD stays black" report.
+        let osd_visible = self.osd.visible();
         for entry in &mut self.osd_surfaces {
+            if !osd_visible {
+                entry.unmap();
+                continue;
+            }
             if !entry.dirty || !entry.configured {
                 continue;
             }
@@ -425,6 +436,7 @@ impl App {
             let mut ctx = crate::ui::PaintCtx {
                 theme: &theme,
                 appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
                 text: &mut self.text,
                 icons: &mut self.icons,
                 state: &self.state,
@@ -441,8 +453,14 @@ impl App {
         }
 
         // Toast stack. Hits are collected so a click on a card can dismiss it.
+        // An empty stack unmaps, for the same reason as the OSD.
         self.toast_hits.clear();
+        let toasts_visible = !self.toasts.is_empty();
         for entry in &mut self.toast_surfaces {
+            if !toasts_visible {
+                entry.unmap();
+                continue;
+            }
             if !entry.dirty || !entry.configured {
                 continue;
             }
@@ -450,6 +468,7 @@ impl App {
             let mut ctx = crate::ui::PaintCtx {
                 theme: &theme,
                 appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
                 text: &mut self.text,
                 icons: &mut self.icons,
                 state: &self.state,
@@ -486,6 +505,7 @@ impl App {
             let mut ctx = crate::ui::PaintCtx {
                 theme: &theme,
                 appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
                 text: &mut self.text,
                 icons: &mut self.icons,
                 state: &self.state,
@@ -950,13 +970,18 @@ struct SettingsWindow {
 }
 
 impl SettingsWindow {
-    fn new(window: Window, scale: i32, output: Option<wl_output::WlOutput>) -> Self {
+    fn new(
+        window: Window,
+        scale: i32,
+        output: Option<wl_output::WlOutput>,
+        metrics: &crate::ui::style::WindowMetrics,
+    ) -> Self {
         Self {
             window,
             renderer: None,
             scale,
-            width: 520,
-            height: 640,
+            width: metrics.width,
+            height: metrics.height,
             configured: false,
             dirty: true,
             activated: false,
@@ -1039,7 +1064,8 @@ impl App {
             .create_window(surface, WindowDecorations::RequestServer, &qh);
         window.set_title("Stratum Settings");
         window.set_app_id("org.stratum.Settings");
-        window.set_min_size(Some((360, 320)));
+        let win = &self.config.metrics.window;
+        window.set_min_size(Some((win.min_width, win.min_height)));
         // Initial commit with no buffer; the compositor answers with a configure.
         window.commit();
 
@@ -1064,7 +1090,8 @@ impl App {
             .max_by_key(|s| s.scale)
             .map(|s| (s.scale, s.output.clone()))
             .unwrap_or((1, None));
-        self.settings = Some(SettingsWindow::new(window, scale, output));
+        let metrics = self.config.metrics.window.clone();
+        self.settings = Some(SettingsWindow::new(window, scale, output, &metrics));
     }
 
     fn apply_action(&mut self, action: crate::ui::Action) {
@@ -1470,8 +1497,17 @@ impl WindowHandler for App {
         configure: WindowConfigure,
         _serial: u32,
     ) {
-        let width = configure.new_size.0.map(|v| v.get()).unwrap_or(520);
-        let height = configure.new_size.1.map(|v| v.get()).unwrap_or(640);
+        let metrics = &self.config.metrics.window;
+        let width = configure
+            .new_size
+            .0
+            .map(|v| v.get())
+            .unwrap_or(metrics.width);
+        let height = configure
+            .new_size
+            .1
+            .map(|v| v.get())
+            .unwrap_or(metrics.height);
         if let Some(settings) = &mut self.settings {
             if settings.window.wl_surface() == window.wl_surface() {
                 settings.resize(&self.gpu, width, height);

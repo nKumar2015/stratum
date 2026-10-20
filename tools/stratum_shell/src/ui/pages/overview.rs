@@ -30,7 +30,7 @@ impl OverviewPage {
                 y: area.y + row as f32 * (tile_h + gap),
                 width: tile_w,
                 height: tile_h,
-                radius: 10.0,
+                radius: ctx.metrics.page.card_radius,
                 color: Color::TRANSPARENT,
             };
             ui::paint_frame(
@@ -46,8 +46,8 @@ impl OverviewPage {
                 label,
                 rect.x + 14.0,
                 Rect { height: 28.0, ..rect },
-                13.0,
-                600,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_bold,
                 ctx.theme.text_muted,
             );
             let summary = summarize(label, snapshot.clone());
@@ -58,11 +58,11 @@ impl OverviewPage {
                 rect.x + 14.0,
                 Rect {
                     y: rect.y + 28.0,
-                    height: 30.0,
+                    height: ctx.metrics.page.button_height,
                     ..rect
                 },
-                15.0,
-                500,
+                ctx.metrics.typography.workspace,
+ctx.metrics.typography.weight_medium,
                 ctx.theme.text_main,
             );
         }

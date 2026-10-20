@@ -106,8 +106,8 @@ impl AudioPage {
                 height: 18.0,
                 ..area
             },
-            12.0,
-            500,
+            ctx.metrics.typography.label,
+ctx.metrics.typography.weight_regular,
             ctx.theme.text_muted,
         );
 
@@ -115,7 +115,7 @@ impl AudioPage {
             x: area.x,
             y: area.y + 56.0,
             width: area.width,
-            height: 30.0,
+            height: ctx.metrics.page.button_height,
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
@@ -142,8 +142,8 @@ impl AudioPage {
                     x: area.x,
                     y,
                     width: area.width,
-                    height: 40.0,
-                    radius: 8.0,
+                    height: ctx.metrics.page.row_height,
+                    radius: ctx.metrics.page.button_radius,
                     color: Color::TRANSPARENT,
                 };
                 let selected = name == current_output;
@@ -153,7 +153,7 @@ impl AudioPage {
                 {
                     pending.push(SystemAction::SetOutput(name.to_string()));
                 }
-                y += 44.0;
+                y += ctx.metrics.page.row_spacing;
             }
         }
     }

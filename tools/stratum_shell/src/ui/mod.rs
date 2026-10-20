@@ -13,6 +13,7 @@ pub mod control_center;
 pub mod controls;
 pub mod pages;
 pub mod sidebar;
+pub mod style;
 pub mod widgets;
 
 use crate::text::{TextEngine, TextStyle};
@@ -21,6 +22,9 @@ use crate::text::{TextEngine, TextStyle};
 pub struct PaintCtx<'a> {
     pub theme: &'a crate::config::Theme,
     pub appearance: &'a crate::config::AppearanceConfig,
+    /// Sizes for every widget. Kept beside the theme so styling a widget means
+    /// consulting one palette and one metrics table, not constants in its code.
+    pub metrics: &'a crate::ui::style::Metrics,
     pub text: &'a mut TextEngine,
     /// Decoded icons, for widgets that display themed artwork.
     pub icons: &'a mut crate::icons::IconTheme,
@@ -128,15 +132,15 @@ pub struct ClickCtx<'a> {
 pub trait Widget {
     /// Intrinsic height in a vertical bar at the given width. `None` means
     /// "fill available".
-    fn height(&self, width: f32) -> Option<f32> {
-        let _ = width;
+    fn height(&self, width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        let _ = (width, metrics);
         None
     }
 
     /// Intrinsic width in a horizontal bar at the given height. `None` means
-    /// "fill available". Defaults to a square-ish slot matching the height.
-    fn width(&self, height: f32) -> Option<f32> {
-        let _ = height;
+    /// "fill available".
+    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        let _ = (height, metrics);
         None
     }
 
@@ -204,6 +208,7 @@ impl Column {
         width: f32,
         input: &InputState,
     ) -> f32 {
+        let metrics = ctx.metrics;
         let mut cursor = y;
         let mut first = true;
         for widget in &mut self.widgets {
@@ -212,7 +217,7 @@ impl Column {
             }
             first = false;
 
-            let height = widget.height(width).unwrap_or(0.0);
+            let height = widget.height(width, metrics).unwrap_or(0.0);
             let rect = Rect {
                 x,
                 y: cursor,
@@ -457,7 +462,7 @@ mod tests {
     fn column_accumulates_spacing() {
         struct Fixed(f32);
         impl Widget for Fixed {
-            fn height(&self, _w: f32) -> Option<f32> {
+            fn height(&self, _w: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
                 Some(self.0)
             }
             fn paint(

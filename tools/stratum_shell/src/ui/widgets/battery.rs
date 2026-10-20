@@ -23,12 +23,12 @@ impl Default for Battery {
 }
 
 impl Widget for Battery {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(24.0)
+    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(metrics.typography.battery)
     }
 
-    fn width(&self, height: f32) -> Option<f32> {
-        Some(height.max(24.0))
+    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(height.max(metrics.typography.battery))
     }
 
     fn paint(
@@ -70,7 +70,7 @@ impl Widget for Battery {
         } else {
             ctx.theme.success
         };
-        ui::paint_text_centered(ctx, list, glyph, rect, 24.0, color);
+        ui::paint_text_centered(ctx, list, glyph, rect, ctx.metrics.typography.battery, color);
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {

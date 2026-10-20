@@ -115,7 +115,6 @@ impl IconKind {
 /// A status icon that opens its page in the control centre.
 pub struct Icon {
     pub kind: IconKind,
-    pub size: f32,
     /// Rect from the last paint, used for hit-testing.
     last_rect: Rect,
 }
@@ -124,19 +123,18 @@ impl Icon {
     pub fn new(kind: IconKind) -> Self {
         Self {
             kind,
-            size: 20.0,
             last_rect: Rect::EMPTY,
         }
     }
 }
 
 impl Widget for Icon {
-    fn height(&self, _width: f32) -> Option<f32> {
-        Some(self.size + 4.0)
+    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(metrics.typography.icon)
     }
 
-    fn width(&self, height: f32) -> Option<f32> {
-        Some(height.max(self.size + 4.0))
+    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(height.max(metrics.typography.icon))
     }
 
     fn paint(
@@ -148,7 +146,7 @@ impl Widget for Icon {
     ) {
         self.last_rect = rect;
         let (glyph, color) = self.kind.appearance(ctx);
-        ui::paint_text_centered(ctx, list, glyph, rect, self.size, color);
+        ui::paint_text_centered(ctx, list, glyph, rect, ctx.metrics.typography.icon, color);
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {

@@ -17,13 +17,16 @@ pub fn slider(
     input: &InputState,
 ) -> Option<f32> {
     let value = value.clamp(0.0, 1.0);
+    let page = &ctx.metrics.page;
+    let track_height = page.slider_track;
+    let knob = page.slider_knob;
 
     let track = Rect {
         x: rect.x,
-        y: rect.y + rect.height * 0.5 - 3.0,
+        y: rect.y + rect.height * 0.5 - track_height * 0.5,
         width: rect.width,
-        height: 6.0,
-        radius: 3.0,
+        height: track_height,
+        radius: track_height * 0.5,
         color: ctx.theme.bg_hover,
     };
     list.push_rect(track);
@@ -35,11 +38,11 @@ pub fn slider(
 
     let knob_x = rect.x + rect.width * value;
     list.push_rect(Rect {
-        x: knob_x - 7.0,
-        y: rect.y + rect.height * 0.5 - 7.0,
-        width: 14.0,
-        height: 14.0,
-        radius: 7.0,
+        x: knob_x - knob * 0.5,
+        y: rect.y + rect.height * 0.5 - knob * 0.5,
+        width: knob,
+        height: knob,
+        radius: knob * 0.5,
         color: ctx.theme.text_main,
     });
 
@@ -66,17 +69,22 @@ pub fn toggle(
         label,
         rect.x,
         rect,
-        13.0,
-        500,
+        ctx.metrics.typography.body,
+        ctx.metrics.typography.weight_medium,
         ctx.theme.text_main,
     );
 
+    let page = &ctx.metrics.page;
+    let width = page.toggle_width;
+    let height = page.toggle_height;
+    let inset = 2.0;
+    let knob_size = height - inset * 2.0;
     let sw = Rect {
-        x: rect.x + rect.width - 44.0,
-        y: rect.y + rect.height * 0.5 - 12.0,
-        width: 44.0,
-        height: 24.0,
-        radius: 12.0,
+        x: rect.x + rect.width - width,
+        y: rect.y + rect.height * 0.5 - height * 0.5,
+        width,
+        height,
+        radius: height * 0.5,
         color: if on {
             ctx.theme.primary
         } else {
@@ -84,13 +92,17 @@ pub fn toggle(
         },
     };
     list.push_rect(sw);
-    let knob = if on { sw.x + 22.0 } else { sw.x + 2.0 };
+    let knob_x = if on {
+        sw.x + width - knob_size - inset
+    } else {
+        sw.x + inset
+    };
     list.push_rect(Rect {
-        x: knob,
-        y: sw.y + 2.0,
-        width: 20.0,
-        height: 20.0,
-        radius: 10.0,
+        x: knob_x,
+        y: sw.y + inset,
+        width: knob_size,
+        height: knob_size,
+        radius: knob_size * 0.5,
         color: ctx.theme.text_main,
     });
 
@@ -125,8 +137,8 @@ pub fn button(
     };
     let style = crate::text::TextStyle {
         family: std::sync::Arc::from(ctx.theme.font.as_str()),
-        size: 13.0,
-        weight: 600,
+        size: ctx.metrics.typography.body,
+        weight: ctx.metrics.typography.weight_bold,
         color: text_color,
     };
     let width = ctx.text.measure(label, &style).0;
@@ -136,8 +148,8 @@ pub fn button(
         label,
         rect.x + (rect.width - width) * 0.5,
         rect,
-        13.0,
-        600,
+        ctx.metrics.typography.body,
+        ctx.metrics.typography.weight_bold,
         text_color,
     );
 
@@ -175,8 +187,8 @@ pub fn selectable_row(
             height: rect.height * 0.55,
             ..rect
         },
-        13.0,
-        500,
+        ctx.metrics.typography.body,
+        ctx.metrics.typography.weight_medium,
         ctx.theme.text_main,
     );
     if !subtitle.is_empty() {
@@ -190,8 +202,8 @@ pub fn selectable_row(
                 height: rect.height * 0.5,
                 ..rect
             },
-            11.0,
-            400,
+            ctx.metrics.typography.caption,
+            ctx.metrics.typography.weight_regular,
             ctx.theme.text_muted,
         );
     }

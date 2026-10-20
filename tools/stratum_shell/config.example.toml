@@ -75,6 +75,122 @@ kind = "clock"
 
 
 # ---------------------------------------------------------------------------
+# Metrics
+#
+# Colours live in [themes]. This table is everything else: font sizes, widget
+# sizes, paddings, gaps, radii, and animation timings. Every value here is what
+# the widgets draw with, so a layout tweak is a number change, not a code change.
+#
+# Any section may be omitted; omitted values keep their defaults. Unknown keys
+# are an error, so a typo tells you instead of silently doing nothing.
+# ---------------------------------------------------------------------------
+
+[metrics.typography]
+icon = 20.0             # status icons in the bar
+battery = 24.0          # the battery glyph is deliberately larger
+clock = 18.0            # clock digits in a vertical rail
+clock_bar = 13.0        # clock text in a horizontal bar
+workspace = 15.0        # workspace numbers
+title = 14.0            # the rotated window title
+title_bar = 13.0        # window title in a horizontal bar
+tray = 13.0             # tray fallback glyphs
+heading = 18.0          # page headings
+body = 13.0             # default body text
+caption = 11.0          # secondary text
+label = 12.0            # small labels above values
+weight_regular = 400
+weight_medium = 500
+weight_bold = 600
+
+[metrics.bar]
+launcher = 24.0         # launcher button size
+group_margin = 6.0      # inner margin of a framed group
+group_spacing = 4.0     # gap between widgets in a framed group
+group_width = 30.0      # width of a framed group in a vertical rail
+corner_size = 20.0      # corner scoop where a rail meets the screen edge
+
+[metrics.workspaces]
+visible = 5             # rows shown at once
+row_height = 20.0
+gap = 3.0
+page_size = 10          # ids per page
+bias = 2                # rows above centre for the active workspace
+marker_width = 14.0     # underline beneath the active workspace
+marker_height = 2.0
+scroll_ms = 400         # scroll animation duration
+cell_pitch = 26.0       # cell advance in a horizontal bar
+
+[metrics.tray]
+cell = 24.0             # icon size
+gap = 4.0
+vertical_limit = 6      # max icons in a rail
+horizontal_limit = 8    # max icons in a bar
+
+[metrics.osd]
+width = 320
+height = 94
+margin_bottom = 72      # distance from the bottom screen edge
+padding = 14.0
+radius = 12.0
+track_height = 9.0
+icon = 22.0
+title = 13.0
+value = 12.0
+hold_seconds = 1.2      # fully visible time before fading
+fade_in_seconds = 0.13
+fade_out_seconds = 0.22
+
+[metrics.toasts]
+surface_width = 344
+margin = 12
+card_width = 320.0
+gap = 8.0
+header_height = 52.0
+body_line_height = 16.0
+radius = 10.0
+stripe_width = 3.0
+icon = 12.0
+title = 13.0
+body = 11.0
+default_seconds = 5.0   # when the server specifies no timeout
+max_cards = 5
+slide_distance = 24.0
+reveal_seconds = 0.18
+
+[metrics.window]
+width = 520             # settings window, initial size
+height = 640
+min_width = 360
+min_height = 320
+nav_width = 150.0       # navigation rail
+nav_header = 52.0
+nav_row_height = 36.0
+nav_row_spacing = 40.0
+nav_inset = 8.0
+nav_top_gap = 6.0
+nav_row_radius = 8.0
+content_padding = 20.0
+heading_height = 40.0
+
+[metrics.page]
+card_padding = 14.0
+card_radius = 10.0
+row_height = 40.0       # a normal list row
+row_spacing = 44.0      # vertical pitch between list rows
+stat_height = 32.0
+stat_spacing = 38.0
+button_height = 32.0
+button_radius = 8.0
+button_width = 140.0
+slider_track = 6.0
+slider_knob = 14.0
+toggle_width = 44.0
+toggle_height = 24.0
+section_gap = 24.0
+section_label_height = 20.0
+
+
+# ---------------------------------------------------------------------------
 # Themes
 #
 # Colours accept #rgb, #rrggbb, or #rrggbbaa. Define as many as you like and

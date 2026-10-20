@@ -38,8 +38,6 @@ pub struct TextEngine {
     /// the frame cost. Runs are stored without a position, so a hit only needs
     /// the origin patched in.
     shape_cache: HashMap<(String, Arc<str>, u32, u16), CachedShape>,
-    /// Text widths keyed the same way, for centring and elision.
-    measure_cache: HashMap<(String, Arc<str>, u32, u16), f32>,
 }
 
 /// A shaped run independent of where it will be drawn.
@@ -48,22 +46,18 @@ struct CachedShape {
     glyphs: Vec<PositionedGlyph>,
     /// `(ascent, line_height)`.
     metrics: (f32, f32),
+    /// The shaper's advance for the line (`run.line_w`).
+    ///
+    /// This must come from the shaper, not from the last glyph's pen position:
+    /// glyph advances are applied when the *next* glyph is placed, so the final
+    /// glyph's `x` excludes its own width. Deriving the width from positions
+    /// made every centred string a few pixels too wide, which shifts its origin
+    /// left and leaves the text visibly right of centre.
+    width: f32,
 }
 
 /// Cache key for shaped text. `f32` is not `Eq`, so the size is stored as bits.
 type ShapeKey = (String, Arc<str>, u32, u16);
-
-/// Total advance of a shaped run.
-///
-/// The shaper's `line_w` is not retained in the cache, so this reconstructs the
-/// width from the glyph positions, which is what a single-line run's advance is.
-fn measured_width(glyphs: &[PositionedGlyph]) -> f32 {
-    let mut width = 0.0_f32;
-    for glyph in glyphs {
-        width = width.max(glyph.x + glyph.x_offset);
-    }
-    width
-}
 
 fn key_for(text: &str, style: &TextStyle) -> ShapeKey {
     (
@@ -100,7 +94,6 @@ impl TextEngine {
             font_system: FontSystem::new(),
             swash: SwashCache::new(),
             shape_cache: HashMap::new(),
-            measure_cache: HashMap::new(),
         }
     }
 
@@ -150,9 +143,13 @@ impl TextEngine {
         let mut glyphs = Vec::new();
         let mut ascent = style.size * 0.8;
         let mut line_height = style.size * 1.2;
+        let mut width = 0.0_f32;
         for run in buffer.layout_runs() {
             ascent = run.line_y;
             line_height = run.line_height.max(line_height);
+            // `line_w` is the run's advance including trailing letter spacing,
+            // which glyph positions alone do not capture.
+            width = width.max(run.line_w);
             for glyph in run.glyphs {
                 // Glyphs are positioned relative to the run origin. `line_y` is
                 // the baseline within the shaped buffer; the renderer adds the
@@ -172,6 +169,7 @@ impl TextEngine {
         CachedShape {
             glyphs,
             metrics: (ascent, line_height),
+            width,
         }
     }
 
@@ -182,38 +180,25 @@ impl TextEngine {
         const MAX_ENTRIES: usize = 512;
         if self.shape_cache.len() >= MAX_ENTRIES {
             self.shape_cache.clear();
-            self.measure_cache.clear();
         }
-        self.measure_cache
-            .insert(key.clone(), measured_width(&shape.glyphs));
         self.shape_cache.insert(key, shape);
     }
 
     /// Measure a single line.
     ///
     /// Returns `(advance_width, line_height)`. The width is the shaper's own
-    /// advance, so centred text lands exactly.
+    /// `line_w`, so centred text lands exactly.
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
         let key = key_for(text, style);
-        if let Some(width) = self.measure_cache.get(&key) {
-            // The line height is derived from the size, matching `Metrics`.
-            return (*width, style.size * 1.2);
-        }
-        // Shaping fills both caches, so a miss costs one shaping pass.
         let shaped = match self.shape_cache.get(&key) {
             Some(cached) => cached.clone(),
             None => {
                 let cached = self.shape_uncached(text, style);
-                self.insert_shape(key.clone(), cached.clone());
+                self.insert_shape(key, cached.clone());
                 cached
             }
         };
-        let width = self
-            .measure_cache
-            .get(&key)
-            .copied()
-            .unwrap_or_else(|| measured_width(&shaped.glyphs));
-        (width, shaped.metrics.1)
+        (shaped.width, shaped.metrics.1)
     }
 
     /// Line height and ascent for a style, used to centre text vertically on
@@ -405,16 +390,60 @@ mod tests {
             second.glyphs.first().map(|g| g.glyph_id)
         );
 
-        // Cached and uncached measurements must agree.
+        // Cached and uncached measurements must agree, and the width must come
+        // from the shaper's own advance rather than the last glyph's pen
+        // position (which omits that glyph's width).
         let (cached_width, _) = engine.measure("Cached", &style);
-        let (direct_width, _) = {
-            let shaped = engine.shape_uncached("Cached", &style);
-            (measured_width(&shaped.glyphs), 0.0)
-        };
-        assert!((cached_width - direct_width).abs() < 0.5);
-        // The shaper's advance is the right edge of the last glyph; it must be
-        // at least as wide as the ink starts.
+        let shaped = engine.shape_uncached("Cached", &style);
+        assert!((cached_width - shaped.width).abs() < 0.01);
         assert!(cached_width > 0.0);
+
+        // The advance must exceed the last glyph's pen x, because the final
+        // glyph still occupies space after it.
+        let last_pen = shaped
+            .glyphs
+            .last()
+            .map(|g| g.x + g.x_offset)
+            .unwrap_or(0.0);
+        assert!(
+            cached_width > last_pen,
+            "width {cached_width} should include the final glyph's advance (pen {last_pen})"
+        );
+    }
+
+    /// Centring depends entirely on this: an underestimated width shifts every
+    /// centred label to the right, which is what the sidebar showed.
+    #[test]
+    fn measured_width_matches_the_rendered_extent() {
+        let mut engine = TextEngine::new();
+        if !super::fonts_available(&mut engine) {
+            eprintln!("skipping: no fonts available");
+            return;
+        }
+        let style = TextStyle {
+            family: Arc::from("sans-serif"),
+            size: 15.0,
+            weight: 400,
+            color: Color::WHITE,
+        };
+        let (width, _) = engine.measure("Workspace 10", &style);
+        let run = engine.shape("Workspace 10", &style, 0.0, 0.0);
+        let last = run.glyphs.last().expect("glyphs");
+        // The final glyph starts before the measured width ends.
+        assert!(
+            last.x < width,
+            "last glyph at {} should start inside width {}",
+            last.x,
+            width
+        );
+        // With a monospace-ish fallback the difference is one glyph at most;
+        // allow a generous bound so this is not font-specific.
+        assert!(
+            width - last.x <= style.size * 2.0,
+            "width {} unexpectedly far from last glyph {}",
+            width,
+            last.x
+        );
     }
 
     #[test]

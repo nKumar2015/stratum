@@ -78,7 +78,7 @@ impl BluetoothPage {
             x: area.x,
             y: area.y + 2.0,
             width: area.width,
-            height: 30.0,
+            height: ctx.metrics.page.button_height,
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
@@ -98,9 +98,9 @@ impl BluetoothPage {
         let scan_rect = Rect {
             x: area.x,
             y: area.y + 44.0,
-            width: 140.0,
+            width: ctx.metrics.page.button_width,
             height: 32.0,
-            radius: 8.0,
+            radius: ctx.metrics.page.button_radius,
             color: Color::TRANSPARENT,
         };
         if controls::button(
@@ -131,8 +131,8 @@ impl BluetoothPage {
                 },
                 area.x,
                 Rect { y, height: 24.0, ..area },
-                13.0,
-                400,
+                ctx.metrics.typography.body,
+ctx.metrics.typography.weight_regular,
                 ctx.theme.text_muted,
             );
             return;
@@ -161,8 +161,8 @@ impl BluetoothPage {
                 x: area.x,
                 y,
                 width: area.width,
-                height: 44.0,
-                radius: 8.0,
+                height: ctx.metrics.page.row_height,
+                radius: ctx.metrics.page.button_radius,
                 color: Color::TRANSPARENT,
             };
             if controls::selectable_row(
@@ -174,7 +174,7 @@ impl BluetoothPage {
                     connect: !connected,
                 });
             }
-            y += 48.0;
+            y += ctx.metrics.page.row_spacing + 4.0;
         }
 
         // Discovery indicator: a subtle bar under the scan button.
