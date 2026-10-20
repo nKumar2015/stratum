@@ -58,7 +58,7 @@ pub(crate) async fn run_monitor(publisher: Publisher) {
 fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
     let mainloop = pipewire::main_loop::MainLoopBox::new(None)
         .map_err(|err| format!("failed to create pipewire mainloop: {}", err))?;
-    let context = pipewire::context::ContextBox::new(&mainloop.loop_(), None)
+    let context = pipewire::context::ContextBox::new(mainloop.loop_(), None)
         .map_err(|err| format!("failed to create pipewire context: {}", err))?;
     let core = context
         .connect(None)

@@ -128,13 +128,10 @@ impl Osd {
         let muted = audio["mute"].as_str().map(|m| m == "yes");
 
         if let (Some(volume), Some(muted)) = (volume, muted) {
-            match (self.last_volume, self.last_muted) {
-                (Some(prev), Some(prev_muted)) => {
-                    if volume != prev || muted != prev_muted {
-                        self.show(Channel::Volume, volume, muted);
-                    }
+            if let (Some(prev), Some(prev_muted)) = (self.last_volume, self.last_muted) {
+                if volume != prev || muted != prev_muted {
+                    self.show(Channel::Volume, volume, muted);
                 }
-                _ => {}
             }
             self.last_volume = Some(volume);
             self.last_muted = Some(muted);
@@ -293,7 +290,7 @@ mod tests {
 
     #[test]
     fn starts_hidden_and_ignores_first_observation() {
-        let mut osd = Osd::new();
+        let osd = Osd::new();
         assert!(!osd.visible());
         assert_eq!(osd.last_volume, None);
     }

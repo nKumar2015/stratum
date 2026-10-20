@@ -134,7 +134,7 @@ impl Sidebar {
         let heights: Vec<Option<f32>> = self
             .widgets
             .iter()
-            .map(|widget| widget.height(content_width, &ctx.metrics))
+            .map(|widget| widget.height(content_width, ctx.metrics))
             .collect();
 
         let fixed_total: f32 = heights.iter().flatten().sum();
@@ -178,7 +178,7 @@ impl Sidebar {
         let widths: Vec<Option<f32>> = self
             .widgets
             .iter()
-            .map(|widget| widget.width(height, &ctx.metrics))
+            .map(|widget| widget.width(height, ctx.metrics))
             .collect();
 
         let fixed_total: f32 = widths.iter().flatten().sum();

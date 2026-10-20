@@ -480,7 +480,7 @@ mod tests {
         column.push(Box::new(Fixed(30.0)));
         // Two widgets of 20 and 30 with 10px between => 60 total.
         let total = 20.0 + 10.0 + 30.0;
-        assert_eq!(column.is_empty(), false);
+        assert!(!column.is_empty());
         assert_eq!(total, 60.0);
     }
 }
