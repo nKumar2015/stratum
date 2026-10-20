@@ -62,6 +62,8 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         // Themes are config-driven and switch live, so `set` is real. `open`
         // needs the theme-switcher overlay, which is not ported yet.
         ("theme", "set") => true,
+        // The power menu exists as its own overlay.
+        ("powermenu", "toggle") => true,
         _ => false,
     }
 }
@@ -423,7 +425,7 @@ mod tests {
         assert!(!is_supported("theme", "open"));
         assert!(is_supported("theme", "set"));
         assert!(is_supported("notifications", "toggleDnd"));
-        assert!(!is_supported("powermenu", "toggle"));
+        assert!(is_supported("powermenu", "toggle"));
     }
 
     #[test]
@@ -482,7 +484,7 @@ mod tests {
 
         // Unported surfaces never reach the UI thread and say so, which is what
         // makes the CLI fall back to Quickshell.
-        let response = ask(r#"{"target":"powermenu","function":"toggle"}"#);
+        let response = ask(r#"{"target":"lockscreen","function":"lock"}"#);
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "unsupported");
 

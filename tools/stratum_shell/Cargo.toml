@@ -12,7 +12,9 @@ path = "src/main.rs"
 # Wayland protocol plumbing only — no UI toolkit.
 # `system` enables libwayland-backed pointer access, which wgpu needs to build
 # a VK_KHR_wayland_surface from a raw wl_surface.
-smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop"] }
+# `xkbcommon` adds keyboard handling (keymap translation and keysyms); typing
+# surfaces (power menu, lock screen, polkit, inline reply) all depend on it.
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
 wayland-client = { version = "0.31", features = ["system"] }
 calloop = "0.14"
 

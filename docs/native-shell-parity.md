@@ -51,7 +51,7 @@ Status: `todo` · `wip` · `verified`
 |---|---|---|---|
 | Lock screen | fullscreen overlay, exclusive keyboard | PAM authentication, password field, failure message and retry, clock, backdrop blur, only unlocks on success | todo |
 | polkit dialog | popup overlay, exclusive keyboard | Shows action/message/icon, password field, submits via the agent, shows remaining attempts, closes on success/failure | todo |
-| Power menu | popup overlay | Lock, hibernate, reboot, shutdown, Windows boot entry, firmware setup, logout | todo |
+| Power menu | popup overlay | Lock, hibernate, reboot, shutdown, Windows boot entry, firmware setup, logout | wip |
 
 ## Screenshots
 
@@ -71,9 +71,10 @@ Status: `todo` · `wip` · `verified`
 **Shell IPC** — `$XDG_RUNTIME_DIR/stratum-shell.sock` (`$STRATUM_SOCKET`
 overrides), one JSON request/response line per connection. All six targets and
 their function names are parsed and validated. Implemented so far:
-`notifications` (`open`, `close`, `toggle`, `clear`, `toggleDnd`) and
-`theme set`. The rest answer `{"code":"unsupported"}`, which `stratum-cli` uses
-to fall back to Quickshell while both shells run; that fallback is exercised.
+`notifications` (`open`, `close`, `toggle`, `clear`, `toggleDnd`),
+`theme set`, and `powermenu toggle`. The rest answer `{"code":"unsupported"}`,
+which `stratum-cli` uses to fall back to Quickshell while both shells run; that
+fallback is exercised.
 
 **`stratum-cli`** — verified end-to-end against the native shell: `notifications
 open/toggle/clear/toggleDnd` and `theme set` were answered by the native pid,

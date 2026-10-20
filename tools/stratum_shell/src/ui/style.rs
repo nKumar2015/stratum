@@ -20,6 +20,7 @@ pub struct Metrics {
     pub tray: TrayMetrics,
     pub osd: OsdMetrics,
     pub toasts: ToastMetrics,
+    pub power_menu: PowerMenuMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -33,6 +34,7 @@ impl Default for Metrics {
             tray: TrayMetrics::default(),
             osd: OsdMetrics::default(),
             toasts: ToastMetrics::default(),
+            power_menu: PowerMenuMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -246,6 +248,46 @@ impl Default for OsdMetrics {
             hold_seconds: 1.2,
             fade_in_seconds: 0.13,
             fade_out_seconds: 0.22,
+        }
+    }
+}
+
+/// The power menu overlay.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PowerMenuMetrics {
+    /// Width of one option tile.
+    pub tile_width: f32,
+    /// Height of one option tile.
+    pub tile_height: f32,
+    /// Gap between tiles.
+    pub tile_gap: f32,
+    /// Padding around the row of tiles.
+    pub panel_padding: f32,
+    /// Corner radius of the panel.
+    pub panel_radius: f32,
+    /// Corner radius of a tile.
+    pub tile_radius: f32,
+    /// Icon size inside a tile.
+    pub icon: f32,
+    /// Label size inside a tile.
+    pub label: f32,
+    /// Dimming applied to the whole screen behind the menu.
+    pub scrim_alpha: f32,
+}
+
+impl Default for PowerMenuMetrics {
+    fn default() -> Self {
+        Self {
+            tile_width: 140.0,
+            tile_height: 140.0,
+            tile_gap: 10.0,
+            panel_padding: 20.0,
+            panel_radius: 12.0,
+            tile_radius: 8.0,
+            icon: 48.0,
+            label: 10.0,
+            scrim_alpha: 0.63,
         }
     }
 }

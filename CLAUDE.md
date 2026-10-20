@@ -51,18 +51,26 @@ Implemented and working: sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with eight
 pages (overview, audio, bluetooth, wifi, battery, notifications, display, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
-live theme switching, config hot reload, and the IPC socket.
+live theme switching, config hot reload, keyboard input, the power menu overlay,
+and the IPC socket.
 
-Not implemented: lock screen, polkit dialog, power menu overlay, theme switcher
-overlay, audio EQ panel, notification actions/inline reply, tray activation and
-DBusMenu, screenshots, dashboard. See `docs/native-shell-parity.md`.
+Not implemented: lock screen, polkit dialog, theme switcher overlay, audio EQ
+panel, notification actions/inline reply, tray activation and DBusMenu,
+screenshots, dashboard. See `docs/native-shell-parity.md`.
+
+The **power menu** is a fullscreen overlay surface per output. Only the output
+it opened on is mapped and given `KeyboardInteractivity::Exclusive`, so keys
+reach it and nowhere else. It is toggled by `stratum-cli powermenu toggle`; the
+shortcut itself stays in the compositor. Keyboard support comes from SCTK's
+`xkbcommon` feature (`KeyboardHandler` in `wayland/state.rs`); modifier state is
+tracked for future text entry.
 
 The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
 with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
 names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
 native shell reports as `unsupported`, so keybinds work during the parallel
-migration. Implemented targets: `notifications` (all functions) and
-`theme set`. The remaining targets (`powermenu`, `lockscreen`, `screenshot`,
+migration. Implemented targets: `notifications` (all functions), `theme set`,
+and `powermenu toggle`. The remaining targets (`lockscreen`, `screenshot`,
 `dashboard`, `theme open/close/toggle`) still fall back to Quickshell; porting
 one means adding an arm in `App::execute_ipc` and extending
 `ipc::is_supported`.
@@ -190,6 +198,10 @@ format, one draw call split into scissored segments. Notable invariants:
   washes out.
 - Overlays need a **premultiplied alpha** composite mode, not `alpha_modes[0]`,
   or a transparent clear composites as opaque black.
+- The **path cache key must include the paint**. Tessellation bakes colour into
+  the vertices, so two paths with the same geometry and different colours have
+  different vertices. Keying on geometry alone made the power menu's selection
+  outline stay on whichever tile was highlighted first.
 - `textureSampleLevel`, not `textureSample`, because of divergent control flow.
 
 `text.rs` shapes with cosmic-text and rasterizes with swash. Shaping results are

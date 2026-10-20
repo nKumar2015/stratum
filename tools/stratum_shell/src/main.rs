@@ -19,6 +19,7 @@ mod hyprland;
 mod ipc;
 mod notifications;
 mod osd;
+mod power_menu;
 mod toasts;
 mod tray;
 #[allow(dead_code)]

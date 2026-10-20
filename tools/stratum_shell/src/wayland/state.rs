@@ -15,6 +15,10 @@ use smithay_client_toolkit::seat::pointer::{
     PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT,
 };
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::seat::keyboard::{
+    KeyEvent as KeyboardEvent, KeyboardHandler, Modifiers, RawModifiers,
+};
+use smithay_client_toolkit::seat::keyboard::Keysym;
 use smithay_client_toolkit::activation::{ActivationHandler, ActivationState, RequestData};
 use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
 use smithay_client_toolkit::shell::xdg::XdgShell;
@@ -67,6 +71,9 @@ pub struct App {
     osd_surfaces: Vec<SurfaceEntry>,
     toasts: crate::toasts::Toasts,
     toast_surfaces: Vec<SurfaceEntry>,
+    /// The power menu overlay and its per-output surfaces.
+    power_menu: crate::power_menu::PowerMenu,
+    power_surfaces: Vec<SurfaceEntry>,
     /// Toast rects from the last paint, for click-to-dismiss.
     toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
@@ -80,6 +87,8 @@ pub struct App {
     /// that surface's logical coordinates.
     pointer: Option<(wl_surface::WlSurface, f32, f32)>,
     pointer_pressed: bool,
+    /// Keyboard modifiers, updated by the compositor.
+    modifiers: Modifiers,
     /// Where the config came from, and its modification time at load.
     config_path: Option<std::path::PathBuf>,
     config_mtime: Option<std::time::SystemTime>,
@@ -164,6 +173,8 @@ impl App {
             osd_surfaces: Vec::new(),
             toasts: crate::toasts::Toasts::new(),
             toast_surfaces: Vec::new(),
+            power_menu: crate::power_menu::PowerMenu::new(),
+            power_surfaces: Vec::new(),
             toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
@@ -172,6 +183,7 @@ impl App {
             settings: None,
             pointer: None,
             pointer_pressed: false,
+            modifiers: Modifiers::default(),
             config_path: path,
             config_mtime,
             last_reload_check: std::time::Instant::now(),
@@ -496,6 +508,59 @@ impl App {
             entry.dirty = false;
         }
 
+        // Power menu. Only the output it opened on is painted and given
+        // keyboard focus; the rest stay unmapped and inert. Repaints happen on
+        // the state changes that matter (open/close, selection change), not
+        // every frame: forcing a redraw here made the labels shimmer.
+        self.power_menu.set_metrics(&self.config.metrics.power_menu);
+        let power_target = self.power_menu.target().map(str::to_string);
+        for entry in &mut self.power_surfaces {
+            let active = power_target
+                .as_deref()
+                .map(|name| name == entry.output_name)
+                .unwrap_or(false);
+            if !active {
+                // Drop focus before unmapping so keys return to the window.
+                entry.set_keyboard_exclusive(false);
+                entry.unmap();
+                continue;
+            }
+            if !entry.configured {
+                continue;
+            }
+            if entry.dirty {
+                tracing::debug!(
+                    "power menu paint output={} selection={}",
+                    entry.output_name,
+                    self.power_menu.selection()
+                );
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                self.power_menu.paint(&mut ctx, &mut list, rect);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
+            // Request focus only once the surface has a buffer attached. Asking
+            // before the first commit after a re-map is why keys stopped
+            // arriving the second time the menu opened.
+            if entry.mapped {
+                entry.set_keyboard_exclusive(true);
+            }
+        }
+
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
                 continue;
@@ -612,11 +677,36 @@ impl App {
                     return Err(IpcError::BadArgs(format!("unknown theme: {name}")));
                 }
             }
+            ("powermenu", "toggle") => {
+                // The menu opens on the focused monitor, not on whichever is
+                // first: the QML shell routed popups the same way.
+                let output = self.focused_output();
+                self.power_menu.toggle(&output);
+                for entry in &mut self.power_surfaces {
+                    entry.dirty = true;
+                }
+            }
             _ => return Err(IpcError::Unsupported),
         }
 
         self.mark_all_dirty();
         Ok(())
+    }
+
+    /// The output the compositor currently has focused, by name.
+    ///
+    /// Popups use this so they open where the user is looking rather than on an
+    /// arbitrary monitor. When the compositor has not reported a focused
+    /// workspace (no Hyprland, or before the first event), fall back to the
+    /// first output so the overlay still has somewhere to appear.
+    fn focused_output(&self) -> String {
+        let hypr = self.state.hypr.get();
+        let named = hypr.focused_monitor.filter(|name| {
+            self.surfaces.iter().any(|entry| &entry.output_name == name)
+        });
+        named
+            .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
+            .unwrap_or_default()
     }
 
     /// Redraw every surface after a state change the UI thread caused.
@@ -1000,6 +1090,29 @@ impl App {
                 SurfaceEntry::new(toast_layer, scale, output_name.clone()).with_output(output.clone()),
             );
 
+            // Power menu: a fullscreen overlay that is only mapped for the
+            // output it opened on. It is created with keyboard interactivity
+            // `None` and switched to `Exclusive` while open, so it cannot steal
+            // keys from a window when hidden.
+            let power_wl = self.compositor_state.create_surface(qh);
+            let power_layer = self.layer_shell.create_layer_surface(
+                qh,
+                power_wl,
+                Layer::Overlay,
+                Some("stratum-powermenu"),
+                Some(output),
+            );
+            power_layer.set_anchor(
+                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+            );
+            power_layer.set_exclusive_zone(-1);
+            power_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            power_layer.commit();
+            self.power_surfaces.push(
+                SurfaceEntry::new(power_layer, scale, output_name.clone())
+                    .with_output(output.clone()),
+            );
+
             debug!("created layer surface on output '{}' (scale {scale}x)", output_name);
         }
         true
@@ -1355,6 +1468,7 @@ impl LayerShellHandler for App {
     ) {
         self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
+        self.power_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
     }
@@ -1369,6 +1483,18 @@ impl LayerShellHandler for App {
     ) {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
+
+        if let Some(entry) = self.power_surfaces.iter_mut().find(|e| &e.layer == layer) {
+            // Fullscreen: the compositor's configure is authoritative.
+            let (width, height) = configure.new_size;
+            entry.resize(
+                &self.gpu,
+                if width == 0 { 1920 } else { width },
+                if height == 0 { 1080 } else { height },
+            );
+            entry.dirty = true;
+            return;
+        }
 
         if let Some(entry) = self.toast_surfaces.iter_mut().find(|e| &e.layer == layer) {
             let (width, height) = configure.new_size;
@@ -1433,6 +1559,12 @@ impl SeatHandler for App {
             match self.seat_state.get_pointer(qh, &seat) {
                 Ok(_pointer) => info!("pointer capability acquired"),
                 Err(err) => tracing::warn!("failed to create pointer: {err}"),
+            }
+        }
+        if capability == Capability::Keyboard {
+            match self.seat_state.get_keyboard(qh, &seat, None) {
+                Ok(_keyboard) => info!("keyboard capability acquired"),
+                Err(err) => tracing::warn!("failed to create keyboard: {err}"),
             }
         }
     }
@@ -1524,7 +1656,24 @@ impl PointerHandler for App {
                 .toast_surfaces
                 .iter()
                 .any(|t| t.layer.wl_surface() == &surface);
-            if on_toast {
+            // The power menu owns the pointer while open; a tile click runs it.
+            let on_power = self
+                .power_surfaces
+                .iter()
+                .any(|p| p.layer.wl_surface() == &surface);
+            if on_power {
+                if let Some(entry) = self
+                    .power_surfaces
+                    .iter()
+                    .find(|p| p.layer.wl_surface() == &surface)
+                {
+                    let rect = entry.logical_rect();
+                    if let Some(argv) = self.power_menu.on_click(point, rect) {
+                        self.actions.push(crate::actions::SystemAction::Spawn(argv));
+                    }
+                }
+                changed = true;
+            } else if on_toast {
                 if let Some((_, id)) = self
                     .toast_hits
                     .iter()
@@ -1651,6 +1800,99 @@ impl ActivationHandler for App {
         if let (Some(activation), Some(settings)) = (&self.activation, &self.settings) {
             activation.activate::<App>(settings.window.wl_surface(), token);
         }
+    }
+}
+
+impl KeyboardHandler for App {
+    fn enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+        _raw: &[u32],
+        _keysyms: &[Keysym],
+    ) {
+    }
+
+    fn leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+    ) {
+    }
+
+    fn press_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: KeyboardEvent,
+    ) {
+        // The power menu owns the keyboard while it is open, so its keys are
+        // handled first and nothing else sees them.
+        if self.power_menu.is_open() {
+            let Some(action) = self.power_menu.key_action(event.keysym) else {
+                return;
+            };
+            tracing::debug!("power menu key {:?} -> {:?}", event.keysym, action);
+            if let Some(argv) = self.power_menu.apply(action) {
+                self.actions.push(crate::actions::SystemAction::Spawn(argv));
+            }
+            for entry in &mut self.power_surfaces {
+                entry.dirty = true;
+            }
+            return;
+        }
+
+        // Escape closes the settings window, which is how an ordinary window
+        // behaves and what the QML panels did.
+        if event.keysym == Keysym::Escape && self.control_center.open {
+            self.control_center.close();
+            for entry in &mut self.surfaces {
+                entry.dirty = true;
+            }
+        }
+    }
+
+    fn repeat_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: KeyboardEvent,
+    ) {
+        // Navigation keys do not need key repeat; ignoring it keeps held arrows
+        // from racing across the menu.
+    }
+
+    fn release_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: KeyboardEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        modifiers: Modifiers,
+        _raw_modifiers: RawModifiers,
+        _layout: u32,
+    ) {
+        self.modifiers = modifiers;
     }
 }
 

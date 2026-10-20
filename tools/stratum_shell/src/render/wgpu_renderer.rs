@@ -839,6 +839,47 @@ fn path_hash(path: &Path) -> u64 {
     }
     path.stroke.map(f32::to_bits).hash(&mut hasher);
     for v in path.transform.m { v.to_bits().hash(&mut hasher); }
+    // The paint must be part of the key. Tessellation bakes the colour into
+    // the vertices, so two paths with identical geometry but different paint
+    // are different vertices. Omitting this made a highlighted border (the
+    // power menu's selection) keep the colour it was first cached with, even
+    // after the highlight moved elsewhere.
+    match &path.paint {
+        Paint::Solid(color) => {
+            0u8.hash(&mut hasher);
+            for channel in [color.r, color.g, color.b, color.a] {
+                channel.to_bits().hash(&mut hasher);
+            }
+        }
+        Paint::LinearGradient { from, to, stops } => {
+            1u8.hash(&mut hasher);
+            for value in [from.x, from.y, to.x, to.y] {
+                value.to_bits().hash(&mut hasher);
+            }
+            for (offset, color) in stops {
+                offset.to_bits().hash(&mut hasher);
+                for channel in [color.r, color.g, color.b, color.a] {
+                    channel.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        Paint::RadialGradient {
+            center,
+            radius,
+            stops,
+        } => {
+            2u8.hash(&mut hasher);
+            center.x.to_bits().hash(&mut hasher);
+            center.y.to_bits().hash(&mut hasher);
+            radius.to_bits().hash(&mut hasher);
+            for (offset, color) in stops {
+                offset.to_bits().hash(&mut hasher);
+                for channel in [color.r, color.g, color.b, color.a] {
+                    channel.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+    }
     hasher.finish()
 }
 
@@ -1057,5 +1098,28 @@ mod tests {
         let verts = tessellate_path(&path, 1.0);
         assert_eq!(verts.len() % 3, 0);
         assert!(verts.len() >= 3);
+    }
+
+    #[test]
+    fn path_cache_key_includes_paint() {
+        // Tessellation bakes colour into the vertices. Two paths with the same
+        // geometry but different colours therefore have different vertices and
+        // must not share a cache entry: sharing one froze the power menu's
+        // selection outline on whichever tile happened to be highlighted first.
+        let geometry = || {
+            vec![
+                PathCommand::MoveTo(Point::new(0.0, 0.0)),
+                PathCommand::LineTo(Point::new(10.0, 0.0)),
+                PathCommand::LineTo(Point::new(10.0, 10.0)),
+                PathCommand::Close,
+            ]
+        };
+        let red = Path::new(geometry(), Paint::Solid(Color::rgba(1.0, 0.0, 0.0, 1.0)));
+        let blue = Path::new(geometry(), Paint::Solid(Color::rgba(0.0, 0.0, 1.0, 1.0)));
+        assert_ne!(path_hash(&red), path_hash(&blue));
+        assert_eq!(path_hash(&red), path_hash(&red.clone()));
+
+        // Stroke width is also baked into the vertices.
+        assert_ne!(path_hash(&red), path_hash(&red.clone().stroked(2.0)));
     }
 }

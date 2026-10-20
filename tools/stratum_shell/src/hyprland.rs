@@ -29,6 +29,11 @@ pub struct HyprState {
     pub occupied: Vec<i32>,
     /// Active window title, if any.
     pub title: Option<String>,
+    /// Monitor the compositor currently has focused.
+    ///
+    /// Popups open here rather than on an arbitrary output, matching the QML
+    /// shell's `popupMonitorName` routing.
+    pub focused_monitor: Option<String>,
 }
 
 fn instance_dir() -> Option<PathBuf> {
@@ -74,6 +79,9 @@ impl HyprState {
                         let name = monitor["name"].as_str().unwrap_or_default().to_string();
                         let id = monitor["activeWorkspace"]["id"].as_i64().unwrap_or(0) as i32;
                         if !name.is_empty() {
+                            if monitor["focused"].as_bool() == Some(true) {
+                                state.focused_monitor = Some(name.clone());
+                            }
                             state.active.insert(name, id);
                         }
                     }

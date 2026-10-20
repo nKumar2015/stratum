@@ -39,6 +39,9 @@ pub struct SurfaceEntry {
     /// Input region last sent to the compositor, so an unchanged region is not
     /// recreated every frame.
     pub input_region: Option<crate::render::display_list::Rect>,
+    /// Whether this surface currently takes exclusive keyboard focus. Tracked
+    /// so the protocol request is only sent when it changes.
+    pub keyboard_exclusive: bool,
 }
 
 impl SurfaceEntry {
@@ -57,7 +60,25 @@ impl SurfaceEntry {
             output: None,
             mapped: false,
             input_region: None,
+            keyboard_exclusive: false,
         }
+    }
+
+    /// Switch between exclusive keyboard focus and none.
+    ///
+    /// Overlays that accept typing must request `Exclusive`; leaving it on while
+    /// hidden would keep the compositor's keys away from the focused window.
+    pub fn set_keyboard_exclusive(&mut self, exclusive: bool) {
+        if self.keyboard_exclusive == exclusive {
+            return;
+        }
+        self.layer.set_keyboard_interactivity(if exclusive {
+            smithay_client_toolkit::shell::wlr_layer::KeyboardInteractivity::Exclusive
+        } else {
+            smithay_client_toolkit::shell::wlr_layer::KeyboardInteractivity::None
+        });
+        self.layer.commit();
+        self.keyboard_exclusive = exclusive;
     }
 
     /// Associate this surface with the output it was created for.
