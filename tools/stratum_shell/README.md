@@ -6,13 +6,30 @@ embeds the system managers directly (no daemon socket between UI and state).
 
 ## Status
 
-M3: the sidebar is config-driven. It draws real widgets from the configuration
-file — launcher, workspaces, vertical app title, quick-panel group, battery, and
-clock — using the four palettes the QML shell shipped with.
+The sidebar is config-driven, the control centre is an xdg-shell window with
+eight pages, and the shell owns notifications, toasts, the OSD, the tray
+watcher, live theme switching, config hot reload, and its IPC socket.
 
-Not yet ported: menus, hover panels, notifications, OSD, lock screen, polkit
-dialog, power menu, dashboard, and the screenshot suite. See
+Not yet ported: menus, hover panels, lock screen, polkit dialog, power menu,
+notification actions/inline reply, dashboard, and the screenshot suite. See
 `docs/native-shell-parity.md` at the repository root.
+
+## IPC
+
+External tools talk to the shell over a Unix socket at
+`$XDG_RUNTIME_DIR/stratum-shell.sock` (override with `$STRATUM_SOCKET`). It
+mirrors the QML `IpcHandler` contract, so `stratum-cli` and existing keybinds
+work unchanged:
+
+```sh
+stratum-cli notifications toggle
+stratum-cli notifications toggleDnd
+stratum-cli theme set gruvbox
+```
+
+The CLI tries the native socket first and falls back to `qs ipc` for functions
+the shell reports as `unsupported`, so both shells can run side by side during
+the migration.
 
 ## Configuration
 

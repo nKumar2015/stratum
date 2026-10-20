@@ -64,9 +64,24 @@ Status: `todo` · `wip` · `verified`
 
 | Surface | Kind | Behaviour to preserve | Status |
 |---|---|---|---|
-| Shell IPC | Unix socket | Targets `powermenu`, `theme`, `lockscreen`, `screenshot`, `dashboard`, `notifications` with the same function names `stratum-cli` already calls | todo |
-| `stratum-cli` | CLI | Every subcommand keeps its output contract; `qs ipc` calls replaced by the shell socket | todo |
-| External keybinds | scripts | Anything calling `stratum-cli` keeps working; anything calling `qs ipc` directly is documented as changed | todo |
+| Shell IPC | Unix socket | Targets `powermenu`, `theme`, `lockscreen`, `screenshot`, `dashboard`, `notifications` with the same function names `stratum-cli` already calls | wip |
+| `stratum-cli` | CLI | Every subcommand keeps its output contract; `qs ipc` calls replaced by the shell socket | verified |
+| External keybinds | scripts | Anything calling `stratum-cli` keeps working; anything calling `qs ipc` directly is documented as changed | verified |
+
+**Shell IPC** — `$XDG_RUNTIME_DIR/stratum-shell.sock` (`$STRATUM_SOCKET`
+overrides), one JSON request/response line per connection. All six targets and
+their function names are parsed and validated. Implemented so far:
+`notifications` (`open`, `close`, `toggle`, `clear`, `toggleDnd`) and
+`theme set`. The rest answer `{"code":"unsupported"}`, which `stratum-cli` uses
+to fall back to Quickshell while both shells run; that fallback is exercised.
+
+**`stratum-cli`** — verified end-to-end against the native shell: `notifications
+open/toggle/clear/toggleDnd` and `theme set` were answered by the native pid,
+and `theme open` / `powermenu toggle` transparently reached Quickshell.
+
+**External keybinds** — `SUPER+T` (`theme open`) and `SUPER+N`
+(`notifications toggle`) still work: the CLI contract and output JSON are
+unchanged.
 
 ## Behaviours easy to miss
 

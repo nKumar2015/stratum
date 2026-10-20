@@ -31,6 +31,7 @@ use wayland_client::{Connection, QueueHandle};
 use super::surfaces::SurfaceEntry;
 use super::display_ptr;
 use crate::config::{Config, SidebarPosition};
+use crate::ipc::{IpcCall, IpcError};
 use crate::render::display_list::Color;
 use crate::render::Gpu;
 use crate::sys_state::SystemState;
@@ -87,6 +88,10 @@ pub struct App {
     /// Held so the ping source's channel stays open for the shell's lifetime.
     #[allow(dead_code)]
     wake: Option<calloop::ping::Ping>,
+    /// The IPC listener. Held so its socket file lives exactly as long as the
+    /// shell; dropping it unlinks the socket.
+    #[allow(dead_code)]
+    ipc: Option<crate::ipc::Server>,
 
     #[allow(dead_code)]
     pub should_exit: bool,
@@ -171,6 +176,7 @@ impl App {
             config_mtime,
             last_reload_check: std::time::Instant::now(),
             wake: None,
+            ipc: None,
             should_exit: false,
         };
 
@@ -199,6 +205,7 @@ impl App {
         app.state.set_waker(Arc::new(move || wake_for_state.ping()));
         app.wake = Some(ping);
 
+        app.start_ipc(&loop_handle);
         app.create_surfaces(&qh);
         app.start_monitors();
 
@@ -273,19 +280,19 @@ impl App {
 
         // Toasts follow the notification list and expire on their own timers.
         // `take_dirty` above already consumed the aggregate flag, so sync on any
-        // state change rather than on the notification cell alone.
+        // state change rather than on the notification cell alone. While
+        // do-not-disturb is on, existing cards still update and disappear with
+        // their notifications, but no new card appears.
         if state_changed {
+            self.toasts.set_muted(self.state.dnd.get());
             let list = self.state.notifications.get();
             self.toasts.sync(&list);
         }
-        let expired = self.toasts.tick(dt);
-        if !expired.is_empty() {
-            if let Some(server) = &self.notifications {
-                for id in expired {
-                    server.close(id, 1);
-                }
-            }
-        }
+        // A toast that times out only hides the card. The notification stays in
+        // the centre until it is dismissed or cleared — expiry is not dismissal,
+        // and closing it on the server here would make notifications vanish from
+        // the page a few seconds after arriving.
+        self.toasts.tick(dt);
         if self.toasts.animating() || !self.toasts.is_empty() {
             for entry in &mut self.toast_surfaces {
                 entry.dirty = true;
@@ -393,22 +400,8 @@ impl App {
                     }
                     crate::actions::SystemAction::SetTheme(name) => {
                         // Theme is shell-owned state, not a system action.
-                        if self.config.themes.contains_key(&name) {
-                            let mut updated = (*self.config).clone();
-                            updated.theme = name.clone();
-                            self.config = Arc::new(updated);
-                            self.sidebar = crate::ui::sidebar::Sidebar::new(Arc::clone(&self.config));
-                            // Keep the panel's page and open state across the swap.
-                            self.control_center.set_config(Arc::clone(&self.config));
-                            for entry in &mut self.surfaces {
-                                entry.dirty = true;
-                            }
-                            for entry in &mut self.osd_surfaces {
-                                entry.dirty = true;
-                            }
-                            for entry in &mut self.toast_surfaces {
-                                entry.dirty = true;
-                            }
+                        if self.switch_theme(&name) {
+                            self.mark_all_dirty();
                         }
                     }
                     other => self.actions.push(other),
@@ -540,6 +533,121 @@ impl App {
             entry.dirty = false;
         }
         Ok(())
+    }
+
+    /// Start the IPC listener and route requests through calloop.
+    ///
+    /// The listener runs on its own thread because a client may connect at any
+    /// time. Requests that need UI state — opening a panel, switching the theme
+    /// — are delivered to the event loop through a calloop channel, so they are
+    /// handled on the same thread as every other state change.
+    fn start_ipc(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
+        let (tx, channel) = calloop::channel::channel();
+        self.ipc = crate::ipc::start(tx);
+        if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
+            match event {
+                calloop::channel::Event::Msg(request) => app.handle_ipc(request),
+                // The listener thread is gone; nothing more can arrive.
+                calloop::channel::Event::Closed => {}
+            }
+        }) {
+            warn!("failed to insert ipc source: {err}");
+        }
+    }
+
+    /// Execute one validated IPC call and answer the client.
+    fn handle_ipc(&mut self, request: crate::ipc::Request) {
+        let result = self.execute_ipc(&request.call);
+        if result.is_err() {
+            tracing::debug!(
+                "ipc {} {} failed: {:?}",
+                request.call.target,
+                request.call.function,
+                result
+            );
+        }
+        // If the client has already gone away the send fails; that is its
+        // problem, not ours, and must not stop the shell.
+        let _ = request.reply.send(result);
+    }
+
+    fn execute_ipc(&mut self, call: &IpcCall) -> Result<(), IpcError> {
+        use crate::ipc::{is_supported, IpcError};
+
+        if !is_supported(&call.target, &call.function) {
+            return Err(IpcError::Unsupported);
+        }
+
+        match (call.target.as_str(), call.function.as_str()) {
+            // The notifications centre is the Notifications page of the
+            // settings window.
+            ("notifications", "open") => {
+                self.control_center.show(crate::ui::control_center::Page::Notifications);
+            }
+            ("notifications", "close") => self.control_center.close(),
+            ("notifications", "toggle") => {
+                self.control_center.toggle(crate::ui::control_center::Page::Notifications)
+            }
+            ("notifications", "clear") => {
+                if let Some(server) = &self.notifications {
+                    let ids: Vec<u32> =
+                        self.state.notifications.get().iter().map(|n| n.id).collect();
+                    for id in ids {
+                        server.close(id, 2);
+                    }
+                }
+            }
+            ("notifications", "toggleDnd") => {
+                let next = !self.state.dnd.get();
+                self.state.dnd.set(next);
+                self.state.notify();
+            }
+            ("theme", "set") => {
+                // The parser guarantees exactly one non-empty argument.
+                let name = call
+                    .args
+                    .first()
+                    .ok_or_else(|| IpcError::BadArgs("missing theme name".into()))?;
+                if !self.switch_theme(name) {
+                    return Err(IpcError::BadArgs(format!("unknown theme: {name}")));
+                }
+            }
+            _ => return Err(IpcError::Unsupported),
+        }
+
+        self.mark_all_dirty();
+        Ok(())
+    }
+
+    /// Redraw every surface after a state change the UI thread caused.
+    fn mark_all_dirty(&mut self) {
+        for entry in &mut self.surfaces {
+            entry.dirty = true;
+        }
+        for entry in &mut self.osd_surfaces {
+            entry.dirty = true;
+        }
+        for entry in &mut self.toast_surfaces {
+            entry.dirty = true;
+        }
+        if let Some(settings) = &mut self.settings {
+            settings.dirty = true;
+        }
+    }
+
+    /// Switch the active theme live. Returns false for an unknown name, which
+    /// must not blank the shell.
+    fn switch_theme(&mut self, name: &str) -> bool {
+        if !self.config.themes.contains_key(name) {
+            return false;
+        }
+        let mut updated = (*self.config).clone();
+        updated.theme = name.to_string();
+        self.config = Arc::new(updated);
+        self.sidebar = Sidebar::new(Arc::clone(&self.config));
+        // Keep the panel's page and open state across the swap.
+        self.control_center.set_config(Arc::clone(&self.config));
+        true
     }
 
     /// Start the system managers and compositor watcher.

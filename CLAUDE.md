@@ -51,16 +51,21 @@ Implemented and working: sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with eight
 pages (overview, audio, bluetooth, wifi, battery, notifications, display, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
-live theme switching, config hot reload.
+live theme switching, config hot reload, and the IPC socket.
 
 Not implemented: lock screen, polkit dialog, power menu overlay, theme switcher
 overlay, audio EQ panel, notification actions/inline reply, tray activation and
 DBusMenu, screenshots, dashboard. See `docs/native-shell-parity.md`.
 
-Recommended order and the open questions about cutover criteria are recorded at
-the end of the last session's notes; the highest-value next item is the **IPC
-socket**, because external keybinds and `stratum-cli` currently reach Quickshell
-via `qs ipc` and have no native equivalent yet.
+The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
+with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
+names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
+native shell reports as `unsupported`, so keybinds work during the parallel
+migration. Implemented targets: `notifications` (all functions) and
+`theme set`. The remaining targets (`powermenu`, `lockscreen`, `screenshot`,
+`dashboard`, `theme open/close/toggle`) still fall back to Quickshell; porting
+one means adding an arm in `App::execute_ipc` and extending
+`ipc::is_supported`.
 
 ### Decisions still open with the user
 
@@ -130,7 +135,7 @@ exposed as `SystemState::set_waker`.
 
 `sys_state.rs` holds `Cell<T>` per domain (audio, net, wifi, wifi_networks,
 bluetooth, battery, music, dashboard, polkit, hypr, tray, brightness,
-notifications). Managers in `stratum_sys` publish into them through
+notifications, dnd). Managers in `stratum_sys` publish into them through
 `SystemState::publisher`, which **wakes the loop only when a snapshot actually
 changed** — PipeWire republishes on many events that carry identical state, and
 treating those as changes was the largest source of idle CPU.

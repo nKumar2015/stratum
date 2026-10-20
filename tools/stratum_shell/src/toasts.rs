@@ -38,6 +38,8 @@ pub struct Toasts {
     dismissed: HashMap<u32, ()>,
     /// Sizes, timings, and limits, refreshed from the config each frame.
     metrics: crate::ui::style::ToastMetrics,
+    /// Do-not-disturb: keep the stack consistent, but do not add cards.
+    muted: bool,
 }
 
 impl Toasts {
@@ -46,11 +48,19 @@ impl Toasts {
         self.metrics = metrics.clone();
     }
 
+    /// Enable or disable do-not-disturb. Turning it on does not remove cards
+    /// already on screen; turning it off lets the next sync adopt anything that
+    /// arrived in the meantime, since `sync` sees the whole live list.
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
+    }
+
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
             dismissed: HashMap::new(),
             metrics: crate::ui::style::ToastMetrics::default(),
+            muted: false,
         }
     }
 
@@ -80,6 +90,12 @@ impl Toasts {
                 continue;
             }
             if self.dismissed.contains_key(&notification.id) {
+                continue;
+            }
+            if self.muted {
+                // Do-not-disturb: the notification still reaches the page; it
+                // just does not interrupt. It is not marked dismissed, so
+                // turning DND off brings it back only if it is still live.
                 continue;
             }
 
@@ -365,6 +381,19 @@ mod tests {
         let list: Vec<_> = (1..=8).map(|id| notification(id, 1, 5000)).collect();
         toasts.sync(&list);
         assert!(toasts.entries.len() <= 5);
+    }
+
+    #[test]
+    fn do_not_disturb_suppresses_new_cards() {
+        let mut toasts = Toasts::new();
+        toasts.set_muted(true);
+        toasts.sync(&[notification(1, 1, 5000)]);
+        assert!(toasts.is_empty());
+
+        // Turning it off adopts what arrived while it was on.
+        toasts.set_muted(false);
+        toasts.sync(&[notification(1, 1, 5000)]);
+        assert_eq!(toasts.entries.len(), 1);
     }
 
     #[test]

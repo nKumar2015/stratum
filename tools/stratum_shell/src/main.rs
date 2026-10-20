@@ -16,6 +16,7 @@ mod glyph_probe;
 mod actions;
 mod config;
 mod hyprland;
+mod ipc;
 mod notifications;
 mod osd;
 mod toasts;

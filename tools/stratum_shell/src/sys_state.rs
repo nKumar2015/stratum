@@ -80,6 +80,8 @@ pub struct SystemState {
     pub brightness: Cell<i64>,
     /// Live notifications, newest last, published by the notification server.
     pub notifications: Cell<Vec<crate::notifications::Notification>>,
+    /// Do-not-disturb: notifications still collect, but no toasts appear.
+    pub dnd: Cell<bool>,
     /// Called after any snapshot changes, so a sleeping event loop wakes up and
     /// repaints instead of waiting for its poll timeout.
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -101,6 +103,7 @@ impl SystemState {
             tray: Cell::new(Vec::new()),
             brightness: Cell::new(0),
             notifications: Cell::new(Vec::new()),
+            dnd: Cell::new(false),
             waker: Mutex::new(None),
         })
     }
@@ -133,6 +136,7 @@ impl SystemState {
             | self.polkit.take_dirty()
             | self.hypr.take_dirty()
             | self.notifications.take_dirty()
+            | self.dnd.take_dirty()
     }
 
     /// A publisher that feeds every manager snapshot into this state.

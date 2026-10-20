@@ -49,7 +49,12 @@ struct Store {
 pub struct NotificationServer {
     store: Mutex<Store>,
     sink: NotificationSink,
-    connection: Mutex<Option<Connection>>,
+    /// The session connection once `serve` has acquired the name. Dismissals
+    /// initiated by the shell use it to emit `NotificationClosed`, which is how
+    /// clients (and the QML shell during migration) learn a notification is
+    /// gone. It is a blocking connection so `close` can be called from the UI
+    /// thread.
+    connection: Mutex<Option<zbus::blocking::Connection>>,
 }
 
 impl NotificationServer {
@@ -77,7 +82,7 @@ impl NotificationServer {
             .await?;
         connection.request_name("org.freedesktop.Notifications").await?;
         if let Ok(mut slot) = self.connection.lock() {
-            *slot = Some(connection);
+            *slot = Some(zbus::blocking::Connection::from(connection.clone()));
         }
         info!("notification server listening on org.freedesktop.Notifications");
         std::future::pending::<()>().await;
@@ -94,6 +99,10 @@ impl NotificationServer {
     }
 
     /// Close a notification and emit the D-Bus signal.
+    ///
+    /// The signal matters even though we initiated the close: a client that
+    /// tracks its own notifications (libnotify, the QML shell during the
+    /// migration) only frees its state when it arrives.
     pub fn close(&self, id: u32, reason: u32) {
         {
             let Ok(mut store) = self.store.lock() else {
@@ -111,7 +120,20 @@ impl NotificationServer {
             }
         }
         self.publish();
-        let _ = reason;
+
+        let connection = self.connection.lock().ok().and_then(|slot| slot.clone());
+        if let Some(connection) = connection {
+            let body = (id, reason);
+            if let Err(err) = connection.emit_signal(
+                None::<&str>,
+                "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications",
+                "NotificationClosed",
+                &body,
+            ) {
+                debug!("failed to emit NotificationClosed for {id}: {err}");
+            }
+        }
     }
 }
 

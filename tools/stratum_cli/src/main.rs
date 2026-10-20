@@ -149,7 +149,39 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
         ));
     }
 
-    let pid = newest_quickshell_pid()?;
+    // Prefer the native shell. It reports `unsupported` for surfaces that have
+    // not been ported yet, which is the cue to fall through to Quickshell while
+    // both shells run side by side. A missing socket means the native shell is
+    // not running at all.
+    match daemon_client::shell_call(target, function, args) {
+        Ok(response) if response["ok"].as_bool() == Some(true) => {
+            let pid = response["pid"].as_i64().unwrap_or(std::process::id() as i64);
+            Ok(pid)
+        }
+        Ok(response) if response["code"].as_str() == Some("unsupported") => {
+            run_ipc_call_quickshell(target, function, args)
+        }
+        Ok(response) => {
+            let detail = response["error"]
+                .as_str()
+                .unwrap_or("shell rejected the request");
+            Err(format!("shell ipc failed: {}", detail))
+        }
+        Err(err) => {
+            // No native shell listening (missing socket, or a stale file left
+            // by a previous run). Fall back to Quickshell; if that is not
+            // running either, report the native error as the more useful one.
+            run_ipc_call_quickshell(target, function, args)
+                .map_err(|fallback| format!("native shell unavailable ({err}); {fallback}"))
+        }
+    }
+}
+
+/// The pre-native path: ask the newest Quickshell instance.
+fn run_ipc_call_quickshell(target: &str, function: &str, args: &[String]) -> Result<i64, String> {
+    let pid = newest_quickshell_pid().map_err(|err| {
+        format!("no native shell IPC socket and no running Quickshell instance ({err})")
+    })?;
     let pid_text = pid.to_string();
 
     let mut command_args = vec![

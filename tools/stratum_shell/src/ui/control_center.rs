@@ -65,6 +65,16 @@ impl ControlCenter {
         }
     }
 
+    /// Open on `page` without toggling. Used by IPC commands, whose contract is
+    /// `open`, not "open unless already open".
+    pub fn show(&mut self, page: Page) {
+        if !self.open || self.page != page {
+            self.pages.on_page_shown(page);
+        }
+        self.open = true;
+        self.page = page;
+    }
+
     pub fn close(&mut self) {
         self.open = false;
     }
@@ -347,6 +357,18 @@ mod tests {
 
         center.toggle(Page::Battery);
         assert!(!center.open);
+    }
+
+    #[test]
+    fn show_is_not_a_toggle() {
+        let config = Arc::new(Config::default());
+        let mut center = ControlCenter::new(config);
+        center.show(Page::Notifications);
+        assert!(center.open);
+        // A second `open` must leave it open; only `toggle` flips it.
+        center.show(Page::Notifications);
+        assert!(center.open);
+        assert_eq!(center.page, Page::Notifications);
     }
 
     #[test]
