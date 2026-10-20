@@ -10,8 +10,15 @@ use crate::render::display_list::DisplayList;
 use crate::render::{Gpu, SurfaceRenderer};
 
 pub struct SurfaceEntry {
-    pub layer: LayerSurface,
+    /// The Vulkan swapchain, which references the Wayland surface below.
+    ///
+    /// Field order is load-bearing: Rust drops fields in declaration order, and
+    /// the swapchain must be torn down *before* the `wl_surface` it presents
+    /// into. Declaring `layer` first destroyed the surface mid-swapchain and
+    /// segfaulted inside the NVIDIA driver (`vkDestroySwapchainKHR` writing
+    /// through a released `wl_proxy`).
     pub renderer: Option<SurfaceRenderer>,
+    pub layer: LayerSurface,
     /// Integer buffer scale reported by SCTK, used for `set_buffer_scale`,
     /// buffer sizing, and glyph rasterization. Fractional outputs (e.g. 1.6)
     /// arrive as their ceiling; rasterizing at the ceiling and letting the
@@ -29,13 +36,16 @@ pub struct SurfaceEntry {
     /// True while a buffer is attached. Layer surfaces stay mapped even when
     /// nothing is drawn, so this tracks whether `unmap` has work to do.
     pub mapped: bool,
+    /// Input region last sent to the compositor, so an unchanged region is not
+    /// recreated every frame.
+    pub input_region: Option<crate::render::display_list::Rect>,
 }
 
 impl SurfaceEntry {
     pub fn new(layer: LayerSurface, scale: i32, output_name: String) -> Self {
         Self {
-            layer,
             renderer: None,
+            layer,
             scale,
             logical_width: 0,
             logical_height: 0,
@@ -46,6 +56,7 @@ impl SurfaceEntry {
             output_name,
             output: None,
             mapped: false,
+            input_region: None,
         }
     }
 
@@ -61,15 +72,16 @@ impl SurfaceEntry {
     /// left attached with a fully transparent (or, worse, opaque) buffer:
     /// leaving it mapped keeps a stale frame on screen forever, which is the
     /// "black rectangle after fading away" bug.
+    ///
+    /// The renderer (and its Vulkan swapchain) is kept. Tearing it down and
+    /// rebuilding it on the next show races the compositor's buffer release and
+    /// surfaces as a `Timeout` from `get_current_texture`.
     pub fn unmap(&mut self) {
         if !self.mapped {
             return;
         }
         self.layer.attach(None, 0, 0);
         self.layer.commit();
-        // The swapchain is tied to the mapped state; drop it so the next show
-        // starts clean rather than presenting into a stale surface.
-        self.renderer = None;
         self.mapped = false;
         self.dirty = false;
     }
@@ -140,25 +152,31 @@ impl SurfaceEntry {
     /// Overlay surfaces are full-height so their contents can grow, but only the
     /// cards themselves should be clickable. Without an input region the whole
     /// strip swallows clicks intended for the window underneath.
-    pub fn set_input_region<D>(
-        &self,
-        compositor: &wayland_client::protocol::wl_compositor::WlCompositor,
-        qh: &wayland_client::QueueHandle<D>,
+    pub fn set_input_region(
+        &mut self,
+        compositor: &smithay_client_toolkit::compositor::CompositorState,
         rect: Option<crate::render::display_list::Rect>,
-    ) where
-        D: wayland_client::Dispatch<wayland_client::protocol::wl_region::WlRegion, ()> + 'static,
-    {
-        let region = compositor.create_region(qh, ());
+    ) {
+        if rect == self.input_region {
+            return;
+        }
+        let Ok(region) = smithay_client_toolkit::compositor::Region::new(compositor) else {
+            return;
+        };
         if let Some(rect) = rect {
             region.add(
-                rect.x as i32,
-                rect.y as i32,
-                rect.width.max(0.0) as i32,
-                rect.height.max(0.0) as i32,
+                rect.x.round() as i32,
+                rect.y.round() as i32,
+                rect.width.max(0.0).round() as i32,
+                rect.height.max(0.0).round() as i32,
             );
         }
-        self.layer.wl_surface().set_input_region(Some(&region));
-        region.destroy();
+        self.layer
+            .wl_surface()
+            .set_input_region(Some(region.wl_region()));
+        // `Region` destroys the protocol object on drop, which is what we want:
+        // the surface has already copied it.
+        self.input_region = rect;
     }
 
     /// Convenience rect for this surface in logical coordinates.

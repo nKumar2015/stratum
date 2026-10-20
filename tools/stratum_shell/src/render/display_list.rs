@@ -17,6 +17,15 @@ pub struct Color {
     pub a: f32,
 }
 
+impl PartialEq for Rect {
+    fn eq(&self, other: &Self) -> bool {
+        (self.x - other.x).abs() < 0.01
+            && (self.y - other.y).abs() < 0.01
+            && (self.width - other.width).abs() < 0.01
+            && (self.height - other.height).abs() < 0.01
+    }
+}
+
 impl Rect {
     pub const EMPTY: Rect = Rect {
         x: 0.0,
@@ -148,6 +157,10 @@ impl Transform {
 }
 
 /// A filled rounded rectangle. The fast path: SDF, no tessellation.
+///
+/// `PartialEq` is used to skip redundant protocol round-trips (an unchanged
+/// input region, for instance), so it compares geometry only — the fill colour
+/// of a hit-test rect is irrelevant.
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {
     pub x: f32,
@@ -402,6 +415,25 @@ fn intersect(a: Rect, b: Rect) -> Rect {
         y,
         width: (right - x).max(0.0),
         height: (bottom - y).max(0.0),
+        radius: 0.0,
+        color: Color::TRANSPARENT,
+    }
+}
+
+/// Smallest rect containing both inputs.
+///
+/// Used where a set of cards has to be described by one hit area — an input
+/// region, for instance, can only be a union of rectangles.
+pub fn union(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let right = (a.x + a.width).max(b.x + b.width);
+    let bottom = (a.y + a.height).max(b.y + b.height);
+    Rect {
+        x,
+        y,
+        width: right - x,
+        height: bottom - y,
         radius: 0.0,
         color: Color::TRANSPARENT,
     }

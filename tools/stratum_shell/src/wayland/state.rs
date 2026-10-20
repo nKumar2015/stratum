@@ -480,6 +480,22 @@ impl App {
             let rect = entry.logical_rect();
             let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
             let hits = self.toasts.paint(&mut ctx, &mut list, rect);
+
+            // The surface spans the full screen height so the stack can grow,
+            // but only the cards themselves should take clicks. Everything
+            // else must fall through to the window underneath. This has to be
+            // set before the commit that `render_list` performs, or the region
+            // only takes effect one frame late.
+            let bounds = hits
+                .iter()
+                .fold(None::<crate::render::display_list::Rect>, |acc, (card, _)| {
+                    Some(match acc {
+                        None => *card,
+                        Some(acc) => crate::render::display_list::union(acc, *card),
+                    })
+                });
+            entry.set_input_region(&self.compositor_state, bounds);
+
             // Only the surface the pointer is over can receive a click, so
             // merging the stacks is safe: at most one output is interactive.
             self.toast_hits.extend(hits);
@@ -956,8 +972,10 @@ fn read_brightnessctl() -> Option<i64> {
 }
 
 struct SettingsWindow {
-    window: Window,
+    /// Declared before `window` so the swapchain drops before the `wl_surface`
+    /// it references. See `SurfaceEntry` for why the order matters.
     renderer: Option<crate::render::SurfaceRenderer>,
+    window: Window,
     scale: i32,
     width: u32,
     height: u32,
@@ -977,8 +995,8 @@ impl SettingsWindow {
         metrics: &crate::ui::style::WindowMetrics,
     ) -> Self {
         Self {
-            window,
             renderer: None,
+            window,
             scale,
             width: metrics.width,
             height: metrics.height,
