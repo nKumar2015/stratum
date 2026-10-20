@@ -59,6 +59,9 @@ Notes:
 - `app_title` is flexible (like QML's `Layout.fillHeight`): it consumes the
   remaining vertical space, which pushes the widgets after it to the bottom.
 - Colours accept `#rgb`, `#rrggbb`, or `#rrggbbaa`.
+- Colours live in `[themes.*]`; everything else visual (font sizes, row heights,
+  paddings, gaps, radii, animation timings) lives in `[metrics.*]`. Neither has
+  literals left in widget code, so restyling means editing the config.
 - **Unknown keys are a hard error**, so a typo surfaces instead of being ignored.
 - Editing the file reloads it live (`behavior.reload_on_change`), including theme
   switches. A parse error keeps the previous config and logs the problem, so a
@@ -69,7 +72,14 @@ Notes:
 
 - `config.rs` — TOML schema, colour parsing, the four built-in themes, and the
   live-reload path.
-- `ui/` — the widget trait, layout helpers, and the sidebar widgets.
+- `ui/style.rs` — every size, padding, gap, radius, and duration, grouped by
+  surface. Colours stay in `config.rs`; nothing draws with a literal.
+- `ui/widgets/` — one module per bar widget (workspaces, app title, tray,
+  quick panel, icons, battery, clock, launcher, spacer).
+- `ui/pages/` — one module per control-centre page.
+- `ui/control_center.rs` — window chrome only: navigation rail and page frame.
+- `ui/controls.rs` — shared immediate-mode controls (slider, toggle, button,
+  selectable row) that pages compose.
 - `sys_state.rs` — in-process state cells fed by `stratum_sys` publishers.
 - `render/` — display list, wgpu renderer, glyph atlas, tessellation.
 - `text.rs` / `icons.rs` — shaping with Nerd Font fallback, icon-theme lookup.
