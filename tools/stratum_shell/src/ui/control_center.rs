@@ -126,8 +126,14 @@ impl ControlCenter {
 
     /// Wheel scrolling for pages that have lists.
     pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
-        if self.page == Page::Wifi {
-            self.pages.wifi.on_scroll(point, delta);
+        match self.page {
+            Page::Wifi => {
+                self.pages.wifi.on_scroll(point, delta);
+            }
+            Page::Bluetooth => {
+                self.pages.bluetooth.on_scroll(point, delta);
+            }
+            _ => {}
         }
     }
 

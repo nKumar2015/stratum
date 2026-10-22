@@ -16,6 +16,7 @@ use crate::ui::{InputState, PaintCtx};
 pub mod audio;
 pub mod battery;
 pub mod bluetooth;
+pub mod devices;
 pub mod display;
 pub mod equalizer;
 pub mod notifications;

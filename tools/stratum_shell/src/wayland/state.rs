@@ -2208,7 +2208,7 @@ impl App {
                     // radio work on a timer for no reason.
                     state.wifi_networks.set(managers::wifi::list(false));
                 }
-                state.bluetooth.set(managers::bluetooth::status());
+                state.bluetooth.set(managers::bluetooth::status_with_all());
                 state.battery.set(managers::battery::status());
                 state.notify();
                 std::thread::sleep(std::time::Duration::from_millis(poll_ms));

@@ -33,6 +33,11 @@ pub enum SystemAction {
     BluetoothPower(bool),
     /// Connect or disconnect a Bluetooth device by address.
     BluetoothConnect { address: String, connect: bool },
+    /// Any other operation on a Bluetooth device.
+    BluetoothDevice { address: String, op: BluetoothOp },
+    /// Run `action` and publish how it ended under `ticket`
+    /// (`SystemState::action_result`), for pages that report outcomes.
+    Tracked { ticket: u64, action: Box<SystemAction> },
     /// Start a Bluetooth scan.
     BluetoothScan,
     /// Enable or disable the Wi-Fi radio.
@@ -100,6 +105,23 @@ pub enum SystemAction {
     TrayMenuClose,
 }
 
+/// What `SystemAction::BluetoothDevice` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BluetoothOp {
+    Pair,
+    Forget,
+    Connect,
+    Disconnect,
+    Trust,
+    Untrust,
+}
+
+/// A fresh ticket for `SystemAction::Tracked`.
+pub fn next_ticket() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A queue the UI writes to and a worker drains.
 pub struct ActionQueue {
     tx: Sender<SystemAction>,
@@ -135,8 +157,19 @@ impl ActionQueue {
             .name("stratum-actions".into())
             .spawn(move || {
                 for action in rx {
-                    if let Err(err) = execute(&action, &state) {
+                    let (ticket, action) = match action {
+                        SystemAction::Tracked { ticket, action } => (Some(ticket), *action),
+                        action => (None, action),
+                    };
+                    let result = execute(&action, &state);
+                    if let Err(err) = &result {
                         tracing::warn!("action failed: {err}");
+                    }
+                    if let Some(ticket) = ticket {
+                        state.action_result.set(crate::sys_state::ActionResult {
+                            ticket,
+                            error: result.err(),
+                        });
                     }
                     // Wake the UI even on failure: the attempt may have changed
                     // something (a refused connect still reorders the list).
@@ -206,7 +239,7 @@ fn publish_eq(state: &SystemState, device: &str, outcome: Option<(&serde_json::V
 }
 
 fn refresh_bluetooth(state: &SystemState) {
-    state.bluetooth.set(managers::bluetooth::status());
+    state.bluetooth.set(managers::bluetooth::status_with_all());
     state.notify();
 }
 
@@ -229,6 +262,23 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             };
             refresh_bluetooth(state);
             result
+        }
+        SystemAction::BluetoothDevice { address, op } => {
+            use managers::bluetooth;
+            let result = match op {
+                BluetoothOp::Pair => bluetooth::pair(address),
+                BluetoothOp::Forget => bluetooth::forget(address),
+                BluetoothOp::Connect => bluetooth::connect(address),
+                BluetoothOp::Disconnect => bluetooth::disconnect(address),
+                BluetoothOp::Trust => bluetooth::trust(address),
+                BluetoothOp::Untrust => bluetooth::untrust(address),
+            };
+            refresh_bluetooth(state);
+            result
+        }
+        SystemAction::Tracked { action, .. } => {
+            // Unwrapped by the worker; a nested one just runs.
+            return execute(action, state);
         }
         SystemAction::BluetoothScan => {
             let result = managers::bluetooth::scan();

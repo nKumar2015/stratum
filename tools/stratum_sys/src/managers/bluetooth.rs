@@ -139,6 +139,21 @@ pub fn status() -> Value {
     })
 }
 
+/// `status()` plus `all_devices`: every device the adapter knows, discovered
+/// ones included (what `list()` returns), from the same single query. For a
+/// UI that shows both the paired summary and the full list.
+pub fn status_with_all() -> Value {
+    let result = with_timeout(BT_TIMEOUT, || {
+        let objects = managed_objects(&system()?)?;
+        let mut status = snapshot(&objects, false)?;
+        status["all_devices"] = snapshot(&objects, true)?["devices"].clone();
+        Ok(status)
+    });
+    result.unwrap_or_else(|error| {
+        json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [], "all_devices": [] })
+    })
+}
+
 pub fn state() -> Value {
     let st = status();
     if let Some(obj) = st.as_object() {

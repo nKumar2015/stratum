@@ -57,6 +57,13 @@ impl<T: Clone + PartialEq> Cell<T> {
     }
 }
 
+/// The outcome of a tracked action: its ticket, and the error if it failed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ActionResult {
+    pub ticket: u64,
+    pub error: Option<String>,
+}
+
 /// Everything the sidebar needs.
 pub struct SystemState {
     pub audio: Cell<serde_json::Value>,
@@ -89,6 +96,9 @@ pub struct SystemState {
     pub notifications: Cell<Vec<crate::notifications::Notification>>,
     /// Do-not-disturb: notifications still collect, but no toasts appear.
     pub dnd: Cell<bool>,
+    /// How the last tracked action ended (`SystemAction::Tracked`), so the
+    /// page that issued it can report the outcome.
+    pub action_result: Cell<ActionResult>,
     /// Called after any snapshot changes, so a sleeping event loop wakes up and
     /// repaints instead of waiting for its poll timeout.
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -116,6 +126,7 @@ impl SystemState {
             brightness: Cell::new(0),
             notifications: Cell::new(Vec::new()),
             dnd: Cell::new(false),
+            action_result: Cell::new(ActionResult::default()),
             waker: Mutex::new(None),
             tray_handle: Mutex::new(None),
         })
@@ -164,6 +175,7 @@ impl SystemState {
             | self.tray_menu.take_dirty()
             | self.notifications.take_dirty()
             | self.dnd.take_dirty()
+            | self.action_result.take_dirty()
     }
 
     /// A publisher that feeds every manager snapshot into this state.

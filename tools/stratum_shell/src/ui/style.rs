@@ -31,6 +31,7 @@ pub struct Metrics {
     pub dashboard: DashboardMetrics,
     pub screenshot: ScreenshotMetrics,
     pub screenshot_viewer: ScreenshotViewerMetrics,
+    pub device_page: DevicePageMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -55,6 +56,7 @@ impl Default for Metrics {
             dashboard: DashboardMetrics::default(),
             screenshot: ScreenshotMetrics::default(),
             screenshot_viewer: ScreenshotViewerMetrics::default(),
+            device_page: DevicePageMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -694,6 +696,81 @@ impl Default for ScreenshotMetrics {
             label_height: 22.0,
             label_radius: 6.0,
             label_gap: 6.0,
+        }
+    }
+}
+
+/// The Bluetooth and Network pages: a status card, a toolbar, the list, and
+/// a detail panel beside it. Defaults are the QML menus'.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DevicePageMetrics {
+    /// Between the blocks of the page, and between items in a row.
+    pub spacing: f32,
+    pub gap: f32,
+    /// The status card: padding, headline size, and its line of values.
+    pub card_padding: f32,
+    pub headline: f32,
+    pub strip: f32,
+    pub strip_line: f32,
+    /// Square icon buttons (disconnect, refresh, scan, close).
+    pub icon_button: f32,
+    pub icon: f32,
+    pub radius: f32,
+    pub border: f32,
+    /// List rows: height, gap, padding, name size, and its value line.
+    pub row_height: f32,
+    pub row_gap: f32,
+    pub row_padding: f32,
+    pub row_title: f32,
+    pub row_strip: f32,
+    /// The detail panel's width, padding, and its action buttons.
+    pub panel_width: f32,
+    pub panel_padding: f32,
+    pub panel_button: f32,
+    /// The scrolling name in the panel (QML `MarqueeLabel`): its size, the
+    /// gap before it repeats, and its speed in px/s.
+    pub marquee: f32,
+    pub marquee_gap: f32,
+    pub marquee_speed: f32,
+    /// The status line at the bottom, and how long a result stays there.
+    pub footer: f32,
+    pub footer_height: f32,
+    pub status_ms: u64,
+    /// The loading dot's size and its pulse period.
+    pub loading_dot: f32,
+    pub loading_ms: u64,
+}
+
+impl Default for DevicePageMetrics {
+    fn default() -> Self {
+        Self {
+            spacing: 10.0,
+            gap: 8.0,
+            card_padding: 10.0,
+            headline: 14.0,
+            strip: 11.0,
+            strip_line: 18.0,
+            icon_button: 30.0,
+            icon: 14.0,
+            radius: 6.0,
+            border: 1.0,
+            row_height: 56.0,
+            row_gap: 6.0,
+            row_padding: 8.0,
+            row_title: 13.0,
+            row_strip: 10.0,
+            panel_width: 250.0,
+            panel_padding: 10.0,
+            panel_button: 30.0,
+            marquee: 14.0,
+            marquee_gap: 24.0,
+            marquee_speed: 42.0,
+            footer: 11.0,
+            footer_height: 22.0,
+            status_ms: 3500,
+            loading_dot: 8.0,
+            loading_ms: 840,
         }
     }
 }

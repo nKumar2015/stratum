@@ -365,6 +365,34 @@ label_height = 22.0
 label_radius = 6.0
 label_gap = 6.0
 
+[metrics.device_page]   # the Bluetooth and Network pages
+spacing = 10.0          # between blocks
+gap = 8.0               # between items in a row
+card_padding = 10.0     # the connected-device card
+headline = 14.0
+strip = 11.0            # "MAC … · State …" values
+strip_line = 18.0
+icon_button = 30.0      # disconnect, refresh, scan, close
+icon = 14.0
+radius = 6.0
+border = 1.0
+row_height = 56.0       # device rows
+row_gap = 6.0
+row_padding = 8.0
+row_title = 13.0
+row_strip = 10.0
+panel_width = 250.0     # selected-device panel
+panel_padding = 10.0
+panel_button = 30.0
+marquee = 14.0          # the panel's scrolling name
+marquee_gap = 24.0      # before it repeats
+marquee_speed = 42.0    # px/s
+footer = 11.0           # status line
+footer_height = 22.0
+status_ms = 3500        # how long a result stays
+loading_dot = 8.0
+loading_ms = 840        # pulse period
+
 [metrics.screenshot_viewer] # the window a capture opens in
 width = 1200
 height = 820

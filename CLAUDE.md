@@ -61,9 +61,14 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: `MarqueeLabel` (the QML scrolling label used by the
-dashboard's music panel and the device/network detail panels; the app title
-never had one).
+The Bluetooth page follows `modules/BluetoothMenu.qml`, built from the shared
+pieces in `ui/pages/devices.rs`: a status card, an icon button, a value
+strip, `Marquee` (QML `MarqueeLabel`, used only by the device and network
+detail panels) and the `Status` footer. A page learns how its own action
+ended by sending `SystemAction::Tracked { ticket, .. }`; the worker publishes
+the outcome under that ticket in `SystemState::action_result`. Queue actions
+from `paint`, not from `on_page_shown`: an action queued there can be cleared
+by the frame start.
 
 **Screenshots** (`screenshot.rs`, `screenshot_viewer.rs`,
 `wayland/viewer_window.rs`). `screenshot start` freezes every output with
