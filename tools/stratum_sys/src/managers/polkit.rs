@@ -17,10 +17,30 @@ use tracing::{info, warn};
 use zbus::zvariant;
 use zbus::Connection;
 
+/// How a pending request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Authorized,
+    Denied,
+    /// The user closed the prompt. Reported to polkitd as `Cancelled`, which
+    /// pkexec shows as "Request dismissed" rather than a failed password.
+    Dismissed,
+}
+
 /// A single in-flight authorization request, keyed by polkit cookie.
 pub struct AuthSession {
-    tx: oneshot::Sender<bool>,
+    tx: oneshot::Sender<Outcome>,
     attempts: u32,
+}
+
+/// Errors returned to polkitd from `BeginAuthentication`.
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "org.freedesktop.PolicyKit1.Error")]
+enum AgentError {
+    #[zbus(error)]
+    ZBus(zbus::Error),
+    Failed(String),
+    Cancelled(String),
 }
 
 /// How long the agent waits for a UI answer before treating a request as
@@ -117,7 +137,26 @@ impl PolkitAgent {
         let Some(session) = pending.remove(cookie) else {
             return false;
         };
-        session.tx.send(success).is_ok()
+        let outcome = if success {
+            Outcome::Authorized
+        } else {
+            Outcome::Denied
+        };
+        session.tx.send(outcome).is_ok()
+    }
+
+    /// End a pending request because the user closed the prompt.
+    ///
+    /// Without this a dismissed dialog would leave the requesting program
+    /// blocked until the agent's timeout.
+    pub fn dismiss(&self, cookie: &str) -> bool {
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        let Some(session) = pending.remove(cookie) else {
+            return false;
+        };
+        session.tx.send(Outcome::Dismissed).is_ok()
     }
 
     /// Number of attempts already spent on a cookie, if it is still pending.
@@ -141,7 +180,7 @@ impl PolkitAgent {
         if remaining == 0 {
             // Signal failure so the waiting `begin_authentication` unblocks.
             if let Some(session) = pending.remove(cookie) {
-                let _ = session.tx.send(false);
+                let _ = session.tx.send(Outcome::Denied);
             }
             return FailureOutcome::Exhausted;
         }
@@ -163,7 +202,7 @@ impl PolkitAgent {
         _details: HashMap<String, String>,
         cookie: String,
         identities: Vec<(String, HashMap<String, zvariant::OwnedValue>)>,
-    ) -> zbus::fdo::Result<()> {
+    ) -> Result<(), AgentError> {
         info!(
             "BEGIN_AUTHENTICATION: action={}, cookie={}",
             action_id, cookie
@@ -201,7 +240,7 @@ impl PolkitAgent {
         let (tx, rx) = oneshot::channel();
         {
             let Ok(mut pending) = self.pending.lock() else {
-                return Err(zbus::fdo::Error::Failed("polkit state poisoned".into()));
+                return Err(AgentError::Failed("polkit state poisoned".into()));
             };
             pending.insert(cookie.clone(), AuthSession { tx, attempts: 0 });
         }
@@ -218,35 +257,32 @@ impl PolkitAgent {
 
         // Hold the D-Bus call open while the user answers, but never forever:
         // a prompt that is dismissed or never rendered must not wedge pkexec.
-        let success = match tokio::time::timeout(AUTH_TIMEOUT, rx).await {
-            Ok(Ok(success)) => success,
-            Ok(Err(_)) => false,
-            Err(_) => {
-                warn!("authentication for cookie {} timed out", cookie);
-                if let Ok(mut pending) = self.pending.lock() {
-                    pending.remove(&cookie);
-                }
-                false
-            }
-        };
+        //
+        // zbus runs this method on its own executor, not inside Tokio, so a
+        // Tokio timer here panics ("no reactor running") on every request. A
+        // plain thread expires the session instead, and the oneshot receiver
+        // works on any executor.
+        expire_after(Arc::clone(&self.pending), cookie.clone(), AUTH_TIMEOUT);
+        let outcome = rx.await.unwrap_or(Outcome::Denied);
+        let success = outcome == Outcome::Authorized;
 
-        info!(
-            "authentication result for cookie {}: {}",
-            cookie, success
-        );
+        info!("authentication result for cookie {}: {:?}", cookie, outcome);
 
         self.emit(json!({
             "active": false,
             "success": success,
             "cookie": cookie.clone(),
-            "message": if success {
-                "Authentication successful."
-            } else {
-                "Authentication failed. Please check your password."
+            "message": match outcome {
+                Outcome::Authorized => "Authentication successful.",
+                Outcome::Denied => "Authentication failed. Please check your password.",
+                Outcome::Dismissed => "Authentication dismissed.",
             }
         }));
 
-        Ok(())
+        match outcome {
+            Outcome::Dismissed => Err(AgentError::Cancelled("Dismissed by the user".into())),
+            _ => Ok(()),
+        }
     }
 
     async fn cancel_authentication(&self, cookie: String) {
@@ -259,9 +295,45 @@ impl PolkitAgent {
     }
 }
 
+/// Fail `cookie` with `Denied` once `after` has passed, unless it was answered
+/// first. Cookies are unique per request, so a later request cannot be hit.
+fn expire_after(
+    pending: Arc<Mutex<HashMap<String, AuthSession>>>,
+    cookie: String,
+    after: std::time::Duration,
+) {
+    std::thread::Builder::new()
+        .name("polkit-timeout".into())
+        .spawn(move || {
+            std::thread::sleep(after);
+            let session = pending.lock().ok().and_then(|mut p| p.remove(&cookie));
+            if let Some(session) = session {
+                warn!("authentication for cookie {} timed out", cookie);
+                let _ = session.tx.send(Outcome::Denied);
+            }
+        })
+        .ok();
+}
+
+/// Which requests the agent answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentSubject {
+    /// Every request from the login session. Only one agent may hold this.
+    Session,
+    /// Only requests made by one process, the way `pkttyagent --process`
+    /// works. Lets a second agent be tested while another owns the session.
+    Process(u32),
+}
+
 /// Register as the session authentication agent and serve requests until the
 /// process exits.
 pub async fn register_agent(agent: Arc<PolkitAgent>) -> zbus::Result<()> {
+    register_agent_for(agent, AgentSubject::Session).await
+}
+
+/// Register as an authentication agent for `subject` and serve requests until
+/// the process exits.
+pub async fn register_agent_for(agent: Arc<PolkitAgent>, subject: AgentSubject) -> zbus::Result<()> {
     let connection = Connection::system().await?;
 
     let object_path = "/org/freedesktop/PolicyKit1/AuthenticationAgent";
@@ -273,9 +345,6 @@ pub async fn register_agent(agent: Arc<PolkitAgent>) -> zbus::Result<()> {
         .at(object_path, (*agent).clone())
         .await?;
 
-    let session_id =
-        get_session_id().ok_or_else(|| zbus::Error::Failure("No session ID".into()))?;
-
     let proxy = zbus::Proxy::new(
         &connection,
         "org.freedesktop.PolicyKit1",
@@ -284,31 +353,72 @@ pub async fn register_agent(agent: Arc<PolkitAgent>) -> zbus::Result<()> {
     )
     .await?;
 
-    let mut details = HashMap::new();
-    details.insert(
-        "session-id".to_string(),
-        zvariant::Value::from(session_id.clone()),
-    );
-    let subject = ("unix-session", details);
+    let mut details: HashMap<&str, zvariant::Value> = HashMap::new();
+    let kind = match subject {
+        AgentSubject::Session => {
+            let session_id =
+                get_session_id().ok_or_else(|| zbus::Error::Failure("No session ID".into()))?;
+            details.insert("session-id", zvariant::Value::from(session_id));
+            "unix-session"
+        }
+        AgentSubject::Process(pid) => {
+            let start_time = process_start_time(pid)
+                .ok_or_else(|| zbus::Error::Failure(format!("no such process {pid}")))?;
+            details.insert("pid", zvariant::Value::from(pid));
+            details.insert("start-time", zvariant::Value::from(start_time));
+            "unix-process"
+        }
+    };
 
     proxy
         .call::<&str, _, ()>(
             "RegisterAuthenticationAgent",
-            &(subject, "en_US.UTF-8", object_path),
+            &((kind, details), "en_US.UTF-8", object_path),
         )
         .await?;
 
-    info!("agent registered for session {}", session_id);
+    info!("agent registered for {:?}", subject);
     std::future::pending::<()>().await;
     Ok(())
+}
+
+/// Serve the agent on the session bus under `name` without registering with
+/// polkitd, so a test can call `BeginAuthentication` itself. With
+/// `STRATUM_POLKIT_HELPER` pointing at a stand-in checker, the whole prompt can
+/// be exercised without a real account or password.
+pub async fn serve_fixture(agent: Arc<PolkitAgent>, name: &str) -> zbus::Result<()> {
+    let connection = Connection::session().await?;
+    connection
+        .object_server()
+        .at("/org/freedesktop/PolicyKit1/AuthenticationAgent", (*agent).clone())
+        .await?;
+    connection.request_name(name).await?;
+    info!("polkit fixture agent serving as {name}");
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+/// A process's start time in clock ticks since boot, which polkit uses with the
+/// pid to identify a process (field 22 of `/proc/<pid>/stat`).
+fn process_start_time(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name (field 2) may contain spaces; fields resume after ')'.
+    let rest = stat.rsplit_once(')')?.1;
+    rest.split_whitespace().nth(19)?.parse().ok()
 }
 
 /// Verify a password against polkit's helper, which performs the actual
 /// authentication against polkitd.
 pub async fn verify_password_and_notify(user: &str, password: &str, cookie: &str) -> bool {
-    // The helper reads the cookie and password as two newline-terminated lines.
-    let clean_password = password.trim_matches(&['\r', '\n', ' '][..]);
-    let payload = format!("{}\n{}\n", cookie, clean_password);
+    // The helper reads the cookie and password as two newline-terminated
+    // lines, so a line break cannot be sent; everything else, including
+    // leading and trailing spaces, is part of the password. (Trimming spaces
+    // here used to make such passwords impossible to enter.)
+    if password.contains(['\r', '\n']) || cookie.contains(['\r', '\n']) {
+        warn!("refusing to send a password or cookie containing a line break");
+        return false;
+    }
+    let payload = format!("{}\n{}\n", cookie, password);
 
     tracing::info!("spawning async helper for user: {}...", user);
 
@@ -377,7 +487,96 @@ mod tests {
             .insert("cookie-1".into(), AuthSession { tx, attempts: 0 });
 
         assert!(agent.resolve("cookie-1", true), "handle should resolve a session registered on the served clone");
-        assert_eq!(rx.try_recv(), Ok(true));
+        assert_eq!(rx.try_recv(), Ok(Outcome::Authorized));
+    }
+
+    #[test]
+    fn dismissing_ends_the_request_as_cancelled() {
+        let (agent, _) = test_agent();
+        let (tx, mut rx) = oneshot::channel();
+        agent
+            .pending
+            .lock()
+            .unwrap()
+            .insert("c".into(), AuthSession { tx, attempts: 0 });
+        assert!(agent.dismiss("c"));
+        assert_eq!(rx.try_recv(), Ok(Outcome::Dismissed));
+        assert!(!agent.dismiss("c"), "a cookie is answered once");
+    }
+
+    /// The timeout must work without a Tokio runtime: zbus calls the agent
+    /// from its own executor.
+    #[test]
+    fn unanswered_requests_expire_without_tokio() {
+        let (agent, _) = test_agent();
+        let (tx, rx) = oneshot::channel();
+        agent
+            .pending
+            .lock()
+            .unwrap()
+            .insert("c".into(), AuthSession { tx, attempts: 0 });
+        expire_after(
+            Arc::clone(&agent.pending),
+            "c".into(),
+            std::time::Duration::from_millis(20),
+        );
+        let outcome = block_on_without_runtime(rx);
+        assert_eq!(outcome, Ok(Outcome::Denied));
+        assert!(!agent.resolve("c", true), "expired sessions are gone");
+    }
+
+    #[test]
+    fn answered_requests_are_not_expired() {
+        let (agent, _) = test_agent();
+        let (tx, mut rx) = oneshot::channel();
+        agent
+            .pending
+            .lock()
+            .unwrap()
+            .insert("c".into(), AuthSession { tx, attempts: 0 });
+        expire_after(
+            Arc::clone(&agent.pending),
+            "c".into(),
+            std::time::Duration::from_millis(20),
+        );
+        assert!(agent.resolve("c", true));
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(rx.try_recv(), Ok(Outcome::Authorized));
+    }
+
+    /// Poll a future to completion on this thread, with no runtime at all.
+    fn block_on_without_runtime<F: std::future::Future>(future: F) -> F::Output {
+        use std::task::{Context, Poll, Wake, Waker};
+        struct Unpark(std::thread::Thread);
+        impl Wake for Unpark {
+            fn wake(self: Arc<Self>) {
+                self.0.unpark();
+            }
+        }
+        let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+        let mut cx = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+                return value;
+            }
+            std::thread::park();
+        }
+    }
+
+    /// polkitd reports "dismissed" only for this exact error name.
+    #[test]
+    fn dismissal_uses_polkits_cancelled_error() {
+        use zbus::DBusError;
+        let err = AgentError::Cancelled("x".into());
+        assert_eq!(err.name().as_str(), "org.freedesktop.PolicyKit1.Error.Cancelled");
+    }
+
+    #[test]
+    fn start_time_parses_this_process() {
+        let start = process_start_time(std::process::id()).expect("own start time");
+        assert!(start > 0);
+        assert_eq!(process_start_time(u32::MAX), None);
     }
 
     #[test]
@@ -407,7 +606,7 @@ mod tests {
         assert_eq!(agent.record_failure("c"), FailureOutcome::Exhausted);
 
         // Exhaustion signals the waiting caller and drops the session.
-        assert_eq!(rx.try_recv(), Ok(false));
+        assert_eq!(rx.try_recv(), Ok(Outcome::Denied));
         assert_eq!(agent.record_failure("c"), FailureOutcome::Unknown);
     }
 
