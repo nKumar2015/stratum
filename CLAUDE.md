@@ -108,6 +108,14 @@ latches a press (`settings_press`) until it has painted once with it; a press
 and release arriving together were otherwise never seen. Text fields in a page
 get keys only while the settings window has keyboard focus.
 
+**Wi-Fi connect** (`stratum_sys::managers::wifi::connect`) uses NetworkManager's
+D-Bus API, never `nmcli … password`: a command line is readable by every local
+user. It waits up to 60 s for the activation, so the shell runs it on a thread
+of its own, outside the action queue. Test it against a stand-in
+NetworkManager (zbus `serve_at` on a `dbus-launch` bus, with
+`DBUS_SYSTEM_BUS_ADDRESS` pointing there), never by connecting the real
+machine to anything.
+
 **Hover menus** (`ui/hover_menu.rs`) open after resting on a status icon and
 close once neither the icon nor the menu has been hovered for a grace period;
 the timing is `HoverIntent`, which is pure and tested. Widgets report what

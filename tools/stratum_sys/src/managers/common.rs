@@ -71,6 +71,23 @@ pub fn run_capture_optional(program: &str, args: &[&str]) -> String {
     run_command_capture(program, args).unwrap_or_default()
 }
 
+/// Run `f` on a thread of its own, giving up after `timeout`, so a daemon
+/// that never answers cannot hang the caller.
+pub fn with_timeout<T: Send + 'static>(
+    timeout: Duration,
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("thread panicked".to_string()),
+    }
+}
+
 pub fn command_available(program: &str) -> bool {
     match Command::new(program)
         .arg("--version")

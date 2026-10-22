@@ -15,6 +15,8 @@ use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 use zvariant::{OwnedObjectPath, OwnedValue};
 
+use crate::managers::common::with_timeout;
+
 const BT_TIMEOUT: Duration = Duration::from_secs(4);
 const ACTION_TIMEOUT: Duration = Duration::from_secs(12);
 
@@ -24,22 +26,6 @@ const DEVICE: &str = "org.bluez.Device1";
 
 type Properties = HashMap<String, OwnedValue>;
 type Objects = HashMap<OwnedObjectPath, HashMap<String, Properties>>;
-
-/// Run `f` on a thread of its own, giving up after `timeout`.
-fn with_timeout<T: Send + 'static>(
-    timeout: Duration,
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("thread panicked".to_string()),
-    }
-}
 
 fn system() -> Result<Connection, String> {
     Connection::system().map_err(|err| format!("system bus unavailable: {err}"))

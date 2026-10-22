@@ -165,23 +165,41 @@ impl ActionQueue {
                         SystemAction::Tracked { ticket, action } => (Some(ticket), *action),
                         action => (None, action),
                     };
-                    let result = execute(&action, &state);
-                    if let Err(err) = &result {
-                        tracing::warn!("action failed: {err}");
+                    // A Wi-Fi connect waits for the whole activation, DHCP
+                    // included, which can take tens of seconds; the actions
+                    // queued behind it (a volume change) must not wait too.
+                    if matches!(action, SystemAction::WifiConnect { .. }) {
+                        let state = Arc::clone(&state);
+                        let spawned = thread::Builder::new()
+                            .name("stratum-wifi-connect".into())
+                            .spawn(move || run(ticket, &action, &state));
+                        if let Err(err) = spawned {
+                            tracing::warn!("action failed: {err}");
+                        }
+                        continue;
                     }
-                    if let Some(ticket) = ticket {
-                        state.action_result.set(crate::sys_state::ActionResult {
-                            ticket,
-                            error: result.err(),
-                        });
-                    }
-                    // Wake the UI even on failure: the attempt may have changed
-                    // something (a refused connect still reorders the list).
-                    state.notify();
+                    run(ticket, &action, &state);
                 }
             })
             .ok();
     }
+}
+
+/// Execute one action and publish how it ended.
+fn run(ticket: Option<u64>, action: &SystemAction, state: &SystemState) {
+    let result = execute(action, state);
+    if let Err(err) = &result {
+        tracing::warn!("action failed: {err}");
+    }
+    if let Some(ticket) = ticket {
+        state.action_result.set(crate::sys_state::ActionResult {
+            ticket,
+            error: result.err(),
+        });
+    }
+    // Wake the UI even on failure: the attempt may have changed
+    // something (a refused connect still reorders the list).
+    state.notify();
 }
 
 impl Default for ActionQueue {
