@@ -121,6 +121,9 @@ pub struct BarMetrics {
     pub group_width: f32,
     /// Height of the corner scoop where a rail meets the screen edge.
     pub corner_size: f32,
+    /// App icon before the window title, and the gap between them.
+    pub title_icon: f32,
+    pub title_icon_gap: f32,
 }
 
 impl Default for BarMetrics {
@@ -131,6 +134,8 @@ impl Default for BarMetrics {
             group_spacing: 4.0,
             group_width: 30.0,
             corner_size: 20.0,
+            title_icon: 16.0,
+            title_icon_gap: 8.0,
         }
     }
 }
@@ -450,6 +455,12 @@ pub struct NotificationCardMetrics {
     /// The close button in the top-right corner.
     pub dismiss: f32,
     pub dismiss_icon: f32,
+    /// The picture or app icon beside the header, its frame, and the gap to
+    /// the text. `visual_glyph` is the urgency glyph shown without one.
+    pub visual: f32,
+    pub visual_radius: f32,
+    pub visual_gap: f32,
+    pub visual_glyph: f32,
     /// Action buttons.
     pub button_height: f32,
     pub button_min_width: f32,
@@ -479,6 +490,10 @@ impl Default for NotificationCardMetrics {
             line_height: 1.35,
             dismiss: 22.0,
             dismiss_icon: 12.0,
+            visual: 20.0,
+            visual_radius: 5.0,
+            visual_gap: 10.0,
+            visual_glyph: 16.0,
             button_height: 26.0,
             button_min_width: 74.0,
             button_padding: 9.0,

@@ -236,12 +236,36 @@ pub fn paint(
         color: Color::TRANSPARENT,
     };
 
+    // The header: a picture or icon (or the urgency glyph without one) beside
+    // the app name and summary, as in the QML toast.
+    let header_y = card.y + m.padding;
+    let header_h = line(&m, m.app) + line(&m, m.summary);
+    let visual = Rect {
+        x,
+        y: header_y + (header_h - m.visual) * 0.5,
+        width: m.visual,
+        height: m.visual,
+        radius: m.visual_radius,
+        color: Color::TRANSPARENT,
+    };
+    paint_visual(ctx, list, n, visual, a);
+    let tx = x + m.visual + m.visual_gap;
+    let header_w = inner - m.visual - m.visual_gap - m.dismiss;
+    let header_row = |y: f32, h: f32| Rect {
+        x: tx,
+        y,
+        width: header_w,
+        height: h,
+        radius: 0.0,
+        color: Color::TRANSPARENT,
+    };
+
     if !n.app_name.is_empty() {
-        ui::paint_text_vcentered(ctx, list, &n.app_name, x, row(card.y + m.padding, line(&m, m.app), inner), m.app, typo.weight_bold, muted);
+        ui::paint_text_vcentered(ctx, list, &n.app_name, tx, header_row(header_y, line(&m, m.app)), m.app, typo.weight_bold, muted);
     }
-    let summary = ui::wrap_text(ctx, &plain(&n.summary), m.summary, typo.weight_bold, inner - m.dismiss, 1);
+    let summary = ui::wrap_text(ctx, &plain(&n.summary), m.summary, typo.weight_bold, header_w, 1);
     if let Some(summary) = summary.first() {
-        ui::paint_text_vcentered(ctx, list, summary, x, row(layout.summary_y, line(&m, m.summary), inner), m.summary, typo.weight_bold, text);
+        ui::paint_text_vcentered(ctx, list, summary, tx, header_row(layout.summary_y, line(&m, m.summary)), m.summary, typo.weight_bold, text);
     }
     for (i, body) in layout.body.iter().enumerate() {
         let y = layout.body_y + line(&m, m.body) * i as f32;
@@ -292,6 +316,60 @@ pub fn paint(
         let preview = ui::wrap_text(ctx, preview, m.body, typo.weight_regular, inner, 1);
         if let Some(preview) = preview.first() {
             ui::paint_text_vcentered(ctx, list, preview, x, row(*y, line(&m, m.body), inner), m.body, typo.weight_regular, theme.secondary.with_alpha(a));
+        }
+    }
+}
+
+/// The header picture, in the QML toast's order: the notification's own
+/// image (`image-data`, then `image-path`), then its app icon (a name or a
+/// path). Without either, the urgency glyph in the accent colour, unframed.
+fn paint_visual(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, n: &Notification, rect: Rect, alpha: f32) {
+    let m = ctx.metrics.notification_card.clone();
+    // Twice the logical size, as the tray does: sharp on scaled outputs.
+    let px = (m.visual * 2.0) as u32;
+    let picture = n
+        .image
+        .as_ref()
+        .map(|i| (i.width, i.height, i.pixels.clone()))
+        .or_else(|| {
+            let path = n.image_path.as_deref().filter(|p| !p.is_empty())?;
+            ctx.icons.load_icon(path, px, 1).map(|i| (i.width, i.height, i.pixels))
+        })
+        .or_else(|| {
+            let icon = Some(n.app_icon.as_str()).filter(|i| !i.trim().is_empty())?;
+            ctx.icons.load_icon(icon, px, 1).map(|i| (i.width, i.height, i.pixels))
+        });
+    let theme = ctx.theme;
+    match picture {
+        Some((width, height, pixels)) => {
+            text_field::paint_frame(
+                list,
+                rect,
+                m.reply_border,
+                theme.border_inactive.with_alpha(alpha),
+                theme.bg_main.with_alpha(alpha),
+            );
+            // Fit inside the frame, keeping the aspect ratio.
+            let inner = rect.width - m.reply_border * 2.0;
+            let scale = inner / width.max(height).max(1) as f32;
+            let (w, h) = (width as f32 * scale, height as f32 * scale);
+            list.push_image(crate::render::display_list::Image {
+                width,
+                height,
+                pixels,
+                x: rect.x + (rect.width - w) * 0.5,
+                y: rect.y + (rect.height - h) * 0.5,
+                width_logical: w,
+                height_logical: h,
+            });
+        }
+        None => {
+            let (glyph, color) = match n.urgency {
+                2.. => ("\u{f071}", theme.error),
+                0 => ("\u{f05a}", theme.text_muted),
+                _ => ("\u{f0f3}", theme.primary),
+            };
+            ui::paint_text_centered(ctx, list, glyph, rect, m.visual_glyph, color.with_alpha(alpha));
         }
     }
 }

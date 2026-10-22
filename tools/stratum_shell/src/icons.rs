@@ -36,24 +36,17 @@ pub struct IconTheme {
     /// Search order, most specific first, ending in `hicolor`.
     search: Vec<String>,
     cache: HashMap<(String, u32, u32), Option<IconImage>>,
+    /// Built on the first app-icon lookup, so a shell that never asks pays
+    /// nothing for reading every desktop entry.
+    desktop: Option<crate::desktop::DesktopIndex>,
 }
 
 impl IconTheme {
     /// Discover themes from the standard XDG data directories.
     pub fn load(preferred: &[&str]) -> Self {
-        let mut roots = Vec::new();
-        if let Ok(home) = std::env::var("HOME") {
-            let home = PathBuf::from(home);
-            roots.push(home.join(".local/share/icons"));
-            roots.push(home.join(".icons"));
-        }
-        roots.push(PathBuf::from("/run/current-system/sw/share/icons"));
-        roots.push(PathBuf::from("/usr/share/icons"));
-        if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {
-            for dir in data_dirs.split(':').filter(|d| !d.is_empty()) {
-                roots.push(PathBuf::from(dir).join("icons"));
-            }
-        }
+        let roots: Vec<PathBuf> = data_dirs().into_iter().map(|dir| dir.join("icons")).chain(
+            std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".icons")),
+        ).collect();
 
         let mut themes = HashMap::new();
         for root in &roots {
@@ -86,7 +79,20 @@ impl IconTheme {
             themes,
             search,
             cache: HashMap::new(),
+            desktop: None,
         }
+    }
+
+    /// The icon for an application, by window class or app name: through its
+    /// desktop entry, then the name itself, then the generic executable icon.
+    pub fn load_app_icon(&mut self, class: &str, size: u32, scale: u32) -> Option<IconImage> {
+        let candidates = self
+            .desktop
+            .get_or_insert_with(crate::desktop::DesktopIndex::load)
+            .icon_candidates(class);
+        candidates
+            .iter()
+            .find_map(|name| self.load_icon(name, size, scale))
     }
 
     fn parse_theme(root: PathBuf) -> Option<ThemeEntry> {
@@ -133,6 +139,7 @@ impl IconTheme {
 
     fn find_and_render(&self, name: &str, size: u32) -> Option<IconImage> {
         // Handle absolute paths and `file://` references directly.
+        let name = name.strip_prefix("file://").unwrap_or(name);
         if name.starts_with('/') {
             return render_file(Path::new(name), size);
         }
@@ -164,6 +171,34 @@ impl IconTheme {
         }
         None
     }
+}
+
+/// XDG data directories, most specific first, without duplicates.
+///
+/// `XDG_DATA_DIRS` alone is not enough: a shell started from a devshell or a
+/// systemd unit may not inherit the session's value, and on NixOS the user's
+/// packages (icon themes, desktop entries) live in profile directories that
+/// only the session's value names. Those are always searched.
+pub fn data_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let home = std::env::var("HOME").ok().map(PathBuf::from);
+    match std::env::var("XDG_DATA_HOME") {
+        Ok(dir) if !dir.is_empty() => dirs.push(PathBuf::from(dir)),
+        _ => dirs.extend(home.as_ref().map(|h| h.join(".local/share"))),
+    }
+    if let Ok(list) = std::env::var("XDG_DATA_DIRS") {
+        dirs.extend(list.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+    }
+    if let Ok(user) = std::env::var("USER") {
+        dirs.push(PathBuf::from(format!("/etc/profiles/per-user/{user}/share")));
+    }
+    dirs.extend(home.map(|h| h.join(".nix-profile/share")));
+    dirs.push(PathBuf::from("/run/current-system/sw/share"));
+    dirs.push(PathBuf::from("/usr/local/share"));
+    dirs.push(PathBuf::from("/usr/share"));
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|dir| seen.insert(dir.clone()));
+    dirs
 }
 
 /// Sort directory names (`48x48/apps`, `scalable/apps`, …) by how close their
@@ -214,15 +249,26 @@ fn render_svg(data: &[u8], size: u32) -> Option<IconImage> {
 
 fn render_png(data: &[u8], size: u32) -> Option<IconImage> {
     let image = image::load_from_memory(data).ok()?;
-    let image = if image.width() == size && image.height() == size {
-        image
+    let size = size.max(1);
+    // Fit inside the square, keeping the aspect ratio, and centre it: a
+    // notification's picture is often not square, and stretching it showed.
+    let fitted = if image.width() == size && image.height() == size {
+        image.to_rgba8()
     } else {
-        image.resize_exact(size.max(1), size.max(1), image::imageops::FilterType::Lanczos3)
-    }
-    .to_rgba8();
+        image
+            .resize(size, size, image::imageops::FilterType::Lanczos3)
+            .to_rgba8()
+    };
+    let mut canvas = image::RgbaImage::new(size, size);
+    image::imageops::overlay(
+        &mut canvas,
+        &fitted,
+        ((size - fitted.width()) / 2) as i64,
+        ((size - fitted.height()) / 2) as i64,
+    );
 
     // tiny-skia and image both use straight alpha; premultiply for compositing.
-    let mut pixels = image.into_raw();
+    let mut pixels = canvas.into_raw();
     for px in pixels.chunks_exact_mut(4) {
         let alpha = px[3] as u32;
         px[0] = ((px[0] as u32 * alpha) / 255) as u8;

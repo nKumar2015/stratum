@@ -38,6 +38,68 @@ pub struct Notification {
     pub reply_placeholder: Option<String>,
     /// The last reply sent, shown on notifications that stay after replying.
     pub last_reply: Option<String>,
+    /// The `image-data` hint, decoded: raw pixels many apps (Chromium,
+    /// Discord, Signal) send instead of a path.
+    pub image: Option<NotificationImage>,
+}
+
+/// Decoded `image-data`, premultiplied RGBA8, at most `IMAGE_MAX` pixels on
+/// a side so a large picture is not re-uploaded every frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationImage {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Arc<[u8]>,
+}
+
+const IMAGE_MAX: u32 = 64;
+
+/// Decode the spec's `(iiibiiay)` image: width, height, rowstride, has
+/// alpha, bits per sample (8), channels (3 or 4), data.
+fn decode_image_data(value: &OwnedValue) -> Option<NotificationImage> {
+    let (width, height, stride, has_alpha, bits, channels, data) =
+        <(i32, i32, i32, bool, i32, i32, Vec<u8>)>::try_from(value.try_clone().ok()?).ok()?;
+    let (width, height, stride, channels) = (
+        u32::try_from(width).ok()?,
+        u32::try_from(height).ok()?,
+        usize::try_from(stride).ok()?,
+        usize::try_from(channels).ok()?,
+    );
+    if bits != 8 || width == 0 || height == 0 || !(3..=4).contains(&channels) || (channels == 4) != has_alpha {
+        return None;
+    }
+    let mut rgba = image::RgbaImage::new(width, height);
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let i = y * stride + x * channels;
+            let px = data.get(i..i + channels)?;
+            let alpha = if channels == 4 { px[3] } else { 255 };
+            rgba.put_pixel(x as u32, y as u32, image::Rgba([px[0], px[1], px[2], alpha]));
+        }
+    }
+    let scaled = if width.max(height) > IMAGE_MAX {
+        image::imageops::resize(
+            &rgba,
+            (width * IMAGE_MAX / width.max(height)).max(1),
+            (height * IMAGE_MAX / width.max(height)).max(1),
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        rgba
+    };
+    let (width, height) = scaled.dimensions();
+    let mut pixels = scaled.into_raw();
+    for px in pixels.chunks_exact_mut(4) {
+        let a = px[3] as u32;
+        for c in &mut px[..3] {
+            *c = ((*c as u32 * a) / 255) as u8;
+        }
+    }
+    Some(NotificationImage {
+        width,
+        height,
+        pixels: Arc::from(pixels),
+    })
 }
 
 /// The action key that marks a notification as accepting an inline reply.
@@ -271,6 +333,10 @@ impl Served {
             .get("urgency")
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(1);
+        // Spec 1.2 name first, then the older spellings clients still send.
+        let image = ["image-data", "image_data", "icon_data"]
+            .iter()
+            .find_map(|key| hints.get(*key).and_then(decode_image_data));
         let resident = hints
             .get("resident")
             .and_then(|value| bool::try_from(value).ok())
@@ -319,6 +385,7 @@ impl Served {
             resident,
             reply_placeholder,
             last_reply: None,
+            image,
         };
 
         if let Some(index) = store.by_id.get(&id).copied() {
@@ -475,6 +542,35 @@ mod tests {
         assert_eq!(get(id).as_deref(), Some("Message Ada"));
         assert_eq!(get(id2).as_deref(), Some("Reply..."));
         assert_eq!(get(id3), None);
+    }
+
+    fn image_value(width: i32, height: i32, channels: i32, data: Vec<u8>) -> OwnedValue {
+        let stride = width * channels;
+        let value = zbus::zvariant::Value::from(zbus::zvariant::Structure::from((
+            width, height, stride, channels == 4, 8i32, channels, data,
+        )));
+        OwnedValue::try_from(value).unwrap()
+    }
+
+    #[test]
+    fn image_data_is_decoded_premultiplied() {
+        // 2x1: opaque red, then half-transparent white.
+        let value = image_value(2, 1, 4, vec![255, 0, 0, 255, 255, 255, 255, 128]);
+        let image = decode_image_data(&value).unwrap();
+        assert_eq!((image.width, image.height), (2, 1));
+        assert_eq!(&image.pixels[..4], &[255, 0, 0, 255]);
+        assert_eq!(&image.pixels[4..], &[128, 128, 128, 128], "premultiplied");
+
+        // RGB without alpha is opaque.
+        let rgb = decode_image_data(&image_value(1, 1, 3, vec![10, 20, 30])).unwrap();
+        assert_eq!(&rgb.pixels[..], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn large_images_are_downscaled_and_bad_ones_rejected() {
+        let big = decode_image_data(&image_value(256, 128, 3, vec![0; 256 * 128 * 3])).unwrap();
+        assert_eq!((big.width, big.height), (IMAGE_MAX, IMAGE_MAX / 2), "aspect kept");
+        assert!(decode_image_data(&image_value(4, 4, 4, vec![0; 3])).is_none(), "short data");
     }
 
     #[test]

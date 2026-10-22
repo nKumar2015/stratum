@@ -29,11 +29,51 @@ pub struct HyprState {
     pub occupied: Vec<i32>,
     /// Active window title, if any.
     pub title: Option<String>,
+    /// Monitor name -> the window its bar shows: the most recently focused
+    /// window on that monitor's active workspace. Each monitor shows its own
+    /// window, as the QML title did, not the globally focused one.
+    pub windows: std::collections::HashMap<String, WindowInfo>,
     /// Monitor the compositor currently has focused.
     ///
     /// Popups open here rather than on an arbitrary output, matching the QML
     /// shell's `popupMonitorName` routing.
     pub focused_monitor: Option<String>,
+}
+
+/// A window as the bar shows it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowInfo {
+    pub title: String,
+    /// Window class (app id), for the icon.
+    pub class: String,
+}
+
+/// One client from `j/clients`, reduced to what window selection needs.
+#[derive(Clone, Debug)]
+struct Client {
+    workspace: i32,
+    /// 0 is the focused window; higher was focused longer ago.
+    focus_history: i64,
+    info: WindowInfo,
+}
+
+/// Pick each monitor's window: the most recently focused client on its active
+/// workspace. That is the focused window when it is there, which is the rule
+/// the QML title used.
+fn pick_windows(
+    active: &std::collections::HashMap<String, i32>,
+    clients: &[Client],
+) -> std::collections::HashMap<String, WindowInfo> {
+    active
+        .iter()
+        .filter_map(|(monitor, workspace)| {
+            clients
+                .iter()
+                .filter(|c| c.workspace == *workspace)
+                .min_by_key(|c| if c.focus_history < 0 { i64::MAX } else { c.focus_history })
+                .map(|c| (monitor.clone(), c.info.clone()))
+        })
+        .collect()
 }
 
 fn instance_dir() -> Option<PathBuf> {
@@ -93,13 +133,30 @@ impl HyprState {
             if let Ok(clients) = serde_json::from_str::<serde_json::Value>(&json) {
                 if let Some(list) = clients.as_array() {
                     let mut ids = Vec::new();
+                    let mut windows = Vec::new();
                     for client in list {
                         let id = client["workspace"]["id"].as_i64().unwrap_or(0) as i32;
                         if id > 0 && !ids.contains(&id) {
                             ids.push(id);
                         }
+                        if client["mapped"].as_bool() == Some(false) {
+                            continue;
+                        }
+                        let text = |key: &str| client[key].as_str().unwrap_or_default().to_string();
+                        let class = Some(text("class"))
+                            .filter(|c| !c.is_empty())
+                            .unwrap_or_else(|| text("initialClass"));
+                        windows.push(Client {
+                            workspace: id,
+                            focus_history: client["focusHistoryID"].as_i64().unwrap_or(i64::MAX),
+                            info: WindowInfo {
+                                title: text("title"),
+                                class,
+                            },
+                        });
                     }
                     state.occupied = ids;
+                    state.windows = pick_windows(&state.active, &windows);
                 }
             }
         }
@@ -190,6 +247,40 @@ impl HyprState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn client(workspace: i32, focus_history: i64, title: &str) -> Client {
+        Client {
+            workspace,
+            focus_history,
+            info: WindowInfo {
+                title: title.into(),
+                class: title.to_lowercase(),
+            },
+        }
+    }
+
+    #[test]
+    fn each_monitor_shows_its_own_workspace_window() {
+        let active = [("eDP-2".to_string(), 1), ("HDMI-A-1".to_string(), 11)]
+            .into_iter()
+            .collect();
+        let clients = [
+            client(11, 0, "Kitty"),   // focused, on the external monitor
+            client(1, 3, "Firefox"),  // older focus on the laptop's workspace
+            client(1, 1, "Zen"),      // more recent on the laptop's workspace
+            client(5, 2, "Hidden"),   // not on any active workspace
+        ];
+        let windows = pick_windows(&active, &clients);
+        assert_eq!(windows["HDMI-A-1"].title, "Kitty");
+        assert_eq!(windows["eDP-2"].title, "Zen", "most recently focused wins");
+        assert_eq!(windows.len(), 2);
+    }
+
+    #[test]
+    fn an_empty_workspace_has_no_window() {
+        let active = [("eDP-2".to_string(), 4)].into_iter().collect();
+        assert!(pick_windows(&active, &[client(1, 0, "Kitty")]).is_empty());
+    }
 
     #[test]
     fn reads_state_without_a_compositor() {

@@ -1,7 +1,10 @@
 //! The app title.
 //!
 //! Horizontal bars show one elided line; vertical rails rotate the run so it
-//! reads upward, matching the QML `rotation: 270` label.
+//! reads upward, matching the QML `rotation: 270` label. Each monitor shows
+//! the window on its own active workspace, with the app's icon before the
+//! title; with no window it shows the desktop label and no icon, as the QML
+//! title did.
 
 use std::sync::Arc;
 
@@ -17,7 +20,7 @@ pub struct AppTitle {
 impl AppTitle {
     pub fn new() -> Self {
         Self {
-            fallback: "Desktop".to_string(),
+            fallback: "\u{f4a9}  Desktop".to_string(),
         }
     }
 }
@@ -47,13 +50,32 @@ impl Widget for AppTitle {
         rect: Rect,
         _input: &InputState,
     ) {
-        let live_title = ctx
-            .state
-            .hypr
-            .get()
-            .title
+        let window = ctx.state.hypr.get().windows.get(ctx.output_name).cloned();
+        let live_title = window
+            .as_ref()
+            .map(|w| w.title.clone())
             .filter(|t| !t.trim().is_empty())
             .unwrap_or_else(|| self.fallback.clone());
+        let bar = &ctx.metrics.bar;
+        let (icon_size, icon_gap) = (bar.title_icon, bar.title_icon_gap);
+        // Twice the logical size, as the tray does: sharp on scaled outputs.
+        let icon = window
+            .as_ref()
+            .and_then(|w| ctx.icons.load_app_icon(&w.class, icon_size as u32, 2));
+        let icon_space = if icon.is_some() { icon_size + icon_gap } else { 0.0 };
+        let push_icon = |list: &mut DisplayList, x: f32, y: f32| {
+            if let Some(icon) = &icon {
+                list.push_image(crate::render::display_list::Image {
+                    width: icon.width,
+                    height: icon.height,
+                    pixels: icon.pixels.clone(),
+                    x,
+                    y,
+                    width_logical: icon_size,
+                    height_logical: icon_size,
+                });
+            }
+        };
 
         if !ctx.is_vertical() {
             let style = TextStyle {
@@ -63,7 +85,7 @@ impl Widget for AppTitle {
                 color: ctx.theme.text_main,
             };
             let insets = 6.0;
-            let available = rect.width - insets * 2.0;
+            let available = rect.width - insets * 2.0 - icon_space;
             if available <= 0.0 {
                 return;
             }
@@ -71,11 +93,12 @@ impl Widget for AppTitle {
             if text.is_empty() {
                 return;
             }
+            push_icon(list, rect.x + insets, rect.y + (rect.height - icon_size) * 0.5);
             ui::paint_text_vcentered(
                 ctx,
                 list,
                 &text,
-                rect.x + insets,
+                rect.x + insets + icon_space,
                 rect,
                 style.size,
                 style.weight,
@@ -99,7 +122,7 @@ impl Widget for AppTitle {
             color: ctx.theme.text_main,
         };
 
-        let available = rect.height - 16.0;
+        let available = rect.height - 16.0 - icon_space;
         let title = elide(&live_title, &style, ctx, available);
         if title.is_empty() {
             return;
@@ -109,10 +132,13 @@ impl Widget for AppTitle {
         let line_height = size * 1.2;
         let length = ctx.text.measure(&title, &style).0;
 
-        // The run is centred in the widget. Rotated -90 degrees it spans
-        // `[baseline - length, baseline]`, so centring puts the baseline at
-        // centre + length/2. Across the rail, bias by half the line height.
-        let baseline_y = rect.y + rect.height * 0.5 + length * 0.5;
+        // Icon and text are centred together. The run reads upward, so the
+        // icon, which comes first, sits below it. Rotated -90 degrees the run
+        // spans `[baseline - length, baseline]`. Across the rail, bias by
+        // half the line height.
+        let bottom = rect.y + rect.height * 0.5 + (length + icon_space) * 0.5;
+        push_icon(list, rect.x + (rect.width - icon_size) * 0.5, bottom - icon_size);
+        let baseline_y = bottom - icon_space;
         run.transform = ui::vertical_text_transform(
             rect.x + (rect.width - line_height) * 0.5 + line_height,
             baseline_y,

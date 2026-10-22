@@ -15,7 +15,7 @@ Status: `todo` · `wip` · `verified`
 |---|---|---|---|
 | Sidebar container | layer-shell panel, left edge, per monitor | Full-height, transparent margins, corner insets, `InvertedCorner` chrome top and bottom | todo |
 | Workspaces | panel section | 10-workspace window around the active workspace, active/occupied/muted colours, click and scroll-wheel to switch, animated scroll to the active row | todo |
-| App title | panel section | Active window title via Hyprland, app icon from the window class, marquee when the title overflows | wip — title shown, elided; no app icon and no marquee yet |
+| App title | panel section | Active window title via Hyprland, app icon from the window class, marquee when the title overflows | wip — each monitor shows its own workspace's most recently focused window (seen on Hyprland: HDMI showed kitty, eDP's empty workspace showed Desktop), with the app icon from its desktop entry or class. Elided; no marquee yet |
 | Tray | panel section | StatusNotifierItem icons, left-click activate, right-click opens the item's DBusMenu, hover-out auto-close | wip — icons render on both monitors, both as watcher owner and as a consumer of Quickshell's watcher; activation/menu not yet exercised against a real app; no hover-out auto-close |
 | Quick icons (audio / BT / wifi) | panel section | Rounded container, per-icon state colour, hover opens the corresponding hover menu on the focused monitor | todo |
 | Battery | panel section | Percentage, charging/low/critical states and icons | todo |
@@ -43,7 +43,7 @@ Status: `todo` · `wip` · `verified`
 | System OSD | layer-shell overlay | Volume and brightness channels, icon by level, fade in/out, absolute volume baseline at 150% ceiling, poll while visible | todo |
 | Notification listener | background service | Own `org.freedesktop.Notifications` server, snapshot persistence across restarts, identity-based replacement of same-app/summary notifications | todo |
 | Notification center | popup overlay | Notification list, dismiss individual, clear all, do-not-disturb toggle, inline reply with action buttons | wip — the Notifications page of the settings window: list, dismiss, clear all, DND over IPC, action buttons, default action on click, and the last reply (as the QML centre showed, no field). Page actions implemented but not yet clicked in a running shell |
-| Notification toasts | popup overlay | Appear per notification with app icon/name/summary/body, urgency styling, auto-expiry, click to dismiss, inline reply field | wip — name/summary/body (markup flattened), urgency stripe, expiry paused while hovered or replying, action buttons, default action on click (dismiss when there is none), inline reply. Exercised in headless sway with notify-send and gdbus: `ActionInvoked`, `NotificationReplied`, one `NotificationClosed` each. No app icon yet |
+| Notification toasts | popup overlay | Appear per notification with app icon/name/summary/body, urgency styling, auto-expiry, click to dismiss, inline reply field | wip — name/summary/body (markup flattened), urgency stripe, expiry paused while hovered or replying, action buttons, default action on click (dismiss when there is none), inline reply. Exercised in headless sway with notify-send and gdbus: `ActionInvoked`, `NotificationReplied`, one `NotificationClosed` each. Picture beside the header (`image-data`, then `image-path`, then the app icon), urgency glyph without one; app icon seen live, `image-data` covered by tests only. PNG and SVG images only (no JPEG decoder) |
 
 ## Interactive / privileged
 

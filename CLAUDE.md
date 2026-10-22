@@ -57,8 +57,15 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: hover menus, audio EQ panel, screenshots, dashboard, app icons (beside the window
-title and on notification cards), notification snapshot persistence. See
+Not implemented: hover menus, audio EQ panel, screenshots, dashboard,
+notification snapshot persistence, the title marquee.
+
+App icons come from `IconTheme::load_app_icon`, which maps a window class to
+its desktop entry's `Icon` (`desktop.rs`) before trying the class as an icon
+name. Icon themes and desktop entries are searched in `icons::data_dirs()`,
+which always includes the NixOS profile directories: a shell started without
+the session's `XDG_DATA_DIRS` (a devshell, a systemd unit) otherwise finds no
+user icon theme at all. See
 `docs/native-shell-parity.md`.
 
 **Tray activation** works: left click sends `Activate`, middle click

@@ -122,6 +122,8 @@ group_margin = 6.0      # inner margin of a framed group
 group_spacing = 4.0     # gap between widgets in a framed group
 group_width = 30.0      # width of a framed group in a vertical rail
 corner_size = 20.0      # corner scoop where a rail meets the screen edge
+title_icon = 16.0       # app icon before the window title
+title_icon_gap = 8.0
 
 [metrics.workspaces]
 visible = 5             # rows shown at once
@@ -249,6 +251,10 @@ body_lines = 3          # body lines before it is elided
 line_height = 1.35      # multiple of the text size
 dismiss = 22.0          # close button
 dismiss_icon = 12.0
+visual = 20.0           # picture or app icon beside the header
+visual_radius = 5.0
+visual_gap = 10.0
+visual_glyph = 16.0     # urgency glyph shown without a picture
 button_height = 26.0    # action buttons
 button_min_width = 74.0
 button_padding = 9.0
