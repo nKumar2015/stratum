@@ -60,6 +60,20 @@ enum LockEvent {
     Artwork(crate::lock::ArtworkSpec, crate::lock::Artwork),
 }
 
+/// What a screenshot worker finished.
+enum ScreenshotEvent {
+    /// `output`'s frozen frame, RGBA8.
+    Frozen { output: String, width: u32, height: u32, pixels: Vec<u8> },
+    FreezeFailed { error: String },
+    /// The capture is at `path`, decoded for the viewer.
+    Captured { path: String, mode: crate::screenshot::Mode, image: crate::screenshot_viewer::Image },
+    CaptureFailed { error: String },
+    /// A viewer action finished.
+    Posted(Result<crate::screenshot_viewer::PostAction, String>),
+    /// The portal answered Save As: a path, or `None` for a cancel.
+    SaveAsChosen(Result<Option<String>, String>),
+}
+
 /// The answer to a polkit password, delivered from the agent's runtime.
 struct PolkitEvent {
     cookie: String,
@@ -138,6 +152,14 @@ pub struct App {
     dashboard: crate::dashboard::Dashboard,
     dashboard_surfaces: Vec<SurfaceEntry>,
     dashboard_requested: Option<std::time::Instant>,
+    /// The screenshot overlay, its per-output surfaces, and the channel its
+    /// `grim` workers answer on.
+    screenshot: crate::screenshot::Screenshot,
+    screenshot_surfaces: Vec<SurfaceEntry>,
+    screenshot_events: Option<calloop::channel::Sender<ScreenshotEvent>>,
+    /// The viewer a capture opens in, and its window while open.
+    viewer: crate::screenshot_viewer::ScreenshotViewer,
+    viewer_window: Option<super::viewer_window::ViewerWindow>,
     /// Hover menus beside the status icons, one overlay surface per output.
     hover_menus: crate::ui::hover_menu::HoverMenus,
     hover_surfaces: Vec<SurfaceEntry>,
@@ -156,6 +178,11 @@ pub struct App {
     queue_handle: QueueHandle<App>,
     xdg_shell: XdgShell,
     activation: Option<ActivationState>,
+    /// `wp_cursor_shape_v1`, and its device for the pointer once there is one.
+    cursor_shapes: Option<smithay_client_toolkit::seat::pointer::cursor_shape::CursorShapeManager>,
+    cursor_shape_device: Option<
+        smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1,
+    >,
     /// The control-centre window, created on first open.
     settings: Option<SettingsWindow>,
     /// Surface the pointer is currently over, and the last known position in
@@ -227,6 +254,9 @@ impl App {
             .map_err(|err| format!("xdg-shell unavailable: {err}"))?;
         // Optional: lets us hand focus to the settings window when opened.
         let activation = ActivationState::bind(&globals, &qh).ok();
+        // Optional: the screenshot overlay shows a crosshair cursor with it.
+        let cursor_shapes =
+            smithay_client_toolkit::seat::pointer::cursor_shape::CursorShapeManager::bind(&globals, &qh).ok();
         // Optional too: without ext-session-lock, `lockscreen lock` answers
         // unsupported and the CLI leaves locking to another client.
         let session_lock_state = SessionLockState::new(&globals, &qh);
@@ -279,6 +309,11 @@ impl App {
             dashboard: crate::dashboard::Dashboard::new(),
             dashboard_surfaces: Vec::new(),
             dashboard_requested: None,
+            screenshot: crate::screenshot::Screenshot::new(),
+            screenshot_surfaces: Vec::new(),
+            screenshot_events: None,
+            viewer: crate::screenshot_viewer::ScreenshotViewer::new(),
+            viewer_window: None,
             hover_menus: crate::ui::hover_menu::HoverMenus::new(),
             hover_surfaces: Vec::new(),
             hover_geometry: None,
@@ -289,6 +324,8 @@ impl App {
             queue_handle: qh.clone(),
             xdg_shell,
             activation,
+            cursor_shapes,
+            cursor_shape_device: None,
             settings: None,
             pointer: None,
             pointer_pressed: false,
@@ -329,6 +366,7 @@ impl App {
 
         app.start_ipc(&loop_handle);
         app.start_lock_events(&loop_handle);
+        app.start_screenshot_events(&loop_handle);
         app.start_polkit_events(&loop_handle);
         app.create_surfaces(&qh);
         app.start_monitors();
@@ -881,6 +919,82 @@ impl App {
             }
         }
 
+        // Screenshot overlay: every output whose frame is frozen. Only the
+        // output it started on takes the keyboard, for Escape.
+        self.screenshot.set_metrics(&self.config.metrics.screenshot);
+        let origins: Vec<(i32, i32)> = self
+            .screenshot_surfaces
+            .iter()
+            .map(|e| self.output_origin(&e.output_name))
+            .collect();
+        let shot_origin = self.screenshot.origin().to_string();
+        for (entry, origin) in self.screenshot_surfaces.iter_mut().zip(origins) {
+            if !self.screenshot.shows(&entry.output_name) {
+                entry.unmap();
+                // A frozen frame is tens of megabytes of GPU memory.
+                if let Some(renderer) = &mut entry.renderer {
+                    renderer.release_backdrop();
+                }
+                continue;
+            }
+            if !entry.ready() {
+                continue;
+            }
+            if entry.dirty {
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                self.screenshot.paint(&mut ctx, &mut list, rect, &output_name, origin);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
+            if entry.mapped {
+                entry.set_keyboard_exclusive(entry.output_name == shot_origin);
+            }
+        }
+
+        // Screenshot viewer window.
+        if self.viewer.is_open() {
+            self.viewer.configure(&self.config.metrics.screenshot_viewer, &self.config.screenshot);
+            if self.viewer.tick() {
+                self.mark_viewer_dirty();
+            }
+        }
+        if let Some(window) = &mut self.viewer_window {
+            if window.configured && window.dirty {
+                let output_name = self.surfaces.first().map(|s| s.output_name.clone()).unwrap_or_default();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let mut list = crate::render::display_list::DisplayList::new(theme.bg_main);
+                self.viewer.paint(&mut ctx, &mut list, window.logical_rect());
+                if let Err(err) = window.render_list(&self.gpu, self.display, &list, &mut self.text) {
+                    tracing::error!("screenshot viewer render failed: {err}");
+                }
+            }
+        }
+
         // Theme switcher, on the output it opened on.
         self.theme_switcher.set_metrics(&self.config.metrics.theme_switcher);
         let theme_target = self.theme_switcher.target().map(str::to_string);
@@ -1112,6 +1226,295 @@ impl App {
         }) {
             warn!("failed to insert lock event source: {err}");
         }
+    }
+
+    /// Route screenshot worker results (frozen frames, captures) into the
+    /// event loop.
+    fn start_screenshot_events(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
+        let (tx, channel) = calloop::channel::channel();
+        self.screenshot_events = Some(tx);
+        if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(event) = event {
+                app.handle_screenshot_event(event);
+            }
+        }) {
+            warn!("failed to insert screenshot event source: {err}");
+        }
+    }
+
+    fn handle_screenshot_event(&mut self, event: ScreenshotEvent) {
+        match event {
+            ScreenshotEvent::Frozen { output, width, height, pixels } => {
+                self.screenshot.frozen(&output, width, height, pixels);
+            }
+            ScreenshotEvent::FreezeFailed { error } => {
+                // Picking over a live screen would capture something other
+                // than what is shown, so give up, as QML did.
+                if self.screenshot.is_open() {
+                    self.screenshot.close();
+                    crate::screenshot::notify_failure("Start failed", &error);
+                }
+            }
+            ScreenshotEvent::Captured { path, mode, image } => {
+                self.screenshot.close();
+                self.viewer.show(path, mode, true, image);
+                self.ensure_viewer_window();
+            }
+            ScreenshotEvent::CaptureFailed { error } => {
+                self.screenshot.capture_failed();
+                crate::screenshot::notify_failure("Capture failed", &error);
+            }
+            ScreenshotEvent::Posted(result) => {
+                if let Err(error) = &result {
+                    crate::screenshot::notify_failure("Viewer action failed", error);
+                }
+                self.viewer.finished(result);
+            }
+            ScreenshotEvent::SaveAsChosen(result) => match result {
+                Ok(Some(target)) => {
+                    self.viewer.set_working(false);
+                    self.run_viewer_post(crate::screenshot_viewer::PostAction::SaveTo, Some(target));
+                }
+                Ok(None) => self.viewer.set_working(false),
+                Err(error) => self.viewer.finished(Err(error)),
+            },
+        }
+        self.mark_screenshot_dirty();
+        self.mark_viewer_dirty();
+    }
+
+    fn mark_viewer_dirty(&mut self) {
+        if let Some(window) = &mut self.viewer_window {
+            window.dirty = true;
+        }
+    }
+
+    /// Create the viewer's window, or bring it forward when it exists.
+    fn ensure_viewer_window(&mut self) {
+        let qh = self.queue_handle.clone();
+        let app_id = "org.stratum.ScreenshotViewer";
+        if self.viewer_window.is_none() {
+            let surface = self.compositor_state.create_surface(&qh);
+            let window = self.xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_title("Screenshot Viewer");
+            window.set_app_id(app_id);
+            let m = self.viewer.metrics();
+            window.set_min_size(Some((m.min_width, m.min_height)));
+            let size = (m.width, m.height);
+            window.commit();
+            // As sharp as the sharpest output, like the settings window.
+            let scale = self.surfaces.iter().map(|s| s.scale).max().unwrap_or(1);
+            self.viewer_window = Some(super::viewer_window::ViewerWindow::new(window, scale, size));
+        }
+        if let (Some(activation), Some(window)) = (&self.activation, &self.viewer_window) {
+            activation.request_token(
+                &qh,
+                RequestData {
+                    seat_and_serial: None,
+                    surface: Some(window.window.wl_surface().clone()),
+                    app_id: Some(app_id.to_string()),
+                    udata: (),
+                },
+            );
+        }
+        self.mark_viewer_dirty();
+    }
+
+    fn close_viewer(&mut self) {
+        self.viewer.close();
+        // Dropping the window unmaps it.
+        self.viewer_window = None;
+    }
+
+    /// Carry out what the viewer asked for.
+    fn apply_viewer_action(&mut self, action: crate::screenshot_viewer::ViewerAction) {
+        use crate::screenshot_viewer::ViewerAction;
+        match action {
+            ViewerAction::None => return,
+            ViewerAction::Redraw => {}
+            ViewerAction::Close => self.close_viewer(),
+            ViewerAction::Post { action, target } => self.run_viewer_post(action, target),
+            ViewerAction::SaveAs => {
+                let Some(sender) = self.screenshot_events.clone() else {
+                    return;
+                };
+                self.viewer.set_working(true);
+                let timeout = std::time::Duration::from_millis(self.viewer.metrics().save_as_timeout_ms);
+                std::thread::spawn(move || {
+                    let result = crate::screenshot_viewer::portal_save_as(timeout);
+                    let _ = sender.send(ScreenshotEvent::SaveAsChosen(result));
+                });
+            }
+        }
+        self.mark_viewer_dirty();
+    }
+
+    /// Run a `screenshot-post` action on the shown image, composing its
+    /// strokes into a temporary file first when there are any.
+    fn run_viewer_post(&mut self, action: crate::screenshot_viewer::PostAction, target: Option<String>) {
+        let (Some(sender), Some(image)) = (self.screenshot_events.clone(), self.viewer.image().cloned())
+        else {
+            return;
+        };
+        let strokes = self.viewer.strokes().to_vec();
+        let source = self.viewer.path().to_string();
+        self.viewer.set_working(true);
+        std::thread::spawn(move || {
+            let result = if strokes.is_empty() {
+                crate::screenshot_viewer::post(action, &source, target.as_deref())
+            } else {
+                crate::screenshot_viewer::export(&image, &strokes).and_then(|temp| {
+                    let result = crate::screenshot_viewer::post(action, &temp, target.as_deref());
+                    let _ = std::fs::remove_file(&temp);
+                    result
+                })
+            };
+            let _ = sender.send(ScreenshotEvent::Posted(result));
+        });
+        self.mark_viewer_dirty();
+    }
+
+    /// One pointer event on the viewer window.
+    fn viewer_pointer(&mut self, kind: &PointerEventKind, x: f32, y: f32) {
+        let point = crate::render::display_list::Point::new(x, y);
+        let ctrl = self.modifiers.ctrl;
+        let action = match kind {
+            PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => self.viewer.motion(point),
+            PointerEventKind::Leave { .. } => {
+                self.viewer.leave();
+                crate::screenshot_viewer::ViewerAction::Redraw
+            }
+            PointerEventKind::Press { button, .. } if *button == BTN_LEFT || *button == BTN_MIDDLE => {
+                self.viewer.press(point, *button == BTN_MIDDLE, ctrl)
+            }
+            PointerEventKind::Release { button, .. } if *button == BTN_LEFT || *button == BTN_MIDDLE => {
+                self.viewer.release()
+            }
+            PointerEventKind::Axis { vertical, .. } => {
+                let steps = if vertical.value120 != 0 {
+                    vertical.value120 as f32 / 120.0
+                } else if vertical.discrete != 0 {
+                    vertical.discrete as f32
+                } else {
+                    vertical.absolute as f32
+                };
+                self.viewer.scroll(point, steps, ctrl)
+            }
+            _ => crate::screenshot_viewer::ViewerAction::None,
+        };
+        self.apply_viewer_action(action);
+    }
+
+    /// Open the overlay on every output and freeze each one.
+    fn start_screenshot(&mut self) {
+        let output = self.focused_output();
+        if !self.screenshot.open_on(&output) {
+            return;
+        }
+        let Some(sender) = self.screenshot_events.clone() else {
+            return;
+        };
+        for entry in &self.screenshot_surfaces {
+            let output = entry.output_name.clone();
+            let sender = sender.clone();
+            std::thread::spawn(move || {
+                let event = match crate::screenshot::freeze(&output) {
+                    Ok((width, height, pixels)) => {
+                        ScreenshotEvent::Frozen { output, width, height, pixels }
+                    }
+                    Err(error) => ScreenshotEvent::FreezeFailed { error },
+                };
+                let _ = sender.send(event);
+            });
+        }
+        self.mark_screenshot_dirty();
+    }
+
+    /// Run a picked capture once the overlay is off screen.
+    fn run_screenshot_capture(&mut self, capture: crate::screenshot::Capture) {
+        let Some(sender) = self.screenshot_events.clone() else {
+            return;
+        };
+        let delay = std::time::Duration::from_millis(self.screenshot.metrics().capture_delay_ms);
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            let mode = capture.mode();
+            // Decoded here too, so the viewer opens with its image.
+            let captured = crate::screenshot::capture(&capture).and_then(|path| {
+                match crate::screenshot_viewer::load(&path) {
+                    Ok(image) => Ok((path, image)),
+                    Err(error) => {
+                        let _ = std::fs::remove_file(&path);
+                        Err(error)
+                    }
+                }
+            });
+            let event = match captured {
+                Ok((path, image)) => ScreenshotEvent::Captured { path, mode, image },
+                Err(error) => ScreenshotEvent::CaptureFailed { error },
+            };
+            let _ = sender.send(event);
+        });
+        self.mark_screenshot_dirty();
+    }
+
+    /// One pointer event on `output`'s screenshot overlay.
+    fn screenshot_pointer(&mut self, output: &str, kind: &PointerEventKind, x: f32, y: f32) {
+        let point = crate::render::display_list::Point::new(x, y);
+        let origin = self.output_origin(output);
+        if let (PointerEventKind::Enter { serial }, Some(device)) = (kind, &self.cursor_shape_device) {
+            // Set per surface: the compositor restores its own on leave.
+            device.set_shape(
+                *serial,
+                smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape::Crosshair,
+            );
+        }
+        match kind {
+            PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                // Windows on the output's active workspace, from the state the
+                // shell already keeps.
+                let hypr = self.state.hypr.get();
+                let workspaces: Vec<i32> = hypr.active.get(output).copied().into_iter().collect();
+                let window = hypr
+                    .window_at(origin.0 + x as i32, origin.1 + y as i32, &workspaces)
+                    .map(|c| crate::screenshot::GlobalRect {
+                        x: c.x,
+                        y: c.y,
+                        width: c.width,
+                        height: c.height,
+                    });
+                self.screenshot.motion(output, point, window);
+            }
+            PointerEventKind::Leave { .. } => self.screenshot.leave(output),
+            PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
+                self.screenshot.press(output, point);
+            }
+            PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
+                if let Some(capture) = self.screenshot.release(output, origin) {
+                    self.run_screenshot_capture(capture);
+                }
+            }
+            _ => return,
+        }
+        self.mark_screenshot_dirty();
+    }
+
+    fn mark_screenshot_dirty(&mut self) {
+        for entry in &mut self.screenshot_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// `output`'s top-left in global layout coordinates, which `grim` and
+    /// window geometry use.
+    fn output_origin(&self, output_name: &str) -> (i32, i32) {
+        self.screenshot_surfaces
+            .iter()
+            .find(|e| e.output_name == output_name)
+            .and_then(|e| e.output.as_ref())
+            .and_then(|o| self.output_state.info(o))
+            .and_then(|info| info.logical_position)
+            .unwrap_or((0, 0))
     }
 
     fn handle_lock_event(&mut self, event: LockEvent) {
@@ -1513,6 +1916,7 @@ impl App {
                 self.dashboard_requested = None;
                 self.mark_dashboard_dirty();
             }
+            ("screenshot", "start") => self.start_screenshot(),
             ("lockscreen", "lock") => self.begin_lock()?,
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
@@ -2211,6 +2615,26 @@ impl App {
                     .with_output_logical_size(output_logical_size),
             );
 
+            // Screenshot overlay: fullscreen over the frozen frame, and above
+            // the bar's exclusive zone so the bar can be captured too.
+            let shot_wl = self.compositor_state.create_surface(qh);
+            let shot_layer = self.layer_shell.create_layer_surface(
+                qh,
+                shot_wl,
+                Layer::Overlay,
+                Some("stratum-screenshot"),
+                Some(output),
+            );
+            shot_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+            shot_layer.set_exclusive_zone(-1);
+            shot_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            shot_layer.commit();
+            self.screenshot_surfaces.push(
+                SurfaceEntry::new(shot_layer, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
             // Hover menu: sized to its contents and moved beside the icon with
             // margins, like the tray menu. A size is set before the first
             // commit so it cannot come up output-sized and swallow clicks.
@@ -2685,6 +3109,7 @@ impl OutputHandler for App {
                 .chain(self.polkit_surfaces.iter_mut())
                 .chain(self.theme_surfaces.iter_mut())
                 .chain(self.dashboard_surfaces.iter_mut())
+                .chain(self.screenshot_surfaces.iter_mut())
                 .chain(self.hover_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
@@ -2717,6 +3142,7 @@ impl LayerShellHandler for App {
         self.polkit_surfaces.retain(|entry| &entry.layer != layer);
         self.theme_surfaces.retain(|entry| &entry.layer != layer);
         self.dashboard_surfaces.retain(|entry| &entry.layer != layer);
+        self.screenshot_surfaces.retain(|entry| &entry.layer != layer);
         self.hover_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
@@ -2740,6 +3166,7 @@ impl LayerShellHandler for App {
             .chain(self.polkit_surfaces.iter_mut())
             .chain(self.theme_surfaces.iter_mut())
             .chain(self.dashboard_surfaces.iter_mut())
+            .chain(self.screenshot_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // Fullscreen: the compositor's configure is authoritative.
@@ -2832,7 +3259,11 @@ impl SeatHandler for App {
     ) {
         if capability == Capability::Pointer {
             match self.seat_state.get_pointer(qh, &seat) {
-                Ok(_pointer) => info!("pointer capability acquired"),
+                Ok(pointer) => {
+                    info!("pointer capability acquired");
+                    self.cursor_shape_device =
+                        self.cursor_shapes.as_ref().map(|m| m.get_shape_device(&pointer, qh));
+                }
                 Err(err) => tracing::warn!("failed to create pointer: {err}"),
             }
         }
@@ -2877,6 +3308,41 @@ impl PointerHandler for App {
 
         for event in events {
             let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+            // The screenshot overlay needs every press, motion and release in
+            // order (a drag is all three), not the frame's summary below.
+            let shot_output = self
+                .screenshot_surfaces
+                .iter()
+                .find(|e| e.layer.wl_surface() == &event.surface)
+                .map(|e| e.output_name.clone());
+            if let Some(output) = shot_output {
+                self.screenshot_pointer(&output, &event.kind, x, y);
+                continue;
+            }
+            // The viewer draws with every motion, not once per frame.
+            if self.viewer_window.as_ref().is_some_and(|w| w.window.wl_surface() == &event.surface) {
+                if let (PointerEventKind::Enter { serial }, Some(device)) =
+                    (&event.kind, &self.cursor_shape_device)
+                {
+                    device.set_shape(
+                        *serial,
+                        smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape::Crosshair,
+                    );
+                }
+                self.viewer_pointer(&event.kind, x, y);
+                continue;
+            }
+            // Once any surface sets a shape, every surface must: compositors
+            // keep the last image across enters, so the screenshot crosshair
+            // would otherwise stay on the bar.
+            if let (PointerEventKind::Enter { serial }, Some(device)) =
+                (&event.kind, &self.cursor_shape_device)
+            {
+                device.set_shape(
+                    *serial,
+                    smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape::Default,
+                );
+            }
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     self.pointer = Some((event.surface.clone(), x, y));
@@ -3146,8 +3612,12 @@ impl WindowHandler for App {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _window: &Window,
+        window: &Window,
     ) {
+        if self.viewer_window.as_ref().is_some_and(|w| &w.window == window) {
+            self.close_viewer();
+            return;
+        }
         // Closing the settings window closes the control centre; the window
         // itself is kept for reuse.
         self.control_center.close();
@@ -3161,6 +3631,13 @@ impl WindowHandler for App {
         configure: WindowConfigure,
         _serial: u32,
     ) {
+        if let Some(viewer) = self.viewer_window.as_mut().filter(|w| &w.window == window) {
+            let m = &self.config.metrics.screenshot_viewer;
+            let width = configure.new_size.0.map(|v| v.get()).unwrap_or(m.width);
+            let height = configure.new_size.1.map(|v| v.get()).unwrap_or(m.height);
+            viewer.resize(&self.gpu, width, height);
+            return;
+        }
         let metrics = &self.config.metrics.window;
         let width = configure
             .new_size
@@ -3184,10 +3661,11 @@ impl WindowHandler for App {
 impl ActivationHandler for App {
     type RequestUdata = ();
 
-    fn new_token(&mut self, token: String, _data: &RequestData<()>) {
-        // Apply the token to the settings window so the compositor focuses it.
-        if let (Some(activation), Some(settings)) = (&self.activation, &self.settings) {
-            activation.activate::<App>(settings.window.wl_surface(), token);
+    fn new_token(&mut self, token: String, data: &RequestData<()>) {
+        // Apply the token to the window that asked for it (the settings
+        // window or the screenshot viewer) so the compositor focuses it.
+        if let (Some(activation), Some(surface)) = (&self.activation, &data.surface) {
+            activation.activate::<App>(surface, token);
         }
     }
 }
@@ -3273,6 +3751,24 @@ impl KeyboardHandler for App {
                 .toasts
                 .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
             self.apply_toast_action(action);
+            return;
+        }
+
+        if self.screenshot.is_open() {
+            if event.keysym == Keysym::Escape {
+                self.screenshot.close();
+                self.mark_screenshot_dirty();
+            }
+            return;
+        }
+
+        let viewer_focused = match (&self.viewer_window, &self.keyboard_focus) {
+            (Some(window), Some(focus)) => window.window.wl_surface() == focus,
+            _ => false,
+        };
+        if viewer_focused {
+            let action = self.viewer.key(event.keysym, self.modifiers.ctrl);
+            self.apply_viewer_action(action);
             return;
         }
 

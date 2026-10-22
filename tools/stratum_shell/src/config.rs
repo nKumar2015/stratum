@@ -32,6 +32,7 @@ pub struct Config {
     pub behavior: BehaviorConfig,
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
+    pub screenshot: ScreenshotConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
     pub metrics: crate::ui::style::Metrics,
 }
@@ -46,6 +47,7 @@ impl Default for Config {
             behavior: BehaviorConfig::default(),
             control_center: ControlCenterConfig::default(),
             lock: LockConfig::default(),
+            screenshot: ScreenshotConfig::default(),
             metrics: crate::ui::style::Metrics::default(),
         }
     }
@@ -425,6 +427,51 @@ impl Default for BehaviorConfig {
             tray: false,
             notifications: false,
             polkit: false,
+        }
+    }
+}
+
+/// The screenshot viewer's annotation pen.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreenshotConfig {
+    /// Pen colours offered, in order; the first is selected on open. These
+    /// are drawn into the image, so they do not follow the theme.
+    pub pen_colors: Vec<String>,
+    /// Pen width on open, in on-screen pixels at 100 % zoom, and its maximum.
+    pub pen_size: u32,
+    pub pen_size_max: u32,
+}
+
+impl Default for ScreenshotConfig {
+    fn default() -> Self {
+        // The QML viewer's presets.
+        Self {
+            pen_colors: ["#ff3b30", "#34c759", "#0a84ff", "#ffd60a", "#ffffff", "#000000"]
+                .map(String::from)
+                .to_vec(),
+            pen_size: 3,
+            pen_size_max: 16,
+        }
+    }
+}
+
+impl ScreenshotConfig {
+    /// The pen colours, parsed; malformed entries are skipped.
+    pub fn colors(&self) -> Vec<Color> {
+        let colors: Vec<Color> = self
+            .pen_colors
+            .iter()
+            .filter_map(|c| {
+                let sentinel = Color::rgba(0.0, 0.0, 0.0, 0.0);
+                let parsed = parse_color(c, sentinel);
+                (parsed.a > 0.0).then_some(parsed)
+            })
+            .collect();
+        if colors.is_empty() {
+            Self::default().colors()
+        } else {
+            colors
         }
     }
 }

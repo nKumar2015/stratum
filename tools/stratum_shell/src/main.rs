@@ -25,6 +25,8 @@ mod lock;
 mod osd;
 mod pam;
 mod polkit_dialog;
+mod screenshot;
+mod screenshot_viewer;
 mod theme_switcher;
 mod power_menu;
 mod toasts;

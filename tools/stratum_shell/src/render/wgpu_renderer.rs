@@ -192,6 +192,18 @@ pub struct SurfaceRenderer {
     size: (u32, u32),
     scale: f32,
     path_cache: HashMap<u64, Vec<Vertex>>,
+    /// The layout the atlas binds with, reused for the backdrop texture.
+    texture_layout: wgpu::BindGroupLayout,
+    backdrop: Option<BackdropTexture>,
+}
+
+/// A `Backdrop` uploaded to the GPU: its own texture (it is far larger than
+/// the atlas) and the full-surface quad that draws it.
+struct BackdropTexture {
+    key: u64,
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    quad: wgpu::Buffer,
 }
 
 impl SurfaceRenderer {
@@ -405,7 +417,75 @@ impl SurfaceRenderer {
             size,
             scale,
             path_cache: HashMap::new(),
+            texture_layout: atlas_layout,
+            backdrop: None,
         })
+    }
+
+    /// Free the backdrop texture now. A hidden surface is not painted again,
+    /// so waiting for a list without one would keep it alive indefinitely.
+    pub fn release_backdrop(&mut self) {
+        self.backdrop = None;
+    }
+
+    /// Upload `backdrop` unless it is the one already on the GPU.
+    fn ensure_backdrop(&mut self, gpu: &Gpu, backdrop: &crate::render::display_list::Backdrop) {
+        if self.backdrop.as_ref().is_some_and(|b| b.key == backdrop.key) {
+            return;
+        }
+        let (width, height) = (backdrop.width.max(1), backdrop.height.max(1));
+        if backdrop.pixels.len() < (width * height * 4) as usize {
+            self.backdrop = None;
+            return;
+        }
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("stratum backdrop"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &backdrop.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("stratum backdrop sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("stratum backdrop bind group"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            ],
+        });
+        let quad = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("stratum backdrop quad"),
+            size: (std::mem::size_of::<Vertex>() * 6) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.backdrop = Some(BackdropTexture { key: backdrop.key, _texture: texture, bind_group, quad });
     }
 
     pub fn resize(&mut self, gpu: &Gpu, size: (u32, u32), scale: f32) {
@@ -425,6 +505,33 @@ impl SurfaceRenderer {
         let mut batch = Batch::new();
         self.atlas.begin_frame();
         let mut used_paths = std::collections::HashSet::new();
+        match &list.backdrop {
+            Some(backdrop) => self.ensure_backdrop(gpu, backdrop),
+            None => self.backdrop = None,
+        }
+        // The backdrop's scissor, in physical pixels; `None` when it is
+        // clipped away entirely.
+        let mut backdrop_scissor = None;
+        if let (Some(backdrop), Some(spec)) = (&self.backdrop, &list.backdrop) {
+            let s = self.scale;
+            let (sw, sh) = (self.size.0 as f32, self.size.1 as f32);
+            let (x, y, w, h) = spec
+                .dest
+                .map(|d| (d.x * s, d.y * s, d.width * s, d.height * s))
+                .unwrap_or((0.0, 0.0, sw, sh));
+            let mut quad = Batch::new();
+            append_textured_px(&mut quad, x, y, w, h, (0.0, 0.0, 1.0, 1.0), [1.0; 4]);
+            gpu.queue.write_buffer(&backdrop.quad, 0, bytemuck::cast_slice(&quad.vertices));
+            let (cx, cy, cw, ch) = spec
+                .clip
+                .map(|c| (c.x * s, c.y * s, c.width * s, c.height * s))
+                .unwrap_or((0.0, 0.0, sw, sh));
+            let (x0, y0) = (cx.max(0.0).floor(), cy.max(0.0).floor());
+            let (x1, y1) = ((cx + cw).min(sw).ceil(), (cy + ch).min(sh).ceil());
+            if x1 > x0 && y1 > y0 {
+                backdrop_scissor = Some((x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32));
+            }
+        }
 
         for command in &list.commands {
             match command {
@@ -592,6 +699,15 @@ impl SurfaceRenderer {
                 multiview_mask: None,
             });
 
+            // The backdrop first, beneath everything, from its own texture.
+            if let (Some(backdrop), Some((x, y, w, h))) = (&self.backdrop, backdrop_scissor) {
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(1, &backdrop.bind_group, &[]);
+                pass.set_vertex_buffer(0, backdrop.quad.slice(..));
+                pass.set_scissor_rect(x, y, w, h);
+                pass.draw(0..6, 0..1);
+            }
             if !batch.is_empty() {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
@@ -786,7 +902,12 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
     let mut buffers: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
     if let Some(width) = path.stroke {
         let mut tess = StrokeTessellator::new();
-        let opts = StrokeOptions::default().with_line_width(width * scale);
+        let mut opts = StrokeOptions::default().with_line_width(width * scale);
+        if path.round {
+            opts = opts
+                .with_line_join(lyon::tessellation::LineJoin::Round)
+                .with_line_cap(lyon::tessellation::LineCap::Round);
+        }
         if tess
             .tessellate_path(
                 &lyon_path,
@@ -863,6 +984,7 @@ fn path_hash(path: &Path) -> u64 {
         }
     }
     path.stroke.map(f32::to_bits).hash(&mut hasher);
+    path.round.hash(&mut hasher);
     for v in path.transform.m { v.to_bits().hash(&mut hasher); }
     // The paint must be part of the key. Tessellation bakes the colour into
     // the vertices, so two paths with identical geometry but different paint

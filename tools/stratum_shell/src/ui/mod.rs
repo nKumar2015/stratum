@@ -355,8 +355,15 @@ pub fn paint_frame(
         ..rect
     });
     if draw_border {
-        // A one-pixel stroke inside the frame edge.
-        list.push_path(Path::new(
+        stroke_rounded(list, rect, border, 1.0);
+    }
+}
+
+/// Stroke the outline of a rounded rectangle, leaving its inside untouched
+/// (a translucent fill shows through, unlike two stacked rects).
+pub fn stroke_rounded(list: &mut DisplayList, rect: Rect, color: Color, width: f32) {
+    list.push_path(
+        Path::new(
             vec![
                 PathCommand::MoveTo(Point::new(rect.x + rect.radius, rect.y)),
                 PathCommand::LineTo(Point::new(rect.x + rect.width - rect.radius, rect.y)),
@@ -381,10 +388,10 @@ pub fn paint_frame(
                 ),
                 PathCommand::Close,
             ],
-            Paint::Solid(border),
+            Paint::Solid(color),
         )
-        .stroked(1.0));
-    }
+        .stroked(width),
+    );
 }
 
 /// Center a line of text horizontally inside `rect`.

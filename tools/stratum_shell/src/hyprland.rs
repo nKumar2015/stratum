@@ -33,6 +33,9 @@ pub struct HyprState {
     /// window on that monitor's active workspace. Each monitor shows its own
     /// window, as the QML title did, not the globally focused one.
     pub windows: std::collections::HashMap<String, WindowInfo>,
+    /// Every mapped window's global rect, workspace, and focus order, for the
+    /// screenshot overlay's window picking.
+    pub client_rects: Vec<ClientRect>,
     /// Monitor the compositor currently has focused.
     ///
     /// Popups open here rather than on an arbitrary output, matching the QML
@@ -46,6 +49,32 @@ pub struct WindowInfo {
     pub title: String,
     /// Window class (app id), for the icon.
     pub class: String,
+}
+
+/// A window's place on screen, in global layout coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClientRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub workspace: i32,
+    /// 0 is the focused window; higher was focused longer ago.
+    pub focus_history: i64,
+}
+
+impl HyprState {
+    /// The window at global `(x, y)` on one of the given workspaces: the most
+    /// recently focused when several overlap (a floating window over a tiled
+    /// one).
+    pub fn window_at(&self, x: i32, y: i32, workspaces: &[i32]) -> Option<ClientRect> {
+        self.client_rects
+            .iter()
+            .filter(|c| workspaces.contains(&c.workspace))
+            .filter(|c| x >= c.x && x < c.x + c.width && y >= c.y && y < c.y + c.height)
+            .min_by_key(|c| if c.focus_history < 0 { i64::MAX } else { c.focus_history })
+            .copied()
+    }
 }
 
 /// One client from `j/clients`, reduced to what window selection needs.
@@ -141,6 +170,21 @@ impl HyprState {
                         }
                         if client["mapped"].as_bool() == Some(false) {
                             continue;
+                        }
+                        let pair = |key: &str| {
+                            let v = &client[key];
+                            (v[0].as_i64().unwrap_or(0) as i32, v[1].as_i64().unwrap_or(0) as i32)
+                        };
+                        let ((x, y), (width, height)) = (pair("at"), pair("size"));
+                        if width > 0 && height > 0 && client["hidden"].as_bool() != Some(true) {
+                            state.client_rects.push(ClientRect {
+                                x,
+                                y,
+                                width,
+                                height,
+                                workspace: id,
+                                focus_history: client["focusHistoryID"].as_i64().unwrap_or(i64::MAX),
+                            });
                         }
                         let text = |key: &str| client[key].as_str().unwrap_or_default().to_string();
                         let class = Some(text("class"))
@@ -274,6 +318,23 @@ mod tests {
         assert_eq!(windows["HDMI-A-1"].title, "Kitty");
         assert_eq!(windows["eDP-2"].title, "Zen", "most recently focused wins");
         assert_eq!(windows.len(), 2);
+    }
+
+    #[test]
+    fn window_at_prefers_the_most_recently_focused_and_ignores_other_workspaces() {
+        let rect = |x, y, w, h, ws, fh| ClientRect { x, y, width: w, height: h, workspace: ws, focus_history: fh };
+        let state = HyprState {
+            client_rects: vec![
+                rect(0, 0, 1000, 1000, 1, 2),    // tiled, under
+                rect(100, 100, 300, 300, 1, 0),  // floating, focused, on top
+                rect(0, 0, 1000, 1000, 5, 1),    // another workspace
+            ],
+            ..Default::default()
+        };
+        assert_eq!(state.window_at(150, 150, &[1]).map(|c| c.width), Some(300));
+        assert_eq!(state.window_at(800, 800, &[1]).map(|c| c.width), Some(1000));
+        assert_eq!(state.window_at(150, 150, &[7]), None);
+        assert_eq!(state.window_at(1000, 10, &[1]), None, "right edge is exclusive");
     }
 
     #[test]

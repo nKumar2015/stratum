@@ -7,6 +7,7 @@
 mod lock_surface;
 mod surfaces;
 mod state;
+mod viewer_window;
 
 pub use state::App;
 

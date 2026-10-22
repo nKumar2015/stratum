@@ -41,6 +41,13 @@ avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
 # could never be undone. Refusals fall back to Quickshell while both run.
 pam_service = "stratum-shell"
 
+[screenshot]            # the viewer's annotation pen
+# Drawn into the image, so they are fixed colours, not theme colours. The
+# first is selected when the viewer opens.
+pen_colors = ["#ff3b30", "#34c759", "#0a84ff", "#ffd60a", "#ffffff", "#000000"]
+pen_size = 3            # on-screen px at 100 % zoom
+pen_size_max = 16
+
 [sidebar]
 position = "left"       # "left" or "right"
 width = 40              # logical px
@@ -339,6 +346,53 @@ cell_gap = 4.0
 button = 28.0
 art = 110.0             # album art
 scrim_alpha = 0.56
+
+[metrics.screenshot]    # the capture overlay
+drag_threshold = 8.0    # movement that turns a press into a region drag
+window_margin = 5.0     # added around a picked window
+capture_delay_ms = 120  # after hiding the overlay, before capturing
+border = 2.0
+window_radius = 6.0
+region_radius = 3.0
+fill_alpha = 0.23       # selection tint
+output_fill_alpha = 0.1 # tint over a whole output (click captures it)
+crosshair_arm = 10.0
+crosshair_width = 3.0
+crosshair_outline = 1.0
+label = 12.0            # size readout
+label_padding = 8.0
+label_height = 22.0
+label_radius = 6.0
+label_gap = 6.0
+
+[metrics.screenshot_viewer] # the window a capture opens in
+width = 1200
+height = 820
+min_width = 820
+min_height = 560
+padding = 12.0
+spacing = 10.0          # between rows
+gap = 8.0               # between items in a row
+title = 14.0
+caption = 11.0
+button_width = 42.0
+button_height = 32.0
+button_radius = 8.0
+icon = 14.0
+row_height = 24.0       # pen and zoom row
+swatch = 20.0           # pen colour
+swatch_border = 1.0
+swatch_border_selected = 2.0
+slider_width = 120.0
+readout_width = 42.0    # "16", "800%"
+status_height = 28.0    # banner over the image
+status_radius = 6.0
+status_ms = 2600
+zoom_min = 1.0
+zoom_max = 8.0
+zoom_wheel_step = 0.15  # Ctrl+wheel
+zoom_slider_step = 0.1
+save_as_timeout_ms = 35000 # portal file chooser
 
 [metrics.equalizer]     # the Equalizer page
 text = 13.0

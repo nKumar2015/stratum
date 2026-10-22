@@ -29,6 +29,8 @@ pub struct Metrics {
     pub hover_menu: HoverMenuMetrics,
     pub equalizer: EqualizerMetrics,
     pub dashboard: DashboardMetrics,
+    pub screenshot: ScreenshotMetrics,
+    pub screenshot_viewer: ScreenshotViewerMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -51,6 +53,8 @@ impl Default for Metrics {
             hover_menu: HoverMenuMetrics::default(),
             equalizer: EqualizerMetrics::default(),
             dashboard: DashboardMetrics::default(),
+            screenshot: ScreenshotMetrics::default(),
+            screenshot_viewer: ScreenshotViewerMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -635,6 +639,136 @@ impl Default for DashboardMetrics {
             button: 28.0,
             art: 110.0,
             scrim_alpha: 0.56,
+        }
+    }
+}
+
+/// The screenshot overlay. Defaults are `modules/ScreenshotToolbar.qml`'s.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreenshotMetrics {
+    /// How far a press must move before it becomes a region drag.
+    pub drag_threshold: f32,
+    /// Added on every side of a picked window, so its shadow and border are
+    /// in the shot.
+    pub window_margin: f32,
+    /// Between hiding the overlay and capturing, so the compositor has
+    /// presented the screen without it.
+    pub capture_delay_ms: u64,
+    /// Outline width, and the corner radius of the window and region outlines.
+    pub border: f32,
+    pub window_radius: f32,
+    pub region_radius: f32,
+    /// Selection fill opacity, and the lighter one over a whole output.
+    pub fill_alpha: f32,
+    pub output_fill_alpha: f32,
+    /// Crosshair: arm length from the centre, the dark stroke, and the light
+    /// outline around it.
+    pub crosshair_arm: f32,
+    pub crosshair_width: f32,
+    pub crosshair_outline: f32,
+    /// The size readout beside the selection.
+    pub label: f32,
+    pub label_padding: f32,
+    pub label_height: f32,
+    pub label_radius: f32,
+    pub label_gap: f32,
+}
+
+impl Default for ScreenshotMetrics {
+    fn default() -> Self {
+        Self {
+            drag_threshold: 8.0,
+            window_margin: 5.0,
+            capture_delay_ms: 120,
+            border: 2.0,
+            window_radius: 6.0,
+            region_radius: 3.0,
+            fill_alpha: 0.23,
+            output_fill_alpha: 0.1,
+            crosshair_arm: 10.0,
+            crosshair_width: 3.0,
+            crosshair_outline: 1.0,
+            label: 12.0,
+            label_padding: 8.0,
+            label_height: 22.0,
+            label_radius: 6.0,
+            label_gap: 6.0,
+        }
+    }
+}
+
+/// The screenshot viewer window. Defaults are `modules/ScreenshotViewer.qml`'s.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreenshotViewerMetrics {
+    /// Size on open, and the smallest it may be made.
+    pub width: u32,
+    pub height: u32,
+    pub min_width: u32,
+    pub min_height: u32,
+    /// Around the content, and between rows and between items in a row.
+    pub padding: f32,
+    pub spacing: f32,
+    pub gap: f32,
+    pub title: f32,
+    pub caption: f32,
+    /// Toolbar buttons and their glyphs.
+    pub button_width: f32,
+    pub button_height: f32,
+    pub button_radius: f32,
+    pub icon: f32,
+    /// The pen and zoom row, its colour swatches, and its sliders.
+    pub row_height: f32,
+    pub swatch: f32,
+    pub swatch_border: f32,
+    pub swatch_border_selected: f32,
+    pub slider_width: f32,
+    /// Width kept for the slider readouts ("16", "800%").
+    pub readout_width: f32,
+    /// The status banner over the bottom of the image, and how long it stays.
+    pub status_height: f32,
+    pub status_radius: f32,
+    pub status_ms: u64,
+    /// Zoom range, the Ctrl+wheel step, and the zoom slider's step.
+    pub zoom_min: f32,
+    pub zoom_max: f32,
+    pub zoom_wheel_step: f32,
+    pub zoom_slider_step: f32,
+    /// How long the portal's file chooser may take before Save As gives up.
+    pub save_as_timeout_ms: u64,
+}
+
+impl Default for ScreenshotViewerMetrics {
+    fn default() -> Self {
+        Self {
+            width: 1200,
+            height: 820,
+            min_width: 820,
+            min_height: 560,
+            padding: 12.0,
+            spacing: 10.0,
+            gap: 8.0,
+            title: 14.0,
+            caption: 11.0,
+            button_width: 42.0,
+            button_height: 32.0,
+            button_radius: 8.0,
+            icon: 14.0,
+            row_height: 24.0,
+            swatch: 20.0,
+            swatch_border: 1.0,
+            swatch_border_selected: 2.0,
+            slider_width: 120.0,
+            readout_width: 42.0,
+            status_height: 28.0,
+            status_radius: 6.0,
+            status_ms: 2600,
+            zoom_min: 1.0,
+            zoom_max: 8.0,
+            zoom_wheel_step: 0.15,
+            zoom_slider_step: 0.1,
+            save_as_timeout_ms: 35_000,
         }
     }
 }

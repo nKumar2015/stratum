@@ -18,7 +18,8 @@ implementation with its own renderer, layout, and theming.
   (no GTK, no Qt, no slint, no iced). Every visual is ours.
 - **The motivation is footprint.** Binary size, memory, CPU, and startup time must
   beat Quickshell. Measured baselines: Quickshell's closure is ~1.1 GiB,
-  qtdeclarative alone ~692 MiB. Our release binary is currently ~7.1 MB.
+  qtdeclarative alone ~692 MiB. Our stripped release binary was ~7.1 MB early
+  on and is ~16 MB as of 2026-10-22 (screenshots added 0.25 MB of that).
 - **Feature parity, not pixel parity.** The QML shell's behaviour and data must be
   preserved; the visual style is deliberately changing to "vectorheart".
 - **Long-term goal:** eventually as configurable as Quickshell — arbitrary
@@ -57,9 +58,24 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: screenshots, and `MarqueeLabel` (the QML scrolling label used
-by the dashboard's music panel and the device/network detail panels; the app
-title never had one).
+Not implemented: `MarqueeLabel` (the QML scrolling label used by the
+dashboard's music panel and the device/network detail panels; the app title
+never had one).
+
+**Screenshots** (`screenshot.rs`, `screenshot_viewer.rs`,
+`wayland/viewer_window.rs`). `screenshot start` freezes every output with
+`grim -t ppm -o`, shown as each overlay's `DisplayList::backdrop` (a texture of
+its own, far too big for the glyph atlas). Window picking reads
+`HyprState::client_rects`, and global coordinates come from the `wl_output`
+logical position, so picking works without Hyprland except for windows. A
+capture runs `grim` after the overlay is hidden, and the PNG is decoded on that
+worker. The viewer is a second xdg toplevel. Its strokes are stored in image
+pixels and rasterised on the CPU (`screenshot_viewer::rasterize`) for
+annotated exports. Actions shell out to `stratum-cli screenshot-post` and
+`portal-save-file`, the QML contract. Every surface sets a cursor shape on
+enter: once one surface sets the crosshair, compositors keep it across
+surfaces. Live tests must set `HOME` to a scratch directory, because Save
+writes to `~/Pictures/Screenshots`.
 
 The **dashboard** (`dashboard.rs`) is a fullscreen overlay polled every
 `dashboard.refresh_ms` only while open (`SystemAction::DashboardRefresh`, into
@@ -120,11 +136,10 @@ The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
 with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
 names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
 native shell reports as `unsupported`, so keybinds work during the parallel
-migration. Implemented targets: `notifications` and `theme` (all functions),
-`powermenu toggle`, and `lockscreen lock`. The remaining targets (`screenshot`,
-`dashboard`) still fall back to Quickshell; porting
-one means adding an arm in `App::execute_ipc` and extending
-`ipc::is_supported`.
+migration. Every QML target and function is now served natively
+(`ipc::tests::every_qml_function_is_served_natively`). Only a lock the shell
+refuses to take still answers `unsupported`. A new function needs an arm in
+`App::execute_ipc` and in `ipc::is_supported`.
 
 The **lock screen** (`lock.rs`, `pam.rs`, `wayland/lock_surface.rs`) uses
 `ext-session-lock-v1` and checks the password with PAM on a worker thread.

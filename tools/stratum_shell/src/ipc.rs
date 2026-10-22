@@ -69,6 +69,8 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         ("lockscreen", "lock") => true,
         // The dashboard overlay.
         ("dashboard", _) => true,
+        // The capture overlay and the viewer it opens.
+        ("screenshot", "start") => true,
         _ => false,
     }
 }
@@ -422,15 +424,15 @@ mod tests {
     }
 
     #[test]
-    fn unported_surfaces_are_reported_unsupported() {
-        // The CLI relies on this distinction to fall back to Quickshell.
-        assert!(is_supported("dashboard", "toggle"));
-        assert!(is_supported("lockscreen", "lock"));
-        assert!(!is_supported("screenshot", "start"));
-        assert!(is_supported("theme", "open"));
-        assert!(is_supported("theme", "set"));
-        assert!(is_supported("notifications", "toggleDnd"));
-        assert!(is_supported("powermenu", "toggle"));
+    fn every_qml_function_is_served_natively() {
+        // Nothing the QML shell answered still needs Quickshell, which the
+        // cutover requires. (Lock can still refuse at call time.)
+        for target in ["dashboard", "lockscreen", "notifications", "powermenu", "screenshot", "theme"] {
+            for function in functions(target).unwrap() {
+                assert!(is_supported(target, function), "{target} {function}");
+            }
+        }
+        assert!(!is_supported("screenshot", "stop"));
     }
 
     #[test]
@@ -487,11 +489,8 @@ mod tests {
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "failed");
 
-        // Unported surfaces never reach the UI thread and say so, which is what
-        // makes the CLI fall back to Quickshell.
-        let response = ask(r#"{"target":"screenshot","function":"start"}"#);
-        assert_eq!(response["ok"], false);
-        assert_eq!(response["code"], "unsupported");
+        let response = ask(r#"{"target":"screenshot","function":"stop"}"#);
+        assert_eq!(response["code"], "unknown_function");
 
         let response = ask(r#"{"target":"nope","function":"toggle"}"#);
         assert_eq!(response["code"], "unknown_target");

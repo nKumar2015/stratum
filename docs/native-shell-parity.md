@@ -57,14 +57,14 @@ Status: `todo` · `wip` · `verified`
 
 | Surface | Kind | Behaviour to preserve | Status |
 |---|---|---|---|
-| Screenshot toolbar | layer-shell overlay, per monitor | Region/window/fullscreen modes, geometry readout, freeze-frame preview | todo |
-| Screenshot viewer | normal xdg-shell window | Image load, zoom and pan, pen/colour/size annotation, undo, save, copy, upload, portal "save as", temp-file cleanup | todo |
+| Screenshot toolbar | layer-shell overlay, per monitor | Region/window/fullscreen modes, geometry readout, freeze-frame preview | wip — `screenshot start` over IPC covers every output with its frozen frame (`grim -t ppm`, straight into a texture). Hover tints the window under the pointer (from the shell's Hyprland state, most recently focused on overlap) or the whole output; click captures it (window + 5 px) or the output; a drag past 8 px captures the region. Crosshair, crosshair cursor, size readout, Escape. Capture hides the overlay, waits 120 ms, runs `grim`; failures notify and return to picking. Region, output click and Escape exercised in headless sway (captures matched the live screen, no overlay in them); window picking needs Hyprland and is not yet seen |
+| Screenshot viewer | normal xdg-shell window | Image load, zoom and pan, pen/colour/size annotation, undo, save, copy, portal "save as", temp-file cleanup | wip — opens with each capture: mode, clear/copy/save/save-as/close (busy glyphs, disabled while running), pen colours (`[screenshot] pen_colors`) and size, zoom slider and Ctrl+wheel about the pointer, middle or Ctrl drag to pan, Ctrl+Z, Escape. Strokes are composed at full resolution into a temp file for the action and removed after; the capture itself is removed on close (QML left it in the runtime dir). Draw, save (annotated PNG, full size), undo, zoom and Escape exercised in headless sway; copy and portal Save As not yet run live. (This row used to list "upload": the QML viewer had none.) |
 
 ## IPC & integration
 
 | Surface | Kind | Behaviour to preserve | Status |
 |---|---|---|---|
-| Shell IPC | Unix socket | Targets `powermenu`, `theme`, `lockscreen`, `screenshot`, `dashboard`, `notifications` with the same function names `stratum-cli` already calls | wip |
+| Shell IPC | Unix socket | Targets `powermenu`, `theme`, `lockscreen`, `screenshot`, `dashboard`, `notifications` with the same function names `stratum-cli` already calls | wip — every QML target and function is served natively; only a lock the shell cannot safely take still answers `unsupported` |
 | `stratum-cli` | CLI | Every subcommand keeps its output contract; `qs ipc` calls replaced by the shell socket | verified |
 | External keybinds | scripts | Anything calling `stratum-cli` keeps working; anything calling `qs ipc` directly is documented as changed | verified |
 

@@ -215,6 +215,9 @@ pub struct Path {
     pub paint: Paint,
     /// `None` means fill; otherwise the stroke width in logical pixels.
     pub stroke: Option<f32>,
+    /// Round joins and caps on a stroke (freehand pen lines), rather than
+    /// mitred joins and flat ends.
+    pub round: bool,
     /// Applied around the path origin when vertices are built.
     pub transform: Transform,
 }
@@ -225,12 +228,18 @@ impl Path {
             commands,
             paint,
             stroke: None,
+            round: false,
             transform: Transform::IDENTITY,
         }
     }
 
     pub fn stroked(mut self, width: f32) -> Self {
         self.stroke = Some(width);
+        self
+    }
+
+    pub fn rounded(mut self) -> Self {
+        self.round = true;
         self
     }
 
@@ -330,11 +339,30 @@ pub enum DrawCommand {
 /// with the renderer rather than in this data structure. A text run records the
 /// clip in effect when it was pushed, so text obeys the same scissor as the
 /// geometry around it.
+/// A large picture drawn beneath everything else (a screenshot's frozen
+/// frame, or the image in the screenshot viewer). Too large for the glyph
+/// atlas, so the renderer keeps it in a texture of its own and uploads it
+/// again only when `key` changes.
+#[derive(Clone, Debug)]
+pub struct Backdrop {
+    /// Identifies the pixels; a new key means new pixels.
+    pub key: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Premultiplied RGBA8.
+    pub pixels: Arc<[u8]>,
+    /// Where to draw it, in logical pixels; `None` fills the surface.
+    pub dest: Option<Rect>,
+    /// What it may cover; `None` is the whole surface.
+    pub clip: Option<Rect>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DisplayList {
     pub clear: Color,
     pub commands: Vec<DrawCommand>,
     pub texts: Vec<TextRun>,
+    pub backdrop: Option<Backdrop>,
     clip_stack: Vec<Rect>,
 }
 
@@ -344,6 +372,7 @@ impl Default for DisplayList {
             clear: Color::TRANSPARENT,
             commands: Vec::new(),
             texts: Vec::new(),
+            backdrop: None,
             clip_stack: Vec::new(),
         }
     }
@@ -355,6 +384,7 @@ impl DisplayList {
             clear,
             commands: Vec::new(),
             texts: Vec::new(),
+            backdrop: None,
             clip_stack: Vec::new(),
         }
     }
