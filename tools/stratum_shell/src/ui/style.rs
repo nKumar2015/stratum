@@ -28,6 +28,7 @@ pub struct Metrics {
     pub theme_switcher: ThemeSwitcherMetrics,
     pub hover_menu: HoverMenuMetrics,
     pub equalizer: EqualizerMetrics,
+    pub dashboard: DashboardMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -49,6 +50,7 @@ impl Default for Metrics {
             theme_switcher: ThemeSwitcherMetrics::default(),
             hover_menu: HoverMenuMetrics::default(),
             equalizer: EqualizerMetrics::default(),
+            dashboard: DashboardMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -570,6 +572,68 @@ impl Default for ThemeSwitcherMetrics {
             empty_height: 36.0,
             empty_text: 12.0,
             max_rows: 8,
+            scrim_alpha: 0.56,
+        }
+    }
+}
+
+/// The dashboard overlay.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DashboardMetrics {
+    /// Milliseconds between data refreshes while open (stratumd: 2000).
+    pub refresh_ms: u64,
+    /// Distance from the top of the screen, and the card's padding.
+    pub margin: f32,
+    pub padding: f32,
+    /// Gap between panels, and padding inside one.
+    pub gap: f32,
+    pub inner: f32,
+    pub radius: f32,
+    pub border: f32,
+    pub performance_width: f32,
+    pub calendar_width: f32,
+    pub music_width: f32,
+    pub panel_height: f32,
+    pub title: f32,
+    pub text: f32,
+    pub caption: f32,
+    pub line: f32,
+    /// Load and progress bars.
+    pub bar: f32,
+    /// Calendar cells and the gap between them.
+    pub cell: f32,
+    pub cell_gap: f32,
+    pub button: f32,
+    /// Album art.
+    pub art: f32,
+    /// Dimming behind the card (QML `#90000000`).
+    pub scrim_alpha: f32,
+}
+
+impl Default for DashboardMetrics {
+    fn default() -> Self {
+        Self {
+            refresh_ms: 2000,
+            margin: 12.0,
+            padding: 8.0,
+            gap: 8.0,
+            inner: 12.0,
+            radius: 10.0,
+            border: 1.0,
+            performance_width: 240.0,
+            calendar_width: 290.0,
+            music_width: 250.0,
+            panel_height: 340.0,
+            title: 15.0,
+            text: 13.0,
+            caption: 11.0,
+            line: 20.0,
+            bar: 6.0,
+            cell: 32.0,
+            cell_gap: 4.0,
+            button: 28.0,
+            art: 110.0,
             scrim_alpha: 0.56,
         }
     }

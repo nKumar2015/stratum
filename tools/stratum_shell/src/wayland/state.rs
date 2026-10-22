@@ -133,6 +133,11 @@ pub struct App {
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
+    /// The dashboard overlay, its per-output surfaces, and when its data was
+    /// last requested (it is polled only while open).
+    dashboard: crate::dashboard::Dashboard,
+    dashboard_surfaces: Vec<SurfaceEntry>,
+    dashboard_requested: Option<std::time::Instant>,
     /// Hover menus beside the status icons, one overlay surface per output.
     hover_menus: crate::ui::hover_menu::HoverMenus,
     hover_surfaces: Vec<SurfaceEntry>,
@@ -271,6 +276,9 @@ impl App {
             polkit_events: None,
             theme_switcher: crate::theme_switcher::ThemeSwitcher::new(),
             theme_surfaces: Vec::new(),
+            dashboard: crate::dashboard::Dashboard::new(),
+            dashboard_surfaces: Vec::new(),
+            dashboard_requested: None,
             hover_menus: crate::ui::hover_menu::HoverMenus::new(),
             hover_surfaces: Vec::new(),
             hover_geometry: None,
@@ -823,6 +831,54 @@ impl App {
         }
         if !hover_events.is_empty() {
             self.apply_hover_events(hover_events);
+        }
+
+        // Dashboard: polled only while open, like the QML watch/unwatch.
+        self.dashboard.set_metrics(&self.config.metrics.dashboard);
+        if self.dashboard.is_open() {
+            let interval = std::time::Duration::from_millis(self.config.metrics.dashboard.refresh_ms);
+            if self.dashboard_requested.is_none_or(|t| t.elapsed() >= interval) {
+                let (year, month) = self.dashboard.month();
+                self.actions.push(crate::actions::SystemAction::DashboardRefresh { year, month });
+                self.dashboard_requested = Some(std::time::Instant::now());
+            }
+            if state_changed {
+                self.mark_dashboard_dirty();
+            }
+        }
+        let dash_target = self.dashboard.target().map(str::to_string);
+        let dash_snapshot = self.state.dashboard.get();
+        for entry in &mut self.dashboard_surfaces {
+            if dash_target.as_deref() != Some(entry.output_name.as_str()) {
+                entry.unmap();
+                continue;
+            }
+            if !entry.ready() {
+                continue;
+            }
+            if entry.dirty {
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                self.dashboard.paint(&mut ctx, &mut list, rect, &dash_snapshot);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
+            if entry.mapped {
+                entry.set_keyboard_exclusive(true);
+            }
         }
 
         // Theme switcher, on the output it opened on.
@@ -1445,6 +1501,18 @@ impl App {
                 }
                 self.mark_themes_dirty();
             }
+            ("dashboard", function @ ("open" | "close" | "toggle")) => {
+                let output = self.focused_output();
+                match function {
+                    "open" if !self.dashboard.is_open() => self.dashboard.open_on(&output),
+                    "close" => self.dashboard.close(),
+                    "toggle" => self.dashboard.toggle(&output),
+                    _ => {}
+                }
+                // Fetch at once on open rather than after the first interval.
+                self.dashboard_requested = None;
+                self.mark_dashboard_dirty();
+            }
             ("lockscreen", "lock") => self.begin_lock()?,
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
@@ -1513,6 +1581,26 @@ impl App {
     /// Theme names in display order (the config's map is sorted).
     fn theme_names(&self) -> Vec<String> {
         self.config.themes.keys().cloned().collect()
+    }
+
+    fn mark_dashboard_dirty(&mut self) {
+        for entry in &mut self.dashboard_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// Carry out what the dashboard asked for.
+    fn apply_dashboard_action(&mut self, action: crate::dashboard::DashboardAction) {
+        use crate::dashboard::DashboardAction;
+        match action {
+            DashboardAction::None => return,
+            DashboardAction::Redraw => {}
+            DashboardAction::Refresh => self.dashboard_requested = None,
+            DashboardAction::Media { player, action } => {
+                self.actions.push(crate::actions::SystemAction::Media { player, action });
+            }
+        }
+        self.mark_dashboard_dirty();
     }
 
     fn mark_themes_dirty(&mut self) {
@@ -2104,6 +2192,25 @@ impl App {
                     .with_output_logical_size(output_logical_size),
             );
 
+            // Dashboard: another fullscreen overlay.
+            let dash_wl = self.compositor_state.create_surface(qh);
+            let dash_layer = self.layer_shell.create_layer_surface(
+                qh,
+                dash_wl,
+                Layer::Overlay,
+                Some("stratum-dashboard"),
+                Some(output),
+            );
+            dash_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+            dash_layer.set_exclusive_zone(-1);
+            dash_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            dash_layer.commit();
+            self.dashboard_surfaces.push(
+                SurfaceEntry::new(dash_layer, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
             // Hover menu: sized to its contents and moved beside the icon with
             // margins, like the tray menu. A size is set before the first
             // commit so it cannot come up output-sized and swallow clicks.
@@ -2577,6 +2684,7 @@ impl OutputHandler for App {
                 .chain(self.power_surfaces.iter_mut())
                 .chain(self.polkit_surfaces.iter_mut())
                 .chain(self.theme_surfaces.iter_mut())
+                .chain(self.dashboard_surfaces.iter_mut())
                 .chain(self.hover_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
@@ -2608,6 +2716,7 @@ impl LayerShellHandler for App {
         self.power_surfaces.retain(|entry| &entry.layer != layer);
         self.polkit_surfaces.retain(|entry| &entry.layer != layer);
         self.theme_surfaces.retain(|entry| &entry.layer != layer);
+        self.dashboard_surfaces.retain(|entry| &entry.layer != layer);
         self.hover_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
@@ -2630,6 +2739,7 @@ impl LayerShellHandler for App {
             .iter_mut()
             .chain(self.polkit_surfaces.iter_mut())
             .chain(self.theme_surfaces.iter_mut())
+            .chain(self.dashboard_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // Fullscreen: the compositor's configure is authoritative.
@@ -2851,6 +2961,12 @@ impl PointerHandler for App {
             if self.hover_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
                 self.hover_clicked = true;
                 self.mark_hover_dirty();
+                return;
+            }
+            if self.dashboard_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                let snapshot = self.state.dashboard.get();
+                let action = self.dashboard.on_click(point, &snapshot);
+                self.apply_dashboard_action(action);
                 return;
             }
             if self.theme_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
@@ -3157,6 +3273,12 @@ impl KeyboardHandler for App {
                 .toasts
                 .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
             self.apply_toast_action(action);
+            return;
+        }
+
+        if self.dashboard.is_open() {
+            let action = self.dashboard.key(event.keysym);
+            self.apply_dashboard_action(action);
             return;
         }
 

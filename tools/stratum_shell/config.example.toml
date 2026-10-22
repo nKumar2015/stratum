@@ -317,6 +317,29 @@ value_width = 38.0      # volume percentage
 stat_split = 0.38       # where values start in label/value rows
 max_devices = 6         # Bluetooth devices before "+N more"
 
+[metrics.dashboard]
+refresh_ms = 2000       # data refresh while open
+margin = 12.0           # from the top of the screen
+padding = 8.0
+gap = 8.0               # between panels
+inner = 12.0            # inside a panel
+radius = 10.0
+border = 1.0
+performance_width = 240.0
+calendar_width = 290.0
+music_width = 250.0
+panel_height = 340.0
+title = 15.0
+text = 13.0
+caption = 11.0
+line = 20.0
+bar = 6.0               # load and progress bars
+cell = 32.0             # calendar day
+cell_gap = 4.0
+button = 28.0
+art = 110.0             # album art
+scrim_alpha = 0.56
+
 [metrics.equalizer]     # the Equalizer page
 text = 13.0
 caption = 11.0

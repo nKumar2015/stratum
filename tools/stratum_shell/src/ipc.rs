@@ -67,6 +67,8 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         // ext-session-lock surfaces with a PAM check. A compositor without the
         // protocol is reported as unsupported at call time instead.
         ("lockscreen", "lock") => true,
+        // The dashboard overlay.
+        ("dashboard", _) => true,
         _ => false,
     }
 }
@@ -422,7 +424,7 @@ mod tests {
     #[test]
     fn unported_surfaces_are_reported_unsupported() {
         // The CLI relies on this distinction to fall back to Quickshell.
-        assert!(!is_supported("dashboard", "toggle"));
+        assert!(is_supported("dashboard", "toggle"));
         assert!(is_supported("lockscreen", "lock"));
         assert!(!is_supported("screenshot", "start"));
         assert!(is_supported("theme", "open"));

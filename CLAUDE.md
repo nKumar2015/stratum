@@ -57,9 +57,14 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: screenshots and the dashboard. (The QML app title never had a
-marquee; `MarqueeLabel` scrolls long names in the dashboard's music panel and
-the device/network detail panels, so it belongs with those.)
+Not implemented: screenshots, and `MarqueeLabel` (the QML scrolling label used
+by the dashboard's music panel and the device/network detail panels; the app
+title never had one).
+
+The **dashboard** (`dashboard.rs`) is a fullscreen overlay polled every
+`dashboard.refresh_ms` only while open (`SystemAction::DashboardRefresh`, into
+`SystemState::dashboard`); its calendar grid is computed locally. Media
+controls run `playerctl` on the action worker.
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's

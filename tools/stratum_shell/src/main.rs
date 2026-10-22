@@ -15,6 +15,7 @@ mod glyph_probe;
 #[allow(dead_code)]
 mod actions;
 mod config;
+mod dashboard;
 mod desktop;
 mod hyprland;
 mod ipc;
