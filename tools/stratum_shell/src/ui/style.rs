@@ -73,6 +73,8 @@ pub struct Typography {
     pub icon: f32,
     /// The battery glyph, which is deliberately larger than the others.
     pub battery: f32,
+    /// The percentage beneath the battery glyph.
+    pub battery_label: f32,
     /// Clock digits in a vertical rail.
     pub clock: f32,
     /// Clock text in a horizontal bar.
@@ -104,6 +106,7 @@ impl Default for Typography {
         Self {
             icon: 20.0,
             battery: 24.0,
+            battery_label: 11.0,
             clock: 18.0,
             clock_bar: 13.0,
             workspace: 15.0,
@@ -138,6 +141,13 @@ pub struct BarMetrics {
     /// App icon before the window title, and the gap between them.
     pub title_icon: f32,
     pub title_icon_gap: f32,
+    /// Line height of stacked bar text (clock rows, battery label), as a
+    /// multiple of its font size.
+    pub label_line: f32,
+    /// Room for the battery percentage beside its glyph in a horizontal bar.
+    pub battery_label_width: f32,
+    /// Width of the clock in a horizontal bar.
+    pub clock_width: f32,
 }
 
 impl Default for BarMetrics {
@@ -150,6 +160,9 @@ impl Default for BarMetrics {
             corner_size: 20.0,
             title_icon: 16.0,
             title_icon_gap: 8.0,
+            label_line: 1.2,
+            battery_label_width: 34.0,
+            clock_width: 84.0,
         }
     }
 }
@@ -248,6 +261,11 @@ pub struct OsdMetrics {
     pub radius: f32,
     /// Height of the value track.
     pub track_height: f32,
+    /// Height of the icon, title and value row, and the gap below it.
+    pub row_height: f32,
+    pub gap: f32,
+    /// Space between the icon and the title.
+    pub icon_gap: f32,
     /// Icon size.
     pub icon: f32,
     /// Title size.
@@ -260,6 +278,8 @@ pub struct OsdMetrics {
     pub fade_in_seconds: f32,
     /// Fade-out duration in seconds.
     pub fade_out_seconds: f32,
+    /// How long the fill takes to slide to a new value.
+    pub fill_seconds: f32,
 }
 
 impl Default for OsdMetrics {
@@ -271,12 +291,16 @@ impl Default for OsdMetrics {
             padding: 14.0,
             radius: 12.0,
             track_height: 9.0,
+            row_height: 30.0,
+            gap: 10.0,
+            icon_gap: 12.0,
             icon: 22.0,
             title: 13.0,
             value: 12.0,
             hold_seconds: 1.2,
             fade_in_seconds: 0.13,
             fade_out_seconds: 0.22,
+            fill_seconds: 0.12,
         }
     }
 }

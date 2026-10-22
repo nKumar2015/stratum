@@ -48,6 +48,10 @@ pub struct SurfaceEntry {
     /// A commit has been made that the compositor will answer with a
     /// configure. Cleared when it arrives.
     pub awaiting_configure: bool,
+    /// A bar's rail within its surface, as `(x, width)`, when the surface is
+    /// wider than the rail to hold the inverted corners. `None` is the whole
+    /// surface.
+    pub rail: Option<(f32, f32)>,
 }
 
 impl SurfaceEntry {
@@ -70,7 +74,15 @@ impl SurfaceEntry {
             keyboard_exclusive: false,
             // Every surface is created with an initial commit.
             awaiting_configure: true,
+            rail: None,
         }
+    }
+
+    /// Paint the bar into `(x, width)` of this surface and take input only
+    /// there, leaving the rest for the inverted corners.
+    pub fn with_rail(mut self, rail: Option<(f32, f32)>) -> Self {
+        self.rail = rail;
+        self
     }
 
     /// Whether a buffer may be attached now. When not, makes sure a configure
@@ -267,12 +279,31 @@ impl SurfaceEntry {
         &mut self,
         gpu: &Gpu,
         display: NonNull<std::ffi::c_void>,
+        compositor: &smithay_client_toolkit::compositor::CompositorState,
         ctx: &mut crate::ui::PaintCtx<'_>,
         sidebar: &mut crate::ui::sidebar::Sidebar,
         input: &crate::ui::InputState,
     ) -> Result<(), String> {
         if !self.configured {
             return Ok(());
+        }
+
+        let (rail_x, rail_width) = self
+            .rail
+            .unwrap_or((0.0, self.logical_width as f32));
+        let surface_rect = crate::render::display_list::Rect {
+            x: rail_x,
+            y: 0.0,
+            width: rail_width,
+            height: self.logical_height as f32,
+            radius: 0.0,
+            color: ctx.theme.bg_main,
+        };
+        // The corners overlap the windows beside the rail, as QML's did, so
+        // clicks there must reach those windows. Set before this frame's
+        // commit so it applies now.
+        if self.rail.is_some() {
+            self.set_input_region(compositor, Some(surface_rect));
         }
 
         if self.renderer.is_none() {
@@ -286,15 +317,10 @@ impl SurfaceEntry {
             )?);
         }
 
-        let mut list = DisplayList::new(ctx.theme.bg_main.with_alpha(0.0));
-        let surface_rect = crate::render::display_list::Rect {
-            x: 0.0,
-            y: 0.0,
-            width: self.logical_width as f32,
-            height: self.logical_height as f32,
-            radius: 0.0,
-            color: ctx.theme.bg_main,
-        };
+        // Fully transparent, not `bg_main` with zero alpha: the swapchain is
+        // premultiplied, so colour under zero alpha is added to whatever is
+        // below, and the strip beside the rail came out solid `bg_main`.
+        let mut list = DisplayList::new(crate::render::display_list::Color::TRANSPARENT);
         sidebar.paint(ctx, &mut list, surface_rect, input);
 
         let renderer = self

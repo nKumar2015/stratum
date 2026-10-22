@@ -109,6 +109,7 @@ kind = "clock"
 [metrics.typography]
 icon = 20.0             # status icons in the bar
 battery = 24.0          # the battery glyph is deliberately larger
+battery_label = 11.0    # the percentage beneath it
 clock = 18.0            # clock digits in a vertical rail
 clock_bar = 13.0        # clock text in a horizontal bar
 workspace = 15.0        # workspace numbers
@@ -131,6 +132,9 @@ group_width = 30.0      # width of a framed group in a vertical rail
 corner_size = 20.0      # corner scoop where a rail meets the screen edge
 title_icon = 16.0       # app icon before the window title
 title_icon_gap = 8.0
+label_line = 1.2        # line height of stacked bar text, times its size
+battery_label_width = 34.0  # battery percentage beside the glyph (horizontal bar)
+clock_width = 84.0      # clock width in a horizontal bar
 
 [metrics.workspaces]
 visible = 5             # rows shown at once
@@ -156,12 +160,16 @@ margin_bottom = 72      # distance from the bottom screen edge
 padding = 14.0
 radius = 12.0
 track_height = 9.0
+row_height = 30.0       # icon, title and value row
+gap = 10.0              # between that row and the track
+icon_gap = 12.0         # between the icon and the title
 icon = 22.0
 title = 13.0
 value = 12.0
 hold_seconds = 1.2      # fully visible time before fading
 fade_in_seconds = 0.13
 fade_out_seconds = 0.22
+fill_seconds = 0.12     # the fill sliding to a new value
 
 [metrics.toasts]
 surface_width = 344

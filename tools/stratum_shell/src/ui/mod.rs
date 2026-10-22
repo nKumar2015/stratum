@@ -128,6 +128,8 @@ pub enum Action {
     /// clicked and updates its local state immediately, so the bar reflects the
     /// change before the compositor's event arrives.
     FocusWorkspace(i32),
+    /// Open the dashboard on the named output (the clock's tap, as in QML).
+    OpenDashboard(String),
 }
 
 /// Which mouse button produced a click.
@@ -172,6 +174,12 @@ pub trait Widget {
 
     /// Handle a click at `point`, optionally returning an action for the shell.
     fn on_click(&mut self, _ctx: &ClickCtx<'_>) -> Option<Action> {
+        None
+    }
+
+    /// Handle wheel input at `point` on `output`. `delta` is in wheel units:
+    /// 120 per notch, positive scrolling down.
+    fn on_scroll(&mut self, _output: &str, _point: Point, _delta: f32) -> Option<Action> {
         None
     }
 
@@ -311,30 +319,33 @@ impl Column {
 
 /// Draw the inverted corner scoop that joins a vertical rail to a screen edge.
 ///
-/// The shape fills the region between the rail's edge and the screen edge,
-/// curving back to the rail so the join looks continuous. `flip` mirrors it
-/// vertically for the bottom corner.
+/// The shape occupies the `size` square at `(x, y)` and fills the region
+/// between the rail's edge and the screen edge, curving back to the rail so
+/// the join looks continuous; the path is QML's `InvertedCorner`. `flip`
+/// mirrors it vertically for the bottom corner, `mirror` horizontally for a
+/// rail on the right, whose edge is then the square's right side.
 pub fn paint_inverted_corner(
     list: &mut DisplayList,
     x: f32,
     y: f32,
     size: f32,
     flip: bool,
+    mirror: bool,
     color: Color,
 ) {
-    let (start_y, end_y, control_y) = if flip {
-        (y, y + size, y + size)
-    } else {
-        (y + size, y, y)
-    };
+    // In the corner's own frame: `0` along x is the rail's edge, `0` or
+    // `size` along y the screen edge.
+    let (edge, outward) = if mirror { (x + size, -1.0) } else { (x, 1.0) };
+    let at = |along: f32, down: f32| Point::new(edge + outward * along, y + down);
+    let (rail_end, screen) = if flip { (0.0, size) } else { (size, 0.0) };
 
     list.push_path(Path::new(
         vec![
-            PathCommand::MoveTo(Point::new(x, start_y)),
-            PathCommand::LineTo(Point::new(x, if flip { y + size } else { y })),
-            PathCommand::LineTo(Point::new(x + size, if flip { y + size } else { y })),
-            // Pull the curve toward the corner to create the scoop.
-            PathCommand::QuadTo(Point::new(x, control_y), Point::new(x, end_y)),
+            PathCommand::MoveTo(at(0.0, rail_end)),
+            PathCommand::LineTo(at(0.0, screen)),
+            PathCommand::LineTo(at(size, screen)),
+            // Back to the start, pulled toward the corner to make the scoop.
+            PathCommand::QuadTo(at(0.0, screen), at(0.0, rail_end)),
             PathCommand::Close,
         ],
         Paint::Solid(color),
@@ -581,7 +592,7 @@ mod tests {
     #[test]
     fn inverted_corner_produces_a_closed_path() {
         let mut list = DisplayList::default();
-        paint_inverted_corner(&mut list, 0.0, 0.0, 20.0, false, Color::WHITE);
+        paint_inverted_corner(&mut list, 0.0, 0.0, 20.0, false, false, Color::WHITE);
         assert_eq!(list.commands.len(), 1);
         match &list.commands[0] {
             crate::render::display_list::DrawCommand::Path(path) => {
@@ -589,6 +600,44 @@ mod tests {
             }
             _ => panic!("expected a path"),
         }
+    }
+
+    fn corner_commands(flip: bool, mirror: bool) -> Vec<PathCommand> {
+        let mut list = DisplayList::default();
+        paint_inverted_corner(&mut list, 40.0, 0.0, 20.0, flip, mirror, Color::WHITE);
+        match &list.commands[0] {
+            crate::render::display_list::DrawCommand::Path(path) => path.commands.clone(),
+            _ => panic!("expected a path"),
+        }
+    }
+
+    /// The curve used to end at the corner point itself, which made it lie
+    /// along the screen edge and enclose nothing: the corners never drew.
+    #[test]
+    fn inverted_corner_curves_back_to_its_start() {
+        for (flip, mirror) in [(false, false), (true, false), (false, true), (true, true)] {
+            let commands = corner_commands(flip, mirror);
+            let PathCommand::MoveTo(start) = commands[0] else {
+                panic!("expected MoveTo");
+            };
+            let PathCommand::QuadTo(control, end) = commands[3] else {
+                panic!("expected QuadTo");
+            };
+            assert_eq!(end, start, "flip {flip} mirror {mirror}");
+            assert_ne!(control, end);
+        }
+    }
+
+    #[test]
+    fn mirrored_corner_hugs_the_right_edge_of_its_square() {
+        let PathCommand::MoveTo(start) = corner_commands(false, true)[0] else {
+            panic!("expected MoveTo");
+        };
+        assert_eq!(start, Point::new(60.0, 20.0));
+        let PathCommand::MoveTo(start) = corner_commands(true, false)[0] else {
+            panic!("expected MoveTo");
+        };
+        assert_eq!(start, Point::new(40.0, 0.0));
     }
 
     #[test]

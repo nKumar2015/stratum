@@ -68,18 +68,31 @@ impl Sidebar {
         }
 
         if self.axis == Axis::Vertical && self.inverted_corners {
+            // The surface is wider than the rail by `corner` on its inner
+            // side; the corners go there.
             let corner = ctx.metrics.bar.corner_size;
-            let edge_x = match self.position {
-                SidebarPosition::Left => surface.x + surface.width,
-                _ => surface.x - corner,
+            let mirror = self.position != SidebarPosition::Left;
+            let edge_x = if mirror {
+                surface.x - corner
+            } else {
+                surface.x + surface.width
             };
-            ui::paint_inverted_corner(list, edge_x, surface.y, corner, false, ctx.theme.bg_main);
+            ui::paint_inverted_corner(
+                list,
+                edge_x,
+                surface.y,
+                corner,
+                false,
+                mirror,
+                ctx.theme.bg_main,
+            );
             ui::paint_inverted_corner(
                 list,
                 edge_x,
                 surface.y + surface.height - corner,
                 corner,
                 true,
+                mirror,
                 ctx.theme.bg_main,
             );
         }
@@ -96,6 +109,13 @@ impl Sidebar {
         input: &InputState,
     ) -> Option<Action> {
         self.on_click_with(point, output_name, input, ui::MouseButton::Left)
+    }
+
+    /// Route wheel input to the widget under `point` on `output`.
+    pub fn on_scroll(&mut self, point: Point, output_name: &str, delta: f32) -> Option<Action> {
+        self.widgets
+            .iter_mut()
+            .find_map(|widget| widget.on_scroll(output_name, point, delta))
     }
 
     /// The hover menu the widget under `point` on `output` opens, if any.

@@ -1,21 +1,26 @@
 //! The clock.
 //!
 //! A horizontal bar shows one line; a vertical rail stacks hour, minute, and
-//! meridiem, matching the QML clock. The widget also schedules its own repaint:
-//! a clock that only redraws when other state changes would sit frozen for
-//! minutes at a time.
+//! meridiem, matching the QML clock. A tap opens the dashboard, as QML's did.
+//! The widget also schedules its own repaint: a clock that only redraws when
+//! other state changes would sit frozen for minutes at a time.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use chrono::Timelike;
 
 use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::text::TextStyle;
-use crate::ui::{self, InputState, PaintCtx, Widget};
+use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 pub struct Clock {
-    /// Seconds accumulated since the last minute boundary.
+    /// Seconds accumulated since the last check of the minute.
     elapsed: f32,
     /// Minute value from the last paint, so a change can be detected.
     last_minute: u32,
+    /// Rect from the last paint on each output; see `Icon` for why per output.
+    rects: HashMap<String, Rect>,
 }
 
 impl Clock {
@@ -23,6 +28,7 @@ impl Clock {
         Self {
             elapsed: 0.0,
             last_minute: u32::MAX,
+            rects: HashMap::new(),
         }
     }
 }
@@ -36,11 +42,11 @@ impl Default for Clock {
 impl Widget for Clock {
     fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
         // Three stacked lines of clock text.
-        Some(metrics.typography.clock * 3.6)
+        Some(metrics.typography.clock * metrics.bar.label_line * 3.0)
     }
 
-    fn width(&self, _height: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
-        Some(84.0)
+    fn width(&self, _height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(metrics.bar.clock_width)
     }
 
     fn paint(
@@ -50,8 +56,9 @@ impl Widget for Clock {
         rect: Rect,
         _input: &InputState,
     ) {
+        self.rects.insert(ctx.output_name.to_string(), rect);
         let now = chrono::Local::now();
-        self.last_minute = now.format("%M").to_string().parse().unwrap_or(0);
+        self.last_minute = now.minute();
 
         if !ctx.is_vertical() {
             let text = now.format("%I:%M %p").to_string();
@@ -77,12 +84,14 @@ impl Widget for Clock {
         }
 
         let line = rect.height / 3.0;
-        let lines: [(String, Color); 3] = [
-            (now.format("%I").to_string(), ctx.theme.primary),
-            (now.format("%M").to_string(), ctx.theme.secondary),
-            (now.format("%p").to_string(), ctx.theme.tertiary),
+        let bold = ctx.metrics.typography.weight_bold;
+        let regular = ctx.metrics.typography.weight_regular;
+        let lines: [(String, Color, u16); 3] = [
+            (now.format("%I").to_string(), ctx.theme.primary, bold),
+            (now.format("%M").to_string(), ctx.theme.secondary, bold),
+            (now.format("%p").to_string(), ctx.theme.tertiary, regular),
         ];
-        for (index, (value, color)) in lines.into_iter().enumerate() {
+        for (index, (value, color, weight)) in lines.into_iter().enumerate() {
             let row = Rect {
                 x: rect.x,
                 y: rect.y + line * index as f32,
@@ -91,23 +100,33 @@ impl Widget for Clock {
                 radius: 0.0,
                 color: Color::TRANSPARENT,
             };
-            ui::paint_text_centered(ctx, list, &value, row, ctx.metrics.typography.clock, color);
+            ui::paint_text_centered_weighted(
+                ctx,
+                list,
+                &value,
+                row,
+                ctx.metrics.typography.clock,
+                weight,
+                color,
+            );
         }
     }
 
+    fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {
+        self.rects
+            .get(ctx.output_name)
+            .filter(|r| r.contains(ctx.point))
+            .map(|_| Action::OpenDashboard(ctx.output_name.to_string()))
+    }
+
     fn tick(&mut self, dt: f32) -> bool {
-        // Ask for a frame exactly when the displayed minute could have changed.
+        // Ask for a frame once the displayed minute has changed. The loop wakes
+        // at least once a second when idle, so the clock turns over within a
+        // second of the minute boundary.
         self.elapsed += dt;
         if self.elapsed >= 1.0 {
             self.elapsed = 0.0;
-            let minute: u32 = chrono::Local::now()
-                .format("%M")
-                .to_string()
-                .parse()
-                .unwrap_or(0);
-            if minute != self.last_minute {
-                return true;
-            }
+            return chrono::Local::now().minute() != self.last_minute;
         }
         false
     }

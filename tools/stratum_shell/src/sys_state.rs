@@ -94,8 +94,10 @@ pub struct SystemState {
     /// The open tray context menu, if any. The shell fetches it on right-click
     /// and publishes it here so the overlay can paint it.
     pub tray_menu: Cell<Option<crate::tray::TrayMenu>>,
-    /// Backlight percentage, polled because there is no push source.
-    pub brightness: Cell<i64>,
+    /// Backlight percentage, polled because there is no push source. `None`
+    /// until the first reading, so the OSD never takes a placeholder as its
+    /// baseline.
+    pub brightness: Cell<Option<i64>>,
     /// Live notifications, newest last, published by the notification server.
     pub notifications: Cell<Vec<crate::notifications::Notification>>,
     /// Do-not-disturb: notifications still collect, but no toasts appear.
@@ -128,7 +130,7 @@ impl SystemState {
             hypr: Cell::new(crate::hyprland::HyprState::default()),
             tray: Cell::new(Vec::new()),
             tray_menu: Cell::new(None),
-            brightness: Cell::new(0),
+            brightness: Cell::new(None),
             notifications: Cell::new(Vec::new()),
             dnd: Cell::new(false),
             action_result: Cell::new(ActionResult::default()),

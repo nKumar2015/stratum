@@ -359,6 +359,10 @@ format, one draw call split into scissored segments. Notable invariants:
   different vertices. Keying on geometry alone made the power menu's selection
   outline stay on whichever tile was highlighted first.
 - `textureSampleLevel`, not `textureSample`, because of divergent control flow.
+- Clear to `Color::TRANSPARENT`, never a theme colour with zero alpha. The
+  swapchain is premultiplied, so colour under zero alpha is *added* to what is
+  below: the strip beside the rail that holds the inverted corners came out
+  solid `bg_main`.
 
 `text.rs` shapes with cosmic-text and rasterizes with swash. Shaping results are
 cached by `(text, family, size, weight)`. Widths come from the shaper's

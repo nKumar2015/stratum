@@ -31,9 +31,20 @@ struct OutputView {
     /// catches up.
     pending: Option<i32>,
     cells: Vec<(Rect, i32)>,
+    /// The widget's rect, the workspace shown as active, and its page at the
+    /// last paint, for wheel input.
+    rect: Option<Rect>,
+    active: i32,
+    page: Vec<i32>,
+    /// Wheel travel not yet turned into a switch. Touchpads send many small
+    /// deltas; one switch per notch's worth keeps them from racing ahead.
+    wheel: f32,
     /// False until the first paint has seeded `scroll`.
     initialised: bool,
 }
+
+/// Wheel travel per workspace step: one notch of a mouse wheel.
+const WHEEL_NOTCH: f32 = 120.0;
 
 pub struct Workspaces {
     /// Per-output scroll and hit-test state, keyed by output name.
@@ -81,6 +92,18 @@ impl Workspaces {
             _ => real,
         }
     }
+
+    /// The workspace one wheel step from `active` within the page `ids`: QML's
+    /// wheel stopped at the first and last ids rather than wrapping or paging.
+    fn wheel_target(ids: &[i32], active: i32, down: bool) -> Option<i32> {
+        let index = ids.iter().position(|id| *id == active)?;
+        let next = if down {
+            ids.get(index + 1)
+        } else {
+            index.checked_sub(1).and_then(|i| ids.get(i))
+        };
+        next.copied()
+    }
 }
 
 impl Default for Workspaces {
@@ -125,6 +148,8 @@ impl Widget for Workspaces {
         }
 
         let active = Self::active_for(view, &hypr, &output);
+        view.rect = Some(rect);
+        view.active = active;
         // The compositor caught up: drop the optimistic value.
         if let Some(pending) = view.pending {
             if hypr.active.get(&output).copied() == Some(pending) {
@@ -140,6 +165,7 @@ impl Widget for Workspaces {
         }
 
         let (ids, _) = Self::page(active, ws);
+        view.page.clone_from(&ids);
         let vertical = matches!(ctx.axis, Axis::Vertical);
         let offset = view.scroll.value();
 
@@ -194,16 +220,24 @@ impl Widget for Workspaces {
             } else {
                 ctx.theme.text_muted
             };
-            ui::paint_text_centered(ctx, list, &id.to_string(), row, 15.0, color);
+            ui::paint_text_centered_weighted(
+                ctx,
+                list,
+                &id.to_string(),
+                row,
+                ctx.metrics.typography.workspace,
+                ctx.metrics.typography.weight_bold,
+                color,
+            );
 
             // Active marker: a short bar under the number, as in QML.
             if is_active {
                 list.push_rect(Rect {
-                    x: row.x + (row.width - 14.0) * 0.5,
-                    y: row.y + row.height - 3.0,
-                    width: 14.0,
-                    height: 2.0,
-                    radius: 1.0,
+                    x: row.x + (row.width - ws.marker_width) * 0.5,
+                    y: row.y + row.height - ws.marker_height,
+                    width: ws.marker_width,
+                    height: ws.marker_height,
+                    radius: ws.marker_height * 0.5,
                     color: ctx.theme.primary,
                 });
             }
@@ -224,6 +258,34 @@ impl Widget for Workspaces {
         // Show the request immediately; the compositor event will confirm it a
         // few milliseconds later and `paint` will reconcile.
         view.pending = Some(id);
+        Some(Action::FocusWorkspace(id))
+    }
+
+    fn on_scroll(
+        &mut self,
+        output: &str,
+        point: crate::render::display_list::Point,
+        delta: f32,
+    ) -> Option<Action> {
+        let view = self.views.get_mut(output)?;
+        if !view.rect.is_some_and(|r| r.contains(point)) {
+            return None;
+        }
+        // A reversal starts afresh rather than first undoing the old travel.
+        if view.wheel.signum() != delta.signum() {
+            view.wheel = 0.0;
+        }
+        view.wheel += delta;
+        if view.wheel.abs() < WHEEL_NOTCH {
+            return None;
+        }
+        let down = view.wheel > 0.0;
+        view.wheel = 0.0;
+        // `pending` is folded into `active` at paint, so repeated notches
+        // before the compositor answers keep stepping.
+        let id = Self::wheel_target(&view.page, view.active, down)?;
+        view.pending = Some(id);
+        view.active = id;
         Some(Action::FocusWorkspace(id))
     }
 
@@ -333,6 +395,51 @@ mod tests {
         // Once it agrees, painting picks up the real value.
         hypr.active.insert("eDP-2".into(), 7);
         assert_eq!(Workspaces::active_for(&view, &hypr, "eDP-2"), 7);
+    }
+
+    #[test]
+    fn wheel_steps_within_the_page_and_stops_at_its_ends() {
+        let ids: Vec<i32> = (11..=20).collect();
+        assert_eq!(Workspaces::wheel_target(&ids, 14, true), Some(15));
+        assert_eq!(Workspaces::wheel_target(&ids, 14, false), Some(13));
+        assert_eq!(Workspaces::wheel_target(&ids, 20, true), None);
+        assert_eq!(Workspaces::wheel_target(&ids, 11, false), None);
+        // A named workspace is not on the page; the wheel does nothing.
+        assert_eq!(Workspaces::wheel_target(&ids, -98, true), None);
+    }
+
+    #[test]
+    fn wheel_switches_once_per_notch() {
+        let mut widget = Workspaces::new();
+        let rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 40.0,
+            height: 115.0,
+            radius: 0.0,
+            color: Color::TRANSPARENT,
+        };
+        widget.views.insert(
+            "eDP-2".into(),
+            OutputView {
+                rect: Some(rect),
+                active: 3,
+                page: (1..=10).collect(),
+                ..Default::default()
+            },
+        );
+        let at = crate::render::display_list::Point::new(10.0, 10.0);
+
+        // Touchpad-sized deltas accumulate to one notch before switching.
+        assert!(widget.on_scroll("eDP-2", at, 60.0).is_none());
+        assert!(matches!(widget.on_scroll("eDP-2", at, 60.0), Some(Action::FocusWorkspace(4))));
+        // Another notch steps again before the compositor has answered.
+        assert!(matches!(widget.on_scroll("eDP-2", at, 120.0), Some(Action::FocusWorkspace(5))));
+        assert!(matches!(widget.on_scroll("eDP-2", at, -120.0), Some(Action::FocusWorkspace(4))));
+        // Outside the strip, or on another output, nothing happens.
+        let outside = crate::render::display_list::Point::new(10.0, 200.0);
+        assert!(widget.on_scroll("eDP-2", outside, 120.0).is_none());
+        assert!(widget.on_scroll("HDMI-A-1", at, 120.0).is_none());
     }
 
     #[test]

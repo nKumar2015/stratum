@@ -201,9 +201,13 @@ pub fn status() -> Value {
     let screen_on_time = read_screen_on_time();
     let profile = read_active_profile();
     let charging_info = read_charging_info(&device, &state);
+    // QML's `UPower.displayDevice.ready`: without a battery the bar shows "--"
+    // rather than an empty one.
+    let present = !device.is_empty() || !power_supply_bat_dirs().is_empty();
 
     json!({
         "battery": {
+            "present": present,
             "pct": pct,
             "state": state,
             "projected_text": projected_text,

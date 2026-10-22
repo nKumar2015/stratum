@@ -454,7 +454,9 @@ impl App {
         self.osd.set_metrics(&self.config.metrics.osd);
         self.toasts.set_metrics(&self.config.metrics.toasts);
         self.osd.observe_audio(&self.state);
-        self.osd.observe_brightness(self.state.brightness.get());
+        if let Some(percent) = self.state.brightness.get() {
+            self.osd.observe_brightness(percent);
+        }
 
         // Toasts follow the notification list and expire on their own timers.
         // `take_dirty` above already consumed the aggregate flag, so sync on any
@@ -1164,6 +1166,7 @@ impl App {
             entry.render_with(
                 &self.gpu,
                 self.display,
+                &self.compositor_state,
                 &mut ctx,
                 &mut self.sidebar,
                 &input,
@@ -2300,22 +2303,26 @@ impl App {
         // Brightness has no push source, so it is polled. `brightnessctl` is
         // two short-lived processes per reading; at 350 ms that was the largest
         // remaining idle cost (and it spawned a process just to discover there
-        // is no backlight). Read the sysfs node directly when possible and fall
-        // back to one polling cadence that is cheap enough to keep.
+        // is no backlight). Read the sysfs node directly when possible, at
+        // QML's 350 ms so brightness keys show the OSD promptly; the
+        // `brightnessctl` fallback keeps a slower cadence.
         let brightness_state = Arc::clone(&self.state);
         std::thread::Builder::new()
             .name("stratum-brightness".into())
             .spawn(move || {
                 let mut last: Option<i64> = None;
                 loop {
-                    if let Some(percent) = read_brightness_percent() {
+                    let sysfs = read_brightness_sysfs();
+                    let reading = sysfs.or_else(read_brightness_tool);
+                    if let Some(percent) = reading {
                         if last != Some(percent) {
                             last = Some(percent);
-                            brightness_state.brightness.set(percent);
+                            brightness_state.brightness.set(Some(percent));
                             brightness_state.notify();
                         }
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    let interval = if sysfs.is_some() { 350 } else { 1000 };
+                    std::thread::sleep(std::time::Duration::from_millis(interval));
                 }
             })
             .ok();
@@ -2365,7 +2372,9 @@ impl App {
             Ok(config) => {
                 info!("reloaded configuration from {}", path.display());
                 let width_changed = config.sidebar.width != self.config.sidebar.width
-                    || config.sidebar.position != self.config.sidebar.position;
+                    || config.sidebar.position != self.config.sidebar.position
+                    || config.sidebar.inverted_corners != self.config.sidebar.inverted_corners
+                    || config.metrics.bar.corner_size != self.config.metrics.bar.corner_size;
                 self.config = Arc::new(config);
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
                 self.config_mtime = mtime;
@@ -2451,16 +2460,24 @@ impl App {
                 Some(output),
             );
 
-            // Placement and width come from the configuration.
+            // Placement and width come from the configuration. A vertical rail
+            // with inverted corners is wider than its exclusive zone by the
+            // corner size, as QML's window was: the corners sit over the edge
+            // of the windows beside it.
             let config = &self.config.sidebar;
+            let corner = if config.is_vertical() && config.inverted_corners {
+                self.config.metrics.bar.corner_size.max(0.0).ceil() as u32
+            } else {
+                0
+            };
             let (anchor, size) = match config.position {
                 SidebarPosition::Left => (
                     Anchor::TOP | Anchor::LEFT | Anchor::BOTTOM,
-                    (config.width, 0),
+                    (config.width + corner, 0),
                 ),
                 SidebarPosition::Right => (
                     Anchor::TOP | Anchor::RIGHT | Anchor::BOTTOM,
-                    (config.width, 0),
+                    (config.width + corner, 0),
                 ),
                 SidebarPosition::Top => (
                     Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
@@ -2481,9 +2498,14 @@ impl App {
             layer.set_size(size.0, size.1);
             layer.commit();
 
+            let rail = (corner > 0).then(|| match config.position {
+                SidebarPosition::Right => (corner as f32, config.width as f32),
+                _ => (0.0, config.width as f32),
+            });
             self.surfaces.push(
                 SurfaceEntry::new(layer, scale, output_name.clone()).with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
+                    .with_output_logical_size(output_logical_size)
+                    .with_rail(rail),
             );
 
             // OSD: an overlay-layer surface anchored bottom-centre with no
@@ -2702,21 +2724,16 @@ impl App {
 /// Using xdg-shell rather than a layer surface means the compositor owns the
 /// window: it gets normal focus, workspace placement, alt-tab, and stacking,
 /// so it feels like part of the shell rather than an overlay.
-/// Read the backlight percentage.
+/// Read the backlight percentage with `brightnessctl`, for when the sysfs
+/// nodes are unavailable.
 ///
-/// Prefers the sysfs `brightness`/`max_brightness` nodes, which cost a single
-/// file read. `brightnessctl` is only used when those are unavailable, and the
-/// result is cached for the process lifetime because a machine without a
-/// backlight will never grow one and each probe spawns two processes.
-///
-/// Returns `None` when no backlight backend is available, which is normal on
+/// Whether the tool exists is cached for the process lifetime, because a
+/// machine without a backlight will never grow one and each probe spawns two
+/// processes. Returns `None` when there is no backlight, which is normal on
 /// desktops; the OSD then simply never shows brightness.
-fn read_brightness_percent() -> Option<i64> {
+fn read_brightness_tool() -> Option<i64> {
     static TOOL_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-    if let Some(percent) = read_brightness_sysfs() {
-        return Some(percent);
-    }
     if !*TOOL_AVAILABLE.get_or_init(brightnessctl_available) {
         return None;
     }
@@ -2990,6 +3007,13 @@ impl App {
                 // the Hyprland event confirms it a moment later.
                 if !crate::hyprland::focus_workspace(id) {
                     tracing::warn!("failed to focus workspace {id}");
+                }
+            }
+            Action::OpenDashboard(output) => {
+                if !self.dashboard.is_open() {
+                    self.dashboard.open_on(&output);
+                    self.dashboard_requested = None;
+                    self.mark_dashboard_dirty();
                 }
             }
         }
@@ -3561,6 +3585,18 @@ impl PointerHandler for App {
                     settings.dirty = true;
                 }
                 changed = true;
+            } else if let Some(output_name) = self
+                .surfaces
+                .iter()
+                .find(|entry| entry.layer.wl_surface() == &surface)
+                .map(|entry| entry.output_name.clone())
+            {
+                // The bar: the workspace strip switches workspace.
+                let point = crate::render::display_list::Point::new(x, y);
+                if let Some(action) = self.sidebar.on_scroll(point, &output_name, delta) {
+                    self.apply_action(action);
+                    changed = true;
+                }
             }
         }
 

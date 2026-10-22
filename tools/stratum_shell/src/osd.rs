@@ -47,13 +47,13 @@ impl Channel {
             }
             Channel::Volume => {
                 if muted || value == 0 {
-                    "\u{f075e}"
+                    "\u{f0581}"
                 } else if value < 34 {
-                    "\u{f057e}"
-                } else if value < 67 {
                     "\u{f057f}"
-                } else {
+                } else if value < 67 {
                     "\u{f0580}"
+                } else {
+                    "\u{f057e}"
                 }
             }
         }
@@ -67,6 +67,8 @@ pub struct Osd {
     muted: bool,
     /// 0 fully hidden, 1 fully shown.
     opacity: Tween,
+    /// The track's filled fraction, which slides to each new value.
+    fill: Tween,
     /// Seconds remaining before fading out.
     hold_remaining: f32,
     /// Sizes and timings, refreshed from the config on each tick.
@@ -85,6 +87,7 @@ impl Osd {
             value: 0,
             muted: false,
             opacity: Tween::new(0.0),
+            fill: Tween::new(0.0),
             metrics: crate::ui::style::OsdMetrics::default(),
             hold_remaining: 0.0,
             last_volume: None,
@@ -106,6 +109,15 @@ impl Osd {
 
     /// Show the OSD for a channel, restarting the hold timer.
     fn show(&mut self, channel: Channel, value: i64, muted: bool) {
+        let ratio = (value as f32 / channel.max()).clamp(0.0, 1.0);
+        // A hidden OSD, or one switching channel, starts at the new value; the
+        // fill only slides between two readings of the same channel.
+        if !self.visible() || self.channel != channel {
+            self.fill.snap(ratio);
+        } else {
+            self.fill
+                .to(ratio, self.metrics.fill_seconds, ui::animation::Easing::EaseOut);
+        }
         self.channel = channel;
         self.value = value.clamp(0, channel.max() as i64);
         self.muted = muted;
@@ -151,6 +163,7 @@ impl Osd {
     /// Advance timers. Returns true while the overlay needs redrawing.
     pub fn tick(&mut self, dt: f32) -> bool {
         let mut animating = self.opacity.tick(dt);
+        animating |= self.fill.tick(dt);
 
         if self.visible {
             self.hold_remaining -= dt;
@@ -173,7 +186,7 @@ impl Osd {
 
         // Panel geometry, centred horizontally.
         let m = &self.metrics;
-        let width = (m.width as f32).min(surface.width - 16.0);
+        let width = (m.width as f32).min(surface.width);
         let height = (m.height as f32).min(surface.height);
         let panel = Rect {
             x: surface.x + (surface.width - width) * 0.5,
@@ -208,15 +221,28 @@ impl Osd {
             x: panel.x + margin,
             y: panel.y + margin,
             width: panel.width - margin * 2.0,
-            height: 30.0,
+            height: m.row_height,
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
 
+        let glyph = self.channel.glyph(self.value, self.muted);
+        let glyph_width = ctx
+            .text
+            .measure(
+                glyph,
+                &crate::text::TextStyle {
+                    family: std::sync::Arc::from(ctx.theme.font.as_str()),
+                    size: m.icon,
+                    weight: ctx.metrics.typography.weight_regular,
+                    color: text,
+                },
+            )
+            .0;
         ui::paint_text_vcentered(
             ctx,
             list,
-            self.channel.glyph(self.value, self.muted),
+            glyph,
             row.x,
             row,
             m.icon,
@@ -227,7 +253,7 @@ impl Osd {
             ctx,
             list,
             self.channel.title(),
-            row.x + 32.0,
+            row.x + glyph_width + m.icon_gap,
             row,
             m.title,
             ctx.metrics.typography.weight_bold,
@@ -262,16 +288,15 @@ impl Osd {
         // Progress track.
         let track = Rect {
             x: panel.x + margin,
-            y: panel.y + margin + 40.0,
+            y: row.y + row.height + m.gap,
             width: panel.width - margin * 2.0,
             height: m.track_height,
             radius: m.track_height * 0.5,
             color: ctx.theme.bg_widget.with_alpha(alpha),
         };
         list.push_rect(track);
-        let ratio = (self.value as f32 / self.channel.max()).clamp(0.0, 1.0);
         list.push_rect(Rect {
-            width: track.width * ratio,
+            width: track.width * self.fill.value().clamp(0.0, 1.0),
             color: accent,
             ..track
         });
@@ -325,6 +350,36 @@ mod tests {
         assert!(!osd.visible());
         osd.observe_brightness(70);
         assert!(osd.visible());
+    }
+
+    #[test]
+    fn glyphs_match_the_qml_osd() {
+        assert_eq!(Channel::Volume.glyph(50, true), "\u{f0581}");
+        assert_eq!(Channel::Volume.glyph(0, false), "\u{f0581}");
+        assert_eq!(Channel::Volume.glyph(20, false), "\u{f057f}");
+        assert_eq!(Channel::Volume.glyph(50, false), "\u{f0580}");
+        assert_eq!(Channel::Volume.glyph(120, false), "\u{f057e}");
+        assert_eq!(Channel::Brightness.glyph(90, false), "\u{f00e0}");
+        assert_eq!(Channel::Brightness.glyph(50, false), "\u{f00df}");
+        assert_eq!(Channel::Brightness.glyph(10, false), "\u{f00de}");
+    }
+
+    #[test]
+    fn fill_slides_between_readings_but_not_into_a_new_channel() {
+        let mut osd = Osd::new();
+        osd.show(Channel::Volume, 75, false);
+        // Shown from hidden: no slide in from zero.
+        assert!((osd.fill.value() - 0.5).abs() < 1e-3);
+
+        osd.show(Channel::Volume, 150, false);
+        assert!(osd.fill.value() < 0.99, "slides rather than jumping");
+        for _ in 0..30 {
+            osd.tick(0.016);
+        }
+        assert!((osd.fill.value() - 1.0).abs() < 1e-3);
+
+        osd.show(Channel::Brightness, 20, false);
+        assert!((osd.fill.value() - 0.2).abs() < 1e-3);
     }
 
     #[test]
