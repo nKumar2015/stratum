@@ -1195,11 +1195,11 @@ pub struct WindowMetrics {
 impl Default for WindowMetrics {
     fn default() -> Self {
         Self {
-            width: 520,
+            width: 560,
             height: 640,
             min_width: 360,
             min_height: 320,
-            nav_width: 150.0,
+            nav_width: 176.0,
             nav_header: 52.0,
             nav_row_height: 36.0,
             nav_row_spacing: 40.0,
@@ -1246,6 +1246,12 @@ pub struct PageMetrics {
     pub section_gap: f32,
     /// Height of a wording row.
     pub section_label_height: f32,
+    /// Side of a colour swatch (theme rows, the preview's status dots).
+    pub swatch: f32,
+    /// Gap between swatches.
+    pub swatch_gap: f32,
+    /// Height of the Display page's theme preview card.
+    pub preview_height: f32,
 }
 
 impl Default for PageMetrics {
@@ -1266,6 +1272,9 @@ impl Default for PageMetrics {
             toggle_height: 24.0,
             section_gap: 24.0,
             section_label_height: 20.0,
+            swatch: 12.0,
+            swatch_gap: 4.0,
+            preview_height: 124.0,
         }
     }
 }

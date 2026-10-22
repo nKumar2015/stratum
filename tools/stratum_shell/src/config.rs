@@ -170,7 +170,7 @@ impl Default for ThemeConfig {
 }
 
 impl ThemeConfig {
-    fn to_theme(&self) -> Theme {
+    pub(crate) fn to_theme(&self) -> Theme {
         // Fallbacks are literal colours: calling `Theme::default()` here would
         // recurse, because the default theme is built from a `ThemeConfig`.
         let f = Color::BLACK;

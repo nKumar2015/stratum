@@ -58,6 +58,13 @@ impl TextField {
         Self::default()
     }
 
+    /// A field already holding `text`, for editing a shown value.
+    pub fn with_text(text: &str) -> Self {
+        let mut field = Self::new();
+        text.chars().for_each(|ch| field.input.push(ch));
+        field
+    }
+
     pub fn clear(&mut self) {
         self.input.clear();
     }

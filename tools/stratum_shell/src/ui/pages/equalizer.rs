@@ -13,8 +13,9 @@
 //! - The output's presets, built-in ones marked; clicking one applies it. The
 //!   current bands can be saved under a name, and custom presets deleted.
 //!
-//! Any edit makes the preset "Custom", as in QML. Number fields are sliders
-//! with readouts here rather than typed fields.
+//! Any edit makes the preset "Custom", as in QML. Each number has a slider
+//! and a box beside it that can be typed into (QML had a typed field for the
+//! frequency only).
 //!
 //! The EQ backend (`stratum_sys::managers::audio`) blocks, so everything goes
 //! through the action worker, which publishes the presets and the outcome into
@@ -467,6 +468,33 @@ pub struct EqualizerPage {
     preview: Option<(usize, f64)>,
     /// The "save as" name field, while it is open.
     naming: Option<TextField>,
+    /// A value box being typed into, and where it was last drawn (a click
+    /// anywhere else commits it).
+    editing: Option<Editing>,
+    edit_rect: Option<Rect>,
+}
+
+/// A value box open for typing.
+struct Editing {
+    which: Drag,
+    /// The band it belongs to; selecting another band drops the edit.
+    band: usize,
+    field: TextField,
+}
+
+/// A number typed into a value box. Units are optional: frequency in Hz,
+/// where a `k` suffix means kHz ("1.2k"); gain and preamp in dB; Q plain.
+/// `None` for anything that is not a number, which leaves the value as it
+/// was.
+fn parse_value(which: Drag, text: &str) -> Option<f64> {
+    let text = text.trim().to_ascii_lowercase();
+    let text = text.trim_end_matches("hz").trim_end_matches("db").trim();
+    let (number, scale) = match text.strip_suffix('k') {
+        Some(number) if which == Drag::Frequency => (number.trim(), 1000.0),
+        _ => (text, 1.0),
+    };
+    let value: f64 = number.strip_prefix('+').unwrap_or(number).parse().ok()?;
+    value.is_finite().then_some(value * scale)
 }
 
 impl EqualizerPage {
@@ -476,15 +504,45 @@ impl EqualizerPage {
             drag: None,
             preview: None,
             naming: None,
+            editing: None,
+            edit_rect: None,
         }
     }
 
-    /// Whether keys should come here: the preset name field is open.
+    /// Whether keys should come here: the preset name field or a value box
+    /// is open.
     pub fn wants_keys(&self) -> bool {
-        self.naming.is_some()
+        self.naming.is_some() || self.editing.is_some()
     }
 
-    /// Typing into the preset name. Return saves, Escape cancels.
+    fn editing_which(&self) -> Option<Drag> {
+        self.editing.as_ref().map(|e| e.which)
+    }
+
+    /// Set the value being typed, if it parses, and close its box. The
+    /// setters clamp to the backend's limits.
+    fn commit(&mut self, which: Drag, band: usize, text: &str) {
+        let Some(value) = parse_value(which, text) else {
+            return;
+        };
+        match which {
+            Drag::Preamp => self.model.set_preamp((value * 10.0).round() / 10.0),
+            Drag::Frequency => self.model.set_frequency(band, value.round()),
+            Drag::Gain => self.model.set_gain(band, (value * 10.0).round() / 10.0),
+            Drag::Q => self.model.set_q(band, (value * 100.0).round() / 100.0),
+            Drag::Point(_) => {}
+        }
+    }
+
+    fn commit_editing(&mut self) {
+        if let Some(editing) = self.editing.take() {
+            self.commit(editing.which, editing.band, editing.field.text());
+        }
+        self.edit_rect = None;
+    }
+
+    /// Typing into the preset name or a value box. Return saves or sets,
+    /// Escape cancels.
     pub fn key(
         &mut self,
         keysym: smithay_client_toolkit::seat::keyboard::Keysym,
@@ -492,6 +550,22 @@ impl EqualizerPage {
         ctrl: bool,
         pending: &mut Vec<SystemAction>,
     ) {
+        if let Some(editing) = self.editing.as_mut() {
+            match editing.field.key(keysym, text, ctrl) {
+                FieldKey::Submit(typed) => {
+                    let (which, band) = (editing.which, editing.band);
+                    self.editing = None;
+                    self.edit_rect = None;
+                    self.commit(which, band, typed.expose());
+                }
+                FieldKey::Escape => {
+                    self.editing = None;
+                    self.edit_rect = None;
+                }
+                _ => {}
+            }
+            return;
+        }
         let Some(field) = self.naming.as_mut() else {
             return;
         };
@@ -538,6 +612,15 @@ impl EqualizerPage {
             self.drag = None;
             self.preview = None;
         }
+        // A click away from an open value box sets it, as leaving a field
+        // did in QML; another band selected drops it.
+        if self.editing.as_ref().is_some_and(|e| e.which != Drag::Preamp && e.band != self.model.selected) {
+            self.editing = None;
+            self.edit_rect = None;
+        }
+        if clicked && self.editing.is_some() && !pointer.zip(self.edit_rect).is_some_and(|(p, r)| r.contains(p)) {
+            self.commit_editing();
+        }
         let mut cursor = Cursor { x: area.x, y: area.y, width: area.width };
         let caption = |ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, text: &str, color: Color| {
             ui::paint_text_vcentered(ctx, list, text, rect.x, rect, m.caption, ctx.metrics.typography.weight_regular, color);
@@ -574,7 +657,7 @@ impl EqualizerPage {
         // Preamp.
         let preamp = self.model.preamp_db;
         let limits = self.model.limits;
-        if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Preamp", &format!("{preamp:+.1} dB"), ((preamp - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32, Drag::Preamp, input) {
+        if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Preamp", &format!("{preamp:+.1} dB"), format!("{preamp:.1}"), ((preamp - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32, Drag::Preamp, input, clicked) {
             self.model.set_preamp(limits.min_gain + v as f64 * (limits.max_gain - limits.min_gain));
         }
         cursor.gap(m.gap);
@@ -605,17 +688,17 @@ impl EqualizerPage {
             }
             cursor.gap(m.gap);
             let norm = limits.norm_of(band.frequency_hz) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Freq", &format_freq(band.frequency_hz), norm, Drag::Frequency, input) {
+            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Freq", &format_freq(band.frequency_hz), format!("{}", band.frequency_hz.round()), norm, Drag::Frequency, input, clicked) {
                 self.model.set_frequency(index, limits.freq_at(v as f64).round());
             }
             let gain_norm = ((band.gain_db - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Gain", &format!("{:+.1} dB", band.gain_db), gain_norm, Drag::Gain, input) {
+            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Gain", &format!("{:+.1} dB", band.gain_db), format!("{:.1}", band.gain_db), gain_norm, Drag::Gain, input, clicked) {
                 // Half-decibel steps.
                 let gain = limits.min_gain + v as f64 * (limits.max_gain - limits.min_gain);
                 self.model.set_gain(index, (gain * 2.0).round() / 2.0);
             }
             let q_norm = ((band.q - limits.min_q) / (limits.max_q - limits.min_q)) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Q", &format!("{:.2}", band.q), q_norm, Drag::Q, input) {
+            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Q", &format!("{:.2}", band.q), format!("{:.2}", band.q), q_norm, Drag::Q, input, clicked) {
                 self.model.set_q(index, ((limits.min_q + v as f64 * (limits.max_q - limits.min_q)) * 100.0).round() / 100.0);
             }
         }
@@ -688,7 +771,9 @@ impl EqualizerPage {
         }
     }
 
-    /// A labelled slider. Returns the new 0..=1 value while dragged.
+    /// A labelled slider with its value in a box that can be typed into:
+    /// clicking the box opens it holding `prefill`. Returns the new 0..=1
+    /// value while the slider is dragged.
     #[allow(clippy::too_many_arguments)]
     fn slider_row(
         &mut self,
@@ -697,14 +782,47 @@ impl EqualizerPage {
         cursor: &mut Cursor,
         label: &str,
         value: &str,
+        prefill: String,
         norm: f32,
         which: Drag,
         input: &InputState,
+        clicked: bool,
     ) -> Option<f32> {
         let m = ctx.metrics.equalizer.clone();
         let row = cursor.take(m.slider_row);
         ui::paint_text_vcentered(ctx, list, label, row.x, row, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
-        ui::paint_text_vcentered(ctx, list, value, row.x + row.width - m.value_width, row, m.caption, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
+
+        let value_box = Rect {
+            x: row.x + row.width - m.value_width,
+            width: m.value_width,
+            radius: m.radius,
+            ..row
+        };
+        let pointer_on_box = input.pointer.is_some_and(|(x, y)| value_box.contains(Point::new(x, y)));
+        if clicked && pointer_on_box && self.drag.is_none() && self.editing_which() != Some(which) {
+            self.editing = Some(Editing { which, band: self.model.selected, field: TextField::with_text(&prefill) });
+        }
+        let editing = self.editing.as_ref().filter(|e| e.which == which);
+        let border = if editing.is_some() || pointer_on_box { ctx.theme.border_active } else { ctx.theme.border_inactive };
+        text_field::paint_frame(list, value_box, m.border, border, ctx.theme.bg_widget);
+        match editing {
+            Some(editing) => {
+                editing.field.paint(ctx, list, value_box, FieldStyle { text: m.caption, padding: m.gap, caret_width: m.border * 1.5, masked: false, placeholder: None }, false);
+                self.edit_rect = Some(value_box);
+            }
+            None => {
+                let style = crate::text::TextStyle {
+                    family: std::sync::Arc::from(ctx.theme.font.as_str()),
+                    size: m.caption,
+                    weight: ctx.metrics.typography.weight_medium,
+                    color: ctx.theme.text_main,
+                };
+                let w = ctx.text.measure(value, &style).0;
+                let x = value_box.x + value_box.width - m.gap - w;
+                ui::paint_text_vcentered(ctx, list, value, x, value_box, m.caption, style.weight, ctx.theme.text_main);
+            }
+        }
+
         let slider = Rect {
             x: row.x + m.label_width,
             width: row.width - m.label_width - m.value_width - m.gap,
@@ -837,6 +955,38 @@ impl Cursor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_values_take_optional_units() {
+        assert_eq!(parse_value(Drag::Frequency, "1000"), Some(1000.0));
+        assert_eq!(parse_value(Drag::Frequency, "1.2k"), Some(1200.0));
+        assert_eq!(parse_value(Drag::Frequency, " 2 kHz "), Some(2000.0));
+        assert_eq!(parse_value(Drag::Frequency, "440 Hz"), Some(440.0));
+        assert_eq!(parse_value(Drag::Gain, "+3.5 dB"), Some(3.5));
+        assert_eq!(parse_value(Drag::Gain, "-2"), Some(-2.0));
+        assert_eq!(parse_value(Drag::Gain, "2k"), None, "k only means kHz");
+        assert_eq!(parse_value(Drag::Q, "0.71"), Some(0.71));
+        assert_eq!(parse_value(Drag::Q, "loud"), None);
+        assert_eq!(parse_value(Drag::Q, ""), None);
+        assert_eq!(parse_value(Drag::Q, "inf"), None);
+    }
+
+    #[test]
+    fn a_typed_value_is_rounded_and_clamped() {
+        let mut page = EqualizerPage::new();
+        page.model.reset();
+        page.commit(Drag::Gain, 0, "3.46");
+        assert_eq!(page.model.bands[0].gain_db, 3.5);
+        page.commit(Drag::Gain, 0, "999");
+        assert_eq!(page.model.bands[0].gain_db, page.model.limits.max_gain);
+        page.commit(Drag::Frequency, 1, "1.5k");
+        assert_eq!(page.model.bands[1].frequency_hz, 1500.0);
+        let q = page.model.bands[2].q;
+        page.commit(Drag::Q, 2, "not a number");
+        assert_eq!(page.model.bands[2].q, q, "left as it was");
+        page.commit(Drag::Preamp, 0, "-4");
+        assert_eq!(page.model.preamp_db, -4.0);
+    }
 
     fn snapshot(active: &str) -> Value {
         json!({

@@ -473,11 +473,11 @@ value_width = 64.0
 preset_row = 26.0
 
 [metrics.window]
-width = 520             # settings window, initial size
+width = 560             # settings window, initial size
 height = 640
 min_width = 360
 min_height = 320
-nav_width = 150.0       # navigation rail
+nav_width = 176.0       # navigation rail
 nav_header = 52.0
 nav_row_height = 36.0
 nav_row_spacing = 40.0
@@ -503,6 +503,9 @@ toggle_width = 44.0
 toggle_height = 24.0
 section_gap = 24.0
 section_label_height = 20.0
+swatch = 12.0           # a theme's colour swatch
+swatch_gap = 4.0
+preview_height = 124.0  # Display page: the theme preview card
 
 
 # ---------------------------------------------------------------------------
