@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::pam::Secret;
 use crate::render::display_list::{Color, DisplayList, Image, Rect};
-use crate::text::TextStyle;
+use crate::ui::password_field::{FieldKey, FieldStyle, PasswordField};
 use crate::ui::{self, PaintCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl PartialEq for KeyOutcome {
 
 pub struct LockScreen {
     phase: Phase,
-    input: Secret,
+    field: PasswordField,
     /// A PAM check is running; input is held until it answers.
     checking: bool,
     /// The last attempt failed. Cleared by the next keypress.
@@ -64,7 +64,7 @@ impl LockScreen {
     pub fn new() -> Self {
         Self {
             phase: Phase::Unlocked,
-            input: Secret::new(),
+            field: PasswordField::new(),
             checking: false,
             failed: false,
             reason: None,
@@ -112,7 +112,7 @@ impl LockScreen {
     }
 
     fn reset_input(&mut self) {
-        self.input.clear();
+        self.field.clear();
         self.checking = false;
         self.failed = false;
         self.reason = None;
@@ -127,58 +127,28 @@ impl LockScreen {
         text: Option<&str>,
         ctrl: bool,
     ) -> KeyOutcome {
-        use smithay_client_toolkit::seat::keyboard::Keysym;
-
         // Typing before the compositor confirms would be lost on a surface
         // that is not shown yet; typing during a check would race it.
         if self.phase != Phase::Locked || self.checking {
             return KeyOutcome::Ignored;
         }
-        match keysym {
-            Keysym::Return | Keysym::KP_Enter => {
-                // An empty submit is a no-op rather than a guaranteed failure
-                // that costs PAM's failure delay.
-                if self.input.is_empty() {
-                    return KeyOutcome::Ignored;
-                }
+        match self.field.key(keysym, text, ctrl) {
+            FieldKey::Ignored => KeyOutcome::Ignored,
+            FieldKey::Changed => {
+                self.failed = false;
+                KeyOutcome::Changed
+            }
+            FieldKey::Submit(password) => {
                 self.checking = true;
                 self.failed = false;
                 self.reason = None;
-                KeyOutcome::Submit(self.input.take())
+                KeyOutcome::Submit(password)
             }
-            Keysym::BackSpace => {
-                if ctrl {
-                    self.input.clear();
-                } else {
-                    self.input.pop();
-                }
+            // There is nothing to close on a lock screen; Escape clears.
+            FieldKey::Escape => {
+                self.field.clear();
                 self.failed = false;
                 KeyOutcome::Changed
-            }
-            Keysym::Escape => {
-                self.input.clear();
-                self.failed = false;
-                KeyOutcome::Changed
-            }
-            _ if ctrl && matches!(keysym, Keysym::u | Keysym::U) => {
-                self.input.clear();
-                KeyOutcome::Changed
-            }
-            _ => {
-                let Some(text) = text else {
-                    return KeyOutcome::Ignored;
-                };
-                let mut typed = false;
-                for ch in text.chars().filter(|ch| !ch.is_control()) {
-                    self.input.push(ch);
-                    typed = true;
-                }
-                if typed {
-                    self.failed = false;
-                    KeyOutcome::Changed
-                } else {
-                    KeyOutcome::Ignored
-                }
             }
         }
     }
@@ -361,7 +331,17 @@ impl LockScreen {
             color: theme.bg_widget,
             ..inset(layout.field, m.field_border)
         });
-        self.paint_dots(ctx, list, layout.field);
+        self.field.paint(
+            ctx,
+            list,
+            layout.field,
+            FieldStyle {
+                text: m.field_text,
+                padding: m.field_padding,
+                caret_width: m.caret_width,
+            },
+            self.checking,
+        );
 
         if let Some(status) = self.status() {
             ui::paint_text_centered(
@@ -376,49 +356,6 @@ impl LockScreen {
                     theme.text_muted
                 },
             );
-        }
-    }
-
-    /// One dot per typed character, as QML's `TextInput.Password` echo did,
-    /// trimmed from the left when they no longer fit, then a caret.
-    fn paint_dots(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, field: Rect) {
-        let m = &self.metrics;
-        let style = TextStyle {
-            family: Arc::from(ctx.theme.font.as_str()),
-            size: m.field_text,
-            weight: ctx.metrics.typography.weight_regular,
-            color: ctx.theme.text_main,
-        };
-        let dot = "\u{25cf}";
-        let dot_w = ctx.text.measure(dot, &style).0.max(1.0);
-        let usable = field.width - m.field_padding * 2.0 - m.caret_width * 2.0;
-        let fits = (usable / dot_w).floor().max(0.0) as usize;
-        let shown = self.input.chars().min(fits);
-        let text = dot.repeat(shown);
-        let width = dot_w * shown as f32;
-        let x = field.x + m.field_padding;
-        if !text.is_empty() {
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &text,
-                x,
-                field,
-                m.field_text,
-                ctx.metrics.typography.weight_regular,
-                ctx.theme.text_main,
-            );
-        }
-        if !self.checking {
-            let caret_h = m.field_text * 1.1;
-            list.push_rect(Rect {
-                x: x + width + m.caret_width,
-                y: field.y + (field.height - caret_h) * 0.5,
-                width: m.caret_width,
-                height: caret_h,
-                radius: 0.0,
-                color: ctx.theme.text_main,
-            });
         }
     }
 }
@@ -725,21 +662,14 @@ mod tests {
         assert_eq!(lock.status().as_deref(), Some("Your account has expired"));
     }
 
+    /// Editing keys are the field's (tested in `password_field`); Escape is
+    /// the lock's own: there is nothing to close, so it clears.
     #[test]
-    fn editing_keys() {
+    fn escape_clears_the_field() {
         let mut lock = locked();
         type_text(&mut lock, "abc");
-        lock.key(Keysym::BackSpace, None, false);
-        assert_eq!(lock.input.chars(), 2);
-        lock.key(Keysym::BackSpace, None, true);
-        assert!(lock.input.is_empty());
-        type_text(&mut lock, "abc");
-        lock.key(Keysym::u, Some("\u{15}"), true);
-        assert!(lock.input.is_empty());
-        type_text(&mut lock, "abc");
-        lock.key(Keysym::Escape, None, false);
-        assert!(lock.input.is_empty());
-        // Control characters never enter the password.
+        assert_eq!(lock.key(Keysym::Escape, None, false), KeyOutcome::Changed);
+        assert!(lock.field.is_empty());
         assert_eq!(lock.key(Keysym::Tab, Some("\t"), false), KeyOutcome::Ignored);
     }
 
@@ -748,7 +678,7 @@ mod tests {
         let mut lock = locked();
         type_text(&mut lock, "secret");
         lock.finish();
-        assert!(lock.input.is_empty());
+        assert!(lock.field.is_empty());
         assert_eq!(lock.phase(), Phase::Unlocked);
         assert!(!lock.active());
     }

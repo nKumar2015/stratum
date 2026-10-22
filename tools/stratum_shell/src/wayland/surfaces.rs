@@ -45,6 +45,9 @@ pub struct SurfaceEntry {
     /// Whether this surface currently takes exclusive keyboard focus. Tracked
     /// so the protocol request is only sent when it changes.
     pub keyboard_exclusive: bool,
+    /// A commit has been made that the compositor will answer with a
+    /// configure. Cleared when it arrives.
+    pub awaiting_configure: bool,
 }
 
 impl SurfaceEntry {
@@ -65,7 +68,27 @@ impl SurfaceEntry {
             mapped: false,
             input_region: None,
             keyboard_exclusive: false,
+            // Every surface is created with an initial commit.
+            awaiting_configure: true,
         }
+    }
+
+    /// Whether a buffer may be attached now. When not, makes sure a configure
+    /// is on its way.
+    ///
+    /// After `unmap`, wlroots treats the surface as new: it sends nothing until
+    /// the client makes a fresh commit without a buffer, so an overlay shown a
+    /// second time would wait forever for a configure. That commit is made
+    /// here, once.
+    pub fn ready(&mut self) -> bool {
+        if self.configured {
+            return true;
+        }
+        if !self.awaiting_configure {
+            self.layer.commit();
+            self.awaiting_configure = true;
+        }
+        false
     }
 
     /// Switch between exclusive keyboard focus and none.
@@ -107,9 +130,20 @@ impl SurfaceEntry {
     /// The renderer (and its Vulkan swapchain) is kept. Tearing it down and
     /// rebuilding it on the next show races the compositor's buffer release and
     /// surfaces as a `Timeout` from `get_current_texture`.
+    ///
+    /// Keyboard focus is dropped in the same commit. Changing it in a commit
+    /// of its own first makes wlroots send a configure, which the unmap then
+    /// invalidates; SCTK's late `ack_configure` for it is a fatal "wrong
+    /// configure serial" error. (Hyprland tolerates it; sway does not.)
     pub fn unmap(&mut self) {
         if !self.mapped {
             return;
+        }
+        if self.keyboard_exclusive {
+            self.layer.set_keyboard_interactivity(
+                smithay_client_toolkit::shell::wlr_layer::KeyboardInteractivity::None,
+            );
+            self.keyboard_exclusive = false;
         }
         self.layer.attach(None, 0, 0);
         self.layer.commit();
@@ -117,8 +151,10 @@ impl SurfaceEntry {
         self.dirty = false;
         // The surface must be configured again before a buffer may be attached.
         // Leaving this true made the next show attach a buffer to an
-        // unconfigured surface, which is a fatal protocol error.
+        // unconfigured surface, which is a fatal protocol error. `ready`
+        // requests that configure.
         self.configured = false;
+        self.awaiting_configure = false;
     }
 
     /// Apply a compositor configure and reconfigure the swapchain.
@@ -128,6 +164,7 @@ impl SurfaceEntry {
         self.logical_height = logical_height.max(1);
         self.physical = (self.logical_width * scale, self.logical_height * scale);
         self.configured = self.physical.0 > 1 && self.physical.1 > 1;
+        self.awaiting_configure = false;
 
         // Tell the compositor that the buffer we attach is `scale` times the
         // logical size. Without this the compositor assumes scale 1 and

@@ -129,6 +129,11 @@ impl Secret {
         taken
     }
 
+    /// The password itself, for handing to a checker (PAM, polkit's helper).
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
     fn as_str(&self) -> &str {
         &self.0
     }

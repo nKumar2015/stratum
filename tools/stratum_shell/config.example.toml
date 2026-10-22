@@ -26,6 +26,9 @@ notifications = false
 # Own org.kde.StatusNotifierWatcher and show tray icons. Same caveat as
 # notifications: only one host can own it.
 tray = false
+# Be the session's polkit authentication agent and show the password dialog.
+# polkit allows one agent per session; leave false while stratumd runs.
+polkit = false
 
 # The lock screen (`stratum-cli lockscreen lock`).
 [lock]
@@ -209,6 +212,32 @@ spacing = 24.0          # gap between rows of the column
 scrim_alpha = 0.5       # dimming over the wallpaper
 backdrop_width = 320.0  # wallpaper is downscaled to this many px, then blurred
 backdrop_blur = 3.0     # blur radius at that width; 0 disables
+
+[metrics.polkit]
+width = 450.0           # card width; height follows the content
+padding = 32.0
+spacing = 24.0          # gap between the card's rows
+radius = 16.0
+border = 1.0
+icon = 48.0             # shield glyph
+icon_gap = 20.0
+title = 20.0            # "Authentication Required"
+subtitle = 13.0         # action id
+message = 14.0
+caption = 12.0          # "Password for …" and the error line
+message_lines = 4       # lines of message before it is elided
+field_height = 40.0
+field_radius = 8.0
+field_border = 1.0
+field_padding = 12.0
+field_text = 14.0       # password dots
+caret_width = 2.0
+button_height = 36.0
+button_radius = 8.0
+cancel_width = 80.0
+confirm_width = 120.0
+button_gap = 12.0
+scrim_alpha = 0.8       # dimming behind the card
 
 [metrics.window]
 width = 520             # settings window, initial size

@@ -60,6 +60,12 @@ enum LockEvent {
     Artwork(crate::lock::ArtworkSpec, crate::lock::Artwork),
 }
 
+/// The answer to a polkit password, delivered from the agent's runtime.
+struct PolkitEvent {
+    cookie: String,
+    verdict: crate::polkit_dialog::Verdict,
+}
+
 /// The PAM service and user the lock checks against, resolved when locking.
 struct LockAuth {
     service: String,
@@ -113,6 +119,13 @@ pub struct App {
     lock_art: crate::lock::Artwork,
     lock_art_spec: Option<crate::lock::ArtworkSpec>,
     lock_events: Option<calloop::channel::Sender<LockEvent>>,
+    /// The polkit dialog, its per-output overlays, and the agent behind it.
+    /// `polkit_runtime` runs the agent; password checks are spawned onto it.
+    polkit_dialog: crate::polkit_dialog::PolkitDialog,
+    polkit_surfaces: Vec<SurfaceEntry>,
+    polkit_agent: Option<Arc<stratum_sys::managers::polkit::PolkitAgent>>,
+    polkit_runtime: Option<tokio::runtime::Handle>,
+    polkit_events: Option<calloop::channel::Sender<PolkitEvent>>,
     /// Toast rects from the last paint, for click-to-dismiss.
     toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
@@ -228,6 +241,11 @@ impl App {
             lock_art: crate::lock::Artwork::default(),
             lock_art_spec: None,
             lock_events: None,
+            polkit_dialog: crate::polkit_dialog::PolkitDialog::new(),
+            polkit_surfaces: Vec::new(),
+            polkit_agent: None,
+            polkit_runtime: None,
+            polkit_events: None,
             toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
@@ -272,6 +290,7 @@ impl App {
 
         app.start_ipc(&loop_handle);
         app.start_lock_events(&loop_handle);
+        app.start_polkit_events(&loop_handle);
         app.create_surfaces(&qh);
         app.start_monitors();
         // Decode the lock artwork now, off-thread, so the wallpaper is already
@@ -499,7 +518,7 @@ impl App {
                 entry.unmap();
                 continue;
             }
-            if !entry.dirty || !entry.configured {
+            if !entry.ready() || !entry.dirty {
                 continue;
             }
             let output_name = entry.output_name.clone();
@@ -531,7 +550,7 @@ impl App {
                 entry.unmap();
                 continue;
             }
-            if !entry.dirty || !entry.configured {
+            if !entry.ready() || !entry.dirty {
                 continue;
             }
             let output_name = entry.output_name.clone();
@@ -585,12 +604,12 @@ impl App {
                 .map(|name| name == entry.output_name)
                 .unwrap_or(false);
             if !active {
-                // Drop focus before unmapping so keys return to the window.
-                entry.set_keyboard_exclusive(false);
+                // Unmapping also drops keyboard focus, so keys return to the
+                // window.
                 entry.unmap();
                 continue;
             }
-            if !entry.configured {
+            if !entry.ready() {
                 continue;
             }
             if entry.dirty {
@@ -621,6 +640,52 @@ impl App {
             // Request focus only once the surface has a buffer attached. Asking
             // before the first commit after a re-map is why keys stopped
             // arriving the second time the menu opened.
+            if entry.mapped {
+                entry.set_keyboard_exclusive(true);
+            }
+        }
+
+        // polkit dialog: follows the agent's published request, on the output
+        // that was focused when the request arrived. Same mapping and focus
+        // rules as the power menu above.
+        if state_changed {
+            let focused = self.focused_output();
+            let payload = self.state.polkit.get();
+            if self.polkit_dialog.sync(&payload, &focused) {
+                self.mark_polkit_dirty();
+            }
+        }
+        self.polkit_dialog.set_metrics(&self.config.metrics.polkit);
+        let polkit_target = self.polkit_dialog.target().map(str::to_string);
+        for entry in &mut self.polkit_surfaces {
+            let active = polkit_target.as_deref() == Some(entry.output_name.as_str());
+            if !active {
+                entry.unmap();
+                continue;
+            }
+            if !entry.ready() {
+                continue;
+            }
+            if entry.dirty {
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                self.polkit_dialog.paint(&mut ctx, &mut list, rect);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
             if entry.mapped {
                 entry.set_keyboard_exclusive(true);
             }
@@ -674,6 +739,7 @@ impl App {
                     // fatal `layerSurface was not configured` protocol error, so
                     // wait for it rather than painting this frame.
                     surface.configured = false;
+                    surface.awaiting_configure = true;
                     surface.dirty = true;
                 }
             }
@@ -686,11 +752,10 @@ impl App {
                 .unwrap_or(false)
                 && menu_size.is_some();
             if !active {
-                entry.set_keyboard_exclusive(false);
                 entry.unmap();
                 continue;
             }
-            if !entry.configured {
+            if !entry.ready() {
                 continue;
             }
             // Only repaint on a change. Without this the surface redrew on every
@@ -874,6 +939,132 @@ impl App {
             let art = spec.load();
             let _ = sender.send(LockEvent::Artwork(spec, art));
         });
+    }
+
+    /// Run the polkit agent on its own runtime. The runtime's handle is kept so
+    /// password checks (which spawn polkit's helper) can run on it too.
+    ///
+    /// Debug builds honour two test hooks. `STRATUM_POLKIT_SUBJECT_PID` makes
+    /// the agent answer only that process's requests, so it can be tested
+    /// while stratumd holds the session's agent. `STRATUM_POLKIT_FIXTURE_NAME`
+    /// skips polkitd entirely and serves the agent on the session bus under
+    /// that name, for tests that send the requests themselves.
+    fn start_polkit_agent(&mut self, publisher: stratum_sys::Publisher) {
+        use stratum_sys::managers::polkit::{self, AgentSubject, PolkitAgent, PolkitHost};
+
+        let debug_env = |key: &str| {
+            cfg!(debug_assertions)
+                .then(|| std::env::var(key).ok())
+                .flatten()
+                .filter(|value| !value.is_empty())
+        };
+        let fixture = debug_env("STRATUM_POLKIT_FIXTURE_NAME");
+        let subject = debug_env("STRATUM_POLKIT_SUBJECT_PID")
+            .and_then(|pid| pid.parse().ok())
+            .map(AgentSubject::Process)
+            .unwrap_or(AgentSubject::Session);
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                tracing::error!("failed to start polkit runtime: {err}");
+                return;
+            }
+        };
+        let agent = Arc::new(PolkitAgent::new(PolkitHost::new(publisher)));
+        self.polkit_agent = Some(Arc::clone(&agent));
+        self.polkit_runtime = Some(runtime.handle().clone());
+        std::thread::Builder::new()
+            .name("stratum-polkit".into())
+            .spawn(move || {
+                if let Some(name) = fixture {
+                    if let Err(err) = runtime.block_on(polkit::serve_fixture(agent, &name)) {
+                        tracing::warn!("polkit fixture agent unavailable: {err}");
+                    }
+                    return;
+                }
+                if let Err(err) = runtime.block_on(polkit::register_agent_for(agent, subject)) {
+                    // Most often another agent (stratumd) already holds the
+                    // session. The runtime ends with this thread, which is
+                    // fine: checks are spawned onto it only in answer to a
+                    // request, and without a registration none can arrive.
+                    tracing::warn!("polkit agent not registered ({subject:?}): {err}");
+                }
+            })
+            .ok();
+    }
+
+    fn start_polkit_events(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
+        let (tx, channel) = calloop::channel::channel();
+        self.polkit_events = Some(tx);
+        if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(event) = event {
+                let event: PolkitEvent = event;
+                info!("polkit verdict for {}: {:?}", event.cookie, event.verdict);
+                if app.polkit_dialog.verdict(&event.cookie, event.verdict) {
+                    app.mark_polkit_dirty();
+                }
+            }
+        }) {
+            warn!("failed to insert polkit event source: {err}");
+        }
+    }
+
+    fn mark_polkit_dirty(&mut self) {
+        for entry in &mut self.polkit_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// Carry out what the dialog asked for.
+    fn apply_polkit_action(&mut self, action: crate::polkit_dialog::DialogAction) {
+        use crate::polkit_dialog::{DialogAction, Verdict};
+        use stratum_sys::managers::polkit::FailureOutcome;
+
+        match action {
+            DialogAction::None => return,
+            DialogAction::Redraw => {}
+            DialogAction::Dismiss { cookie } => {
+                if let Some(agent) = &self.polkit_agent {
+                    agent.dismiss(&cookie);
+                }
+            }
+            DialogAction::Submit {
+                cookie,
+                user,
+                password,
+            } => {
+                let (Some(agent), Some(runtime), Some(sender)) = (
+                    self.polkit_agent.clone(),
+                    self.polkit_runtime.clone(),
+                    self.polkit_events.clone(),
+                ) else {
+                    return;
+                };
+                runtime.spawn(async move {
+                    let ok = stratum_sys::managers::polkit::verify_password_and_notify(
+                        &user,
+                        password.expose(),
+                        &cookie,
+                    )
+                    .await;
+                    drop(password);
+                    let verdict = if ok {
+                        agent.resolve(&cookie, true);
+                        Verdict::Accepted
+                    } else {
+                        match agent.record_failure(&cookie) {
+                            FailureOutcome::Retry { remaining } => Verdict::Retry { remaining },
+                            FailureOutcome::Exhausted | FailureOutcome::Unknown => Verdict::Exhausted,
+                        }
+                    };
+                    let _ = sender.send(PolkitEvent { cookie, verdict });
+                });
+            }
+        }
+        self.mark_polkit_dirty();
     }
 
     /// Ask the compositor to lock the session.
@@ -1208,6 +1399,10 @@ impl App {
                 .ok();
         }
 
+        if self.config.behavior.polkit {
+            self.start_polkit_agent(publisher.clone());
+        }
+
         // Own org.freedesktop.Notifications when configured to. Off by default
         // so another daemon (Quickshell) can keep it during migration.
         if self.config.behavior.notifications {
@@ -1494,6 +1689,28 @@ impl App {
             power_layer.commit();
             self.power_surfaces.push(
                 SurfaceEntry::new(power_layer, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
+            // polkit dialog: the same kind of fullscreen overlay as the power
+            // menu, for the same reasons.
+            let polkit_wl = self.compositor_state.create_surface(qh);
+            let polkit_layer = self.layer_shell.create_layer_surface(
+                qh,
+                polkit_wl,
+                Layer::Overlay,
+                Some("stratum-polkit"),
+                Some(output),
+            );
+            polkit_layer.set_anchor(
+                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+            );
+            polkit_layer.set_exclusive_zone(-1);
+            polkit_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            polkit_layer.commit();
+            self.polkit_surfaces.push(
+                SurfaceEntry::new(polkit_layer, scale, output_name.clone())
                     .with_output(output.clone())
                     .with_output_logical_size(output_logical_size),
             );
@@ -1946,6 +2163,7 @@ impl OutputHandler for App {
                 .chain(self.osd_surfaces.iter_mut())
                 .chain(self.toast_surfaces.iter_mut())
                 .chain(self.power_surfaces.iter_mut())
+                .chain(self.polkit_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
                 if entry.output.as_ref() == Some(&output) {
@@ -1974,6 +2192,7 @@ impl LayerShellHandler for App {
         self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.power_surfaces.retain(|entry| &entry.layer != layer);
+        self.polkit_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
@@ -1990,7 +2209,12 @@ impl LayerShellHandler for App {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
 
-        if let Some(entry) = self.power_surfaces.iter_mut().find(|e| &e.layer == layer) {
+        if let Some(entry) = self
+            .power_surfaces
+            .iter_mut()
+            .chain(self.polkit_surfaces.iter_mut())
+            .find(|e| &e.layer == layer)
+        {
             // Fullscreen: the compositor's configure is authoritative.
             let (width, height) = configure.new_size;
             entry.resize(
@@ -2191,6 +2415,15 @@ impl PointerHandler for App {
                 .toast_surfaces
                 .iter()
                 .any(|t| t.layer.wl_surface() == &surface);
+            let on_polkit = self
+                .polkit_surfaces
+                .iter()
+                .any(|p| p.layer.wl_surface() == &surface);
+            if on_polkit {
+                let action = self.polkit_dialog.on_click(point);
+                self.apply_polkit_action(action);
+                return;
+            }
             // The power menu owns the pointer while open; a tile click runs it.
             let on_power = self
                 .power_surfaces
@@ -2428,6 +2661,15 @@ impl KeyboardHandler for App {
                     });
                 }
             }
+            return;
+        }
+
+        // An open polkit dialog has exclusive focus; a program is waiting on it.
+        if self.polkit_dialog.is_open() {
+            let action = self
+                .polkit_dialog
+                .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
+            self.apply_polkit_action(action);
             return;
         }
 

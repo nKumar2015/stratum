@@ -12,6 +12,7 @@ pub mod animation;
 pub mod control_center;
 pub mod controls;
 pub mod pages;
+pub mod password_field;
 pub mod sidebar;
 pub mod style;
 pub mod widgets;
@@ -467,9 +468,99 @@ pub fn vertical_text_transform(baseline_x: f32, bottom_y: f32) -> Transform {
         .then(Transform::translate(baseline_x, bottom_y))
 }
 
+/// Break `text` into lines no wider than `max_width`, at spaces, the way
+/// QML's `wrapMode: Text.WordWrap` does. A single word wider than the line is
+/// kept whole. At most `max_lines` lines are returned; when text is cut off the
+/// last line ends in an ellipsis.
+pub fn wrap_text(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16, max_width: f32, max_lines: usize) -> Vec<String> {
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight,
+        color: ctx.theme.text_main,
+    };
+    wrap_with(text, max_width, max_lines, |s| ctx.text.measure(s, &style).0)
+}
+
+fn wrap_with(text: &str, max_width: f32, max_lines: usize, mut measure: impl FnMut(&str) -> f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut words = text.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        let candidate = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{current} {word}")
+        };
+        if current.is_empty() || measure(&candidate) <= max_width {
+            current = candidate;
+            continue;
+        }
+        lines.push(std::mem::replace(&mut current, word.to_string()));
+        if lines.len() == max_lines {
+            // Out of lines: what is left goes into the last one, elided.
+            let mut last = lines.pop().unwrap_or_default();
+            last.push(' ');
+            last.push_str(&current);
+            for rest in words.by_ref() {
+                last.push(' ');
+                last.push_str(rest);
+            }
+            lines.push(elide_with(&last, max_width, &mut measure));
+            return lines;
+        }
+    }
+    if !current.is_empty() && max_lines > 0 {
+        lines.push(current);
+    }
+    lines
+}
+
+fn elide_with(text: &str, max_width: f32, measure: &mut impl FnMut(&str) -> f32) -> String {
+    let mut chars: Vec<char> = text.chars().collect();
+    loop {
+        let candidate: String = chars.iter().collect::<String>() + "\u{2026}";
+        if chars.is_empty() || measure(&candidate) <= max_width {
+            return candidate;
+        }
+        chars.pop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ten pixels per character, so widths are easy to reason about.
+    fn mono(s: &str) -> f32 {
+        s.chars().count() as f32 * 10.0
+    }
+
+    #[test]
+    fn wrap_breaks_at_spaces() {
+        let lines = wrap_with("the quick brown fox", 100.0, 5, mono);
+        assert_eq!(lines, vec!["the quick", "brown fox"]);
+    }
+
+    #[test]
+    fn wrap_keeps_a_long_word_whole() {
+        let lines = wrap_with("a /run/current-system/sw/bin/true b", 100.0, 5, mono);
+        assert_eq!(lines, vec!["a", "/run/current-system/sw/bin/true", "b"]);
+    }
+
+    #[test]
+    fn wrap_elides_what_does_not_fit() {
+        let lines = wrap_with("one two three four five six", 90.0, 2, mono);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "one two");
+        assert!(lines[1].ends_with('\u{2026}'));
+        assert!(mono(&lines[1]) <= 90.0);
+    }
+
+    #[test]
+    fn wrap_of_nothing_is_nothing() {
+        assert!(wrap_with("   ", 100.0, 3, mono).is_empty());
+    }
 
     #[test]
     fn inverted_corner_produces_a_closed_path() {

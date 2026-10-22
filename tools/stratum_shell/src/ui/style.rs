@@ -23,6 +23,7 @@ pub struct Metrics {
     pub power_menu: PowerMenuMetrics,
     pub tray_menu: TrayMenuMetrics,
     pub lock: LockMetrics,
+    pub polkit: PolkitMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -39,6 +40,7 @@ impl Default for Metrics {
             power_menu: PowerMenuMetrics::default(),
             tray_menu: TrayMenuMetrics::default(),
             lock: LockMetrics::default(),
+            polkit: PolkitMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -350,6 +352,77 @@ impl Default for LockMetrics {
             scrim_alpha: 0.5,
             backdrop_width: 320.0,
             backdrop_blur: 3.0,
+        }
+    }
+}
+
+/// The polkit authentication dialog. Defaults follow `modules/PolkitDialog.qml`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PolkitMetrics {
+    /// Card width; its height follows the content.
+    pub width: f32,
+    /// Padding inside the card.
+    pub padding: f32,
+    /// Vertical gap between the card's rows.
+    pub spacing: f32,
+    pub radius: f32,
+    pub border: f32,
+    /// Shield glyph and the gap to the title beside it.
+    pub icon: f32,
+    pub icon_gap: f32,
+    /// "Authentication Required".
+    pub title: f32,
+    /// The action id under the title.
+    pub subtitle: f32,
+    /// The request's message.
+    pub message: f32,
+    /// "Password for …" and the error beside it.
+    pub caption: f32,
+    /// Lines of message shown before it is elided.
+    pub message_lines: usize,
+    pub field_height: f32,
+    pub field_radius: f32,
+    pub field_border: f32,
+    pub field_padding: f32,
+    pub field_text: f32,
+    pub caret_width: f32,
+    pub button_height: f32,
+    pub button_radius: f32,
+    pub cancel_width: f32,
+    pub confirm_width: f32,
+    pub button_gap: f32,
+    /// Dimming behind the card (QML `#cc000000`).
+    pub scrim_alpha: f32,
+}
+
+impl Default for PolkitMetrics {
+    fn default() -> Self {
+        Self {
+            width: 450.0,
+            padding: 32.0,
+            spacing: 24.0,
+            radius: 16.0,
+            border: 1.0,
+            icon: 48.0,
+            icon_gap: 20.0,
+            title: 20.0,
+            subtitle: 13.0,
+            message: 14.0,
+            caption: 12.0,
+            message_lines: 4,
+            field_height: 40.0,
+            field_radius: 8.0,
+            field_border: 1.0,
+            field_padding: 12.0,
+            field_text: 14.0,
+            caret_width: 2.0,
+            button_height: 36.0,
+            button_radius: 8.0,
+            cancel_width: 80.0,
+            confirm_width: 120.0,
+            button_gap: 12.0,
+            scrim_alpha: 0.8,
         }
     }
 }

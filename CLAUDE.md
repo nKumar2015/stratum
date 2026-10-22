@@ -52,10 +52,10 @@ status icons, battery, clock), control centre as an xdg-shell window with eight
 pages (overview, audio, bluetooth, wifi, battery, notifications, display, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
-the IPC socket, and the lock screen (verified only in a nested compositor; see
-below).
+the IPC socket, the lock screen, and the polkit dialog (both verified only
+against fixtures in a nested compositor; see below).
 
-Not implemented: polkit dialog, hover menus, theme switcher
+Not implemented: hover menus, theme switcher
 overlay, audio EQ panel, notification actions/inline reply, screenshots,
 dashboard, app icon beside the window title. See
 `docs/native-shell-parity.md`.
@@ -116,6 +116,37 @@ links (`ldd target/debug/stratum-shell`). Drive input with `wtype`: sway drops
 the first key of each new virtual keyboard, so start with `wtype -s 300 ...`,
 and give `-k Return` its own delay. pam_exec runs its script with an empty
 environment, so use shell builtins only.
+
+The **polkit dialog** (`polkit_dialog.rs`) fronts the agent in
+`stratum_sys::managers::polkit`, enabled by `[behavior] polkit` (off while
+stratumd holds the session's agent — polkit allows one). The password field is
+shared with the lock screen (`ui/password_field.rs`). The agent's methods run
+on **zbus's own executor, not Tokio**: anything Tokio-specific inside them (a
+`tokio::time` timer) panics on every request. Password checks are spawned onto
+the polkit runtime from the shell instead.
+
+**Testing polkit without a real password.** Do not send wrong passwords to the
+user's real account. Debug builds have two hooks: `STRATUM_POLKIT_FIXTURE_NAME`
+serves the agent on the session bus under that name without polkitd, and
+`STRATUM_POLKIT_HELPER` replaces `polkit-agent-helper-1` with a stand-in
+script (reads the cookie and password lines, exits 0 on a fixed test
+password). On a private `dbus-launch` bus, call `BeginAuthentication`
+(`sssa{ss}sa(sa{sv})`) and `CancelAuthentication` with `busctl --address`.
+`STRATUM_POLKIT_SUBJECT_PID` registers with real polkitd for one process only.
+polkit 127's `pkexec` is not setuid; use `pkcheck --process` instead.
+
+**Overlays on wlroots (sway).** Hyprland is lenient where wlroots is not; two
+rules found in sway, both handled by `SurfaceEntry`:
+
+- `unmap()` drops keyboard focus in the *same* commit as the null buffer. A
+  separate commit first makes wlroots send a configure that the unmap then
+  invalidates, and SCTK's late ack is a fatal "wrong configure serial".
+- After an unmap, wlroots sends no configure until a fresh bufferless commit.
+  Overlay loops call `entry.ready()`, which makes that commit once, instead of
+  checking `entry.configured` directly.
+
+The renderer must also release a `Suboptimal` frame before reconfiguring the
+surface; reconfiguring while holding it is a fatal wgpu validation error.
 
 ### Decisions made with the user (2026-10-21)
 

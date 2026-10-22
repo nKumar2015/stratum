@@ -411,6 +411,10 @@ pub struct BehaviorConfig {
     /// beside another notification daemon (including Quickshell) during
     /// migration; enable it once this shell is the only one.
     pub notifications: bool,
+    /// Register as the session's polkit authentication agent and show the
+    /// password dialog. Off by default: polkit allows one agent per session,
+    /// and stratumd holds it while it runs.
+    pub polkit: bool,
 }
 
 impl Default for BehaviorConfig {
@@ -420,6 +424,7 @@ impl Default for BehaviorConfig {
             reload_on_change: true,
             tray: false,
             notifications: false,
+            polkit: false,
         }
     }
 }

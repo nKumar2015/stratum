@@ -21,6 +21,7 @@ mod notifications;
 mod lock;
 mod osd;
 mod pam;
+mod polkit_dialog;
 mod power_menu;
 mod toasts;
 mod tray;
