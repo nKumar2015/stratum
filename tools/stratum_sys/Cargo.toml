@@ -20,5 +20,4 @@ tracing = { workspace = true }
 # System integration backends
 pipewire = { workspace = true }
 pulsectl-rs = { workspace = true }
-bluer = { workspace = true }
 libc = { workspace = true }

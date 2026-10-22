@@ -45,11 +45,21 @@ use std::process::ExitCode;
 use tracing::{error, info};
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "stratum_shell=info,wgpu=warn,naga=warn".into()),
-        )
+    // `Targets` reads the same `target=level` directives as `EnvFilter`
+    // without its span and regex matching, which cost ~250 KB of binary.
+    use tracing_subscriber::prelude::*;
+    let filter = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|value| value.parse::<tracing_subscriber::filter::Targets>().ok())
+        .unwrap_or_else(|| {
+            tracing_subscriber::filter::Targets::new()
+                .with_target("stratum_shell", tracing::Level::INFO)
+                .with_target("wgpu", tracing::Level::WARN)
+                .with_target("naga", tracing::Level::WARN)
+        });
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(filter)
         .init();
 
     info!("stratum-shell starting");

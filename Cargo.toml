@@ -27,7 +27,6 @@ zvariant = "5.10"
 # System integration
 pipewire = "0.9.2"
 pulsectl-rs = "0.3.2"
-bluer = { version = "0.17", features = ["bluetoothd"] }
 libc = "0.2"
 chrono = { version = "0.4", default-features = true }
 lazy_static = "1.4"

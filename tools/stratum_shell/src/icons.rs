@@ -300,6 +300,22 @@ mod tests {
     }
 
     #[test]
+    fn svg_icons_render_without_resvg_default_features() {
+        // Gradients, groups and transforms are what icon themes use; resvg
+        // is built without text or raster-image support.
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+            <defs><linearGradient id="g"><stop offset="0" stop-color="#f00"/>
+            <stop offset="1" stop-color="#00f"/></linearGradient></defs>
+            <g transform="translate(2 2)"><rect width="12" height="12" fill="url(#g)"/></g>
+            </svg>"##;
+        let icon = render_svg(svg, 16).expect("renders");
+        let at = |x: usize, y: usize| &icon.pixels[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4];
+        assert_eq!(at(0, 0)[3], 0, "outside the rect is clear");
+        assert!(at(3, 8)[0] > 200 && at(3, 8)[3] == 255, "red end of the gradient");
+        assert!(at(12, 8)[2] > 200, "blue end of the gradient");
+    }
+
+    #[test]
     fn missing_icon_returns_none_and_caches() {
         let mut theme = IconTheme::load(&["DefinitelyNotATheme"]);
         assert!(theme.load_icon("this-icon-does-not-exist", 24, 1).is_none());

@@ -19,7 +19,10 @@ implementation with its own renderer, layout, and theming.
 - **The motivation is footprint.** Binary size, memory, CPU, and startup time must
   beat Quickshell. Measured baselines: Quickshell's closure is ~1.1 GiB,
   qtdeclarative alone ~692 MiB. Our stripped release binary was ~7.1 MB early
-  on and is ~16 MB as of 2026-10-22 (screenshots added 0.25 MB of that).
+  on, grew to ~16 MB as the system managers were embedded, and is ~13.1 MB
+  as of 2026-10-22. Before adding a dependency, check its default features:
+  resvg's defaults alone cost 1.9 MB. To find what is big, relink with
+  `CARGO_PROFILE_RELEASE_STRIP=false` and sum `nm -S -C` sizes by crate.
 - **Feature parity, not pixel parity.** The QML shell's behaviour and data must be
   preserved; the visual style is deliberately changing to "vectorheart".
 - **Long-term goal:** eventually as configurable as Quickshell — arbitrary

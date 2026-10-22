@@ -30,7 +30,9 @@ cosmic-text = "0.19"
 # Must match cosmic-text's fontdb version so glyph font IDs are the same type.
 fontdb = "0.23"
 swash = "0.2"
-resvg = "0.48"
+# No default features: they add SVG <text> layout with its own font stack,
+# and GIF, WebP and JPEG decoders for embedded rasters. Icons need none of it.
+resvg = { version = "0.48", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 serde = { workspace = true }

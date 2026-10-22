@@ -1,23 +1,84 @@
+//! Bluetooth through BlueZ's D-Bus API.
+//!
+//! Talks to `org.bluez` with zbus, which every other manager already uses.
+//! This used to go through `bluer`, which brought a second D-Bus stack
+//! (libdbus bindings, dbus-crossroads, dbus-tokio) into every binary for a
+//! dozen calls.
+//!
+//! Every call is blocking and runs on a thread of its own with a timeout, so
+//! an unresponsive bluetoothd cannot hang the caller. The JSON shapes are the
+//! ones the CLI and both shells already read.
+
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::time::Duration;
-use bluer::{Address, Session};
+use zbus::blocking::{Connection, Proxy};
+use zvariant::{OwnedObjectPath, OwnedValue};
 
 const BT_TIMEOUT: Duration = Duration::from_secs(4);
+const ACTION_TIMEOUT: Duration = Duration::from_secs(12);
 
-async fn status_from_bluer_async(include_unpaired: bool) -> Result<Value, String> {
-    let session = Session::new()
-        .await
-        .map_err(|err| format!("bluer session failed: {}", err))?;
-    let adapter = session
-        .default_adapter()
-        .await
-        .map_err(|err| format!("bluer default adapter failed: {}", err))?;
+const BLUEZ: &str = "org.bluez";
+const ADAPTER: &str = "org.bluez.Adapter1";
+const DEVICE: &str = "org.bluez.Device1";
 
-    let powered = adapter
-        .is_powered()
-        .await
-        .map_err(|err| format!("bluer adapter power query failed: {}", err))?;
-    if !powered {
+type Properties = HashMap<String, OwnedValue>;
+type Objects = HashMap<OwnedObjectPath, HashMap<String, Properties>>;
+
+/// Run `f` on a thread of its own, giving up after `timeout`.
+fn with_timeout<T: Send + 'static>(
+    timeout: Duration,
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("thread panicked".to_string()),
+    }
+}
+
+fn system() -> Result<Connection, String> {
+    Connection::system().map_err(|err| format!("system bus unavailable: {err}"))
+}
+
+/// Every BlueZ object and its interfaces' properties.
+fn managed_objects(conn: &Connection) -> Result<Objects, String> {
+    let manager = Proxy::new(conn, BLUEZ, "/", "org.freedesktop.DBus.ObjectManager")
+        .map_err(|err| err.to_string())?;
+    manager
+        .call("GetManagedObjects", &())
+        .map_err(|err| format!("bluez object query failed: {err}"))
+}
+
+fn prop_bool(props: &Properties, key: &str) -> bool {
+    props.get(key).and_then(|v| bool::try_from(v).ok()).unwrap_or(false)
+}
+
+fn prop_str(props: &Properties, key: &str) -> Option<String> {
+    props.get(key).and_then(|v| <&str>::try_from(v).ok()).map(str::to_string)
+}
+
+/// The default adapter: the first by object path (`hci0` before `hci1`), as
+/// bluer chose it.
+fn default_adapter(objects: &Objects) -> Result<(String, &Properties), String> {
+    objects
+        .iter()
+        .filter_map(|(path, interfaces)| interfaces.get(ADAPTER).map(|props| (path.as_str(), props)))
+        .min_by(|a, b| a.0.cmp(b.0))
+        .map(|(path, props)| (path.to_string(), props))
+        .ok_or_else(|| "no bluetooth adapter".to_string())
+}
+
+/// The status snapshot from BlueZ's objects: the default adapter's state and
+/// its devices (paired ones only unless `include_unpaired`), connected first,
+/// then by name.
+fn snapshot(objects: &Objects, include_unpaired: bool) -> Result<Value, String> {
+    let (adapter_path, adapter) = default_adapter(objects)?;
+    if !prop_bool(adapter, "Powered") {
         return Ok(json!({
             "ok": true,
             "state": "off",
@@ -25,96 +86,57 @@ async fn status_from_bluer_async(include_unpaired: bool) -> Result<Value, String
             "devices": [],
         }));
     }
+    let scanning = prop_bool(adapter, "Discovering");
 
-    let scanning = adapter.is_discovering().await.unwrap_or(false);
-    let addresses = adapter
-        .device_addresses()
-        .await
-        .map_err(|err| format!("bluer device list query failed: {}", err))?;
-
-    let mut devices: Vec<Value> = Vec::new();
-    let mut has_connected = false;
-
-    for address in addresses {
-        let device = match adapter.device(address) {
-            Ok(device) => device,
-            Err(_) => continue,
+    let mut devices: Vec<(bool, String, Value)> = Vec::new();
+    for interfaces in objects.values() {
+        let Some(device) = interfaces.get(DEVICE) else {
+            continue;
         };
-        let paired = device.is_paired().await.unwrap_or(false);
+        let on_adapter = device
+            .get("Adapter")
+            .and_then(|v| v.downcast_ref::<zvariant::ObjectPath>().ok())
+            .is_some_and(|p| p.as_str() == adapter_path);
+        if !on_adapter {
+            continue;
+        }
+        let paired = prop_bool(device, "Paired");
         if !paired && !include_unpaired {
             continue;
         }
-
-        let connected = device.is_connected().await.unwrap_or(false);
-        if connected {
-            has_connected = true;
-        }
-
-        let mac = address.to_string().to_uppercase();
-        let name = device
-            .name()
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| mac.clone());
-
-        devices.push(json!({
+        let Some(mac) = prop_str(device, "Address").map(|m| m.to_uppercase()) else {
+            continue;
+        };
+        let connected = prop_bool(device, "Connected");
+        let name = prop_str(device, "Name").filter(|n| !n.is_empty()).unwrap_or_else(|| mac.clone());
+        let entry = json!({
             "mac": mac,
-            "name": if name.is_empty() { mac.clone() } else { name },
+            "name": name,
             "connected": if connected { "yes" } else { "no" },
             "paired": if paired { "yes" } else { "no" },
-            "trusted": if device.is_trusted().await.unwrap_or(false) { "yes" } else { "no" },
-        }));
+            "trusted": if prop_bool(device, "Trusted") { "yes" } else { "no" },
+        });
+        devices.push((connected, name, entry));
     }
-
-    devices.sort_by(|a, b| {
-        let a_connected = a
-            .get("connected")
-            .and_then(Value::as_str)
-            .map(|v| v == "yes")
-            .unwrap_or(false);
-        let b_connected = b
-            .get("connected")
-            .and_then(Value::as_str)
-            .map(|v| v == "yes")
-            .unwrap_or(false);
-
-        if a_connected != b_connected {
-            return b_connected.cmp(&a_connected);
-        }
-
-        let a_name = a.get("name").and_then(Value::as_str).unwrap_or_default();
-        let b_name = b.get("name").and_then(Value::as_str).unwrap_or_default();
-        a_name.cmp(b_name)
-    });
+    devices.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let has_connected = devices.iter().any(|d| d.0);
 
     Ok(json!({
         "ok": true,
         "state": if has_connected { "connected" } else { "on" },
         "scanning": if scanning { "yes" } else { "no" },
-        "devices": devices,
+        "devices": devices.into_iter().map(|d| d.2).collect::<Vec<_>>(),
     }))
 }
 
+fn query(include_unpaired: bool) -> Result<Value, String> {
+    with_timeout(BT_TIMEOUT, move || snapshot(&managed_objects(&system()?)?, include_unpaired))
+}
+
 pub fn status() -> Value {
-    std::thread::spawn(|| {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(runtime) => runtime,
-            Err(e) => return json!({ "ok": false, "error": e.to_string(), "state": "off", "scanning": "no", "devices": [] }),
-        };
-
-        let result = runtime.block_on(async {
-            tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(false)).await
-        });
-
-        match result {
-            Ok(Ok(snapshot)) => snapshot,
-            Ok(Err(error)) => json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [] }),
-            Err(elapsed) => json!({ "ok": false, "error": elapsed.to_string(), "state": "off", "scanning": "no", "devices": [] }),
-        }
+    query(false).unwrap_or_else(|error| {
+        json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [] })
     })
-    .join()
-    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "state": "off", "scanning": "no", "devices": [] }))
 }
 
 pub fn state() -> Value {
@@ -134,185 +156,218 @@ pub fn state() -> Value {
 }
 
 pub fn list() -> Value {
-    std::thread::spawn(|| {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(runtime) => runtime,
-            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-        };
+    match query(true) {
+        Ok(snapshot) => json!({
+            "ok": true,
+            "command": "bluetooth",
+            "subcommand": "list",
+            "hover": false,
+            "devices": snapshot.get("devices").cloned().unwrap_or(json!([])),
+        }),
+        Err(e) => json!({"ok": false, "error": e}),
+    }
+}
 
-        let result = runtime.block_on(async {
-            tokio::time::timeout(BT_TIMEOUT, status_from_bluer_async(true)).await
-        });
+/// The default adapter's object path.
+fn adapter_path(conn: &Connection) -> Result<String, String> {
+    default_adapter(&managed_objects(conn)?).map(|(path, _)| path)
+}
 
-        match result {
-            Ok(Ok(mut snapshot)) => {
-                if let Some(obj) = snapshot.as_object_mut() {
-                    let devices = obj.get("devices").cloned().unwrap_or(json!([]));
-                    return json!({
-                        "ok": true,
-                        "command": "bluetooth",
-                        "subcommand": "list",
-                        "hover": false,
-                        "devices": devices,
-                    });
-                }
-                json!({"ok": false, "error": "malformed snapshot"})
-            }
-            Ok(Err(e)) => json!({"ok": false, "error": e}),
-            Err(e) => json!({"ok": false, "error": e.to_string()}),
-        }
-    })
-    .join()
-    .unwrap_or_else(|_| json!({"ok": false, "error": "thread panicked"}))
+fn proxy<'a>(conn: &Connection, path: String, interface: &'static str) -> Result<Proxy<'a>, String> {
+    Proxy::new(conn, BLUEZ, path, interface).map_err(|e| e.to_string())
 }
 
 pub fn power(target: &str) -> Value {
-    let target_bool = target == "on";
-    let target_str = target.to_string();
-    std::thread::spawn(move || {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(rt) => rt,
-            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-        };
-
-        let result = runtime.block_on(async {
-            let session = Session::new().await.map_err(|e| e.to_string())?;
-            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-            adapter.set_powered(target_bool).await.map_err(|e| e.to_string())?;
-            Ok::<(), String>(())
-        });
-
-        match result {
-            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "power", "successful": true, "output": format!("Powered {}", target_str) }),
-            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "power", "successful": false }),
-        }
-    })
-    .join()
-    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "power", "successful": false }))
+    let on = target == "on";
+    let result = with_timeout(BT_TIMEOUT, move || {
+        let conn = system()?;
+        let adapter = proxy(&conn, adapter_path(&conn)?, ADAPTER)?;
+        adapter.set_property("Powered", on).map_err(|e| e.to_string())
+    });
+    match result {
+        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "power", "successful": true, "output": format!("Powered {}", target) }),
+        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "power", "successful": false }),
+    }
 }
 
 pub fn scan() -> Value {
-    std::thread::spawn(|| {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(rt) => rt,
-            Err(e) => return json!({ "ok": false, "error": e.to_string(), "command": "bluetooth", "subcommand": "scan", "successful": false }),
-        };
-
-        let result = runtime.block_on(async {
-            let session = Session::new().await.map_err(|e| e.to_string())?;
-            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-
-            let _discover = adapter.discover_devices().await.map_err(|e| e.to_string())?;
-            tokio::time::sleep(BT_TIMEOUT).await;
-
-            Ok::<(), String>(())
-        });
-
-        match result {
-            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "scan", "successful": true, "output": "Discovery finished" }),
-            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "scan", "successful": false }),
-        }
-    })
-    .join()
-    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "scan", "successful": false }))
+    // Discovery runs for BT_TIMEOUT, so allow for the calls around it.
+    let result = with_timeout(BT_TIMEOUT * 2, || {
+        let conn = system()?;
+        let adapter = proxy(&conn, adapter_path(&conn)?, ADAPTER)?;
+        adapter.call::<_, _, ()>("StartDiscovery", &()).map_err(|e| e.to_string())?;
+        std::thread::sleep(BT_TIMEOUT);
+        // BlueZ stops it anyway once this connection closes.
+        let _ = adapter.call::<_, _, ()>("StopDiscovery", &());
+        Ok(())
+    });
+    match result {
+        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "scan", "successful": true, "output": "Discovery finished" }),
+        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "scan", "successful": false }),
+    }
 }
 
-async fn with_device<F, Fut>(mac: &str, f: F) -> Result<(), String>
-where
-    F: FnOnce(bluer::Device) -> Fut,
-    Fut: std::future::Future<Output = Result<(), bluer::Error>>,
-{
-    let addr: Address = mac.parse().map_err(|_| format!("Invalid MAC address: {}", mac))?;
-    let session = Session::new().await.map_err(|e| e.to_string())?;
-    let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-    let device = adapter.device(addr).map_err(|e| e.to_string())?;
-    f(device).await.map_err(|e| e.to_string())
+/// `AA:BB:CC:DD:EE:FF`, upper-cased; `None` if it is not a MAC address.
+fn parse_mac(mac: &str) -> Option<String> {
+    let parts: Vec<&str> = mac.split(':').collect();
+    let valid = parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()));
+    valid.then(|| mac.to_uppercase())
 }
 
-fn execute_device_action<F, Fut>(subcommand: &str, mac: &str, f: F) -> Value
-where
-    F: FnOnce(bluer::Device) -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = Result<(), bluer::Error>> + Send + 'static,
-{
-    let mac_str = mac.to_string();
-    let subcmd = subcommand.to_string();
-    
-    std::thread::spawn(move || {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(rt) => rt,
-            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-        };
+/// The device's object path under `adapter`, as BlueZ names it.
+fn device_path(adapter: &str, mac: &str) -> String {
+    format!("{adapter}/dev_{}", mac.replace(':', "_"))
+}
 
-        let result = runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(12), with_device(&mac_str, f)).await
-        });
-
-        match result {
-            Ok(Ok(_)) => json!({ "ok": true, "command": "bluetooth", "subcommand": subcmd, "successful": true, "output": format!("{} succeeded", subcmd) }),
-            Ok(Err(e)) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": subcmd, "successful": false }),
-            Err(_) => json!({ "ok": false, "error": "timeout", "command": "bluetooth", "subcommand": subcmd, "successful": false }),
-        }
+/// Run `f` on the device `mac` of the default adapter.
+fn with_device(
+    mac: &str,
+    f: impl FnOnce(&Proxy<'_>) -> zbus::Result<()> + Send + 'static,
+) -> Result<(), String> {
+    let mac = parse_mac(mac).ok_or_else(|| format!("Invalid MAC address: {}", mac))?;
+    with_timeout(ACTION_TIMEOUT, move || {
+        let conn = system()?;
+        let device = proxy(&conn, device_path(&adapter_path(&conn)?, &mac), DEVICE)?;
+        f(&device).map_err(|e| e.to_string())
     })
-    .join()
-    .unwrap_or_else(move |_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": subcommand, "successful": false }))
+}
+
+fn device_action(
+    subcommand: &str,
+    mac: &str,
+    f: impl FnOnce(&Proxy<'_>) -> zbus::Result<()> + Send + 'static,
+) -> Value {
+    match with_device(mac, f) {
+        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": subcommand, "successful": true, "output": format!("{} succeeded", subcommand) }),
+        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": subcommand, "successful": false }),
+    }
 }
 
 pub fn pair(mac: &str) -> Value {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-    };
-
-    let result = runtime.block_on(async {
-        tokio::time::timeout(Duration::from_secs(12), with_device(mac, |dev| async move {
-            let _ = dev.pair().await;
-            dev.set_trusted(true).await
-        })).await
+    let result = with_device(mac, |device| {
+        // Already paired is fine; trusting is what makes it reconnect.
+        let _ = device.call::<_, _, ()>("Pair", &());
+        device.set_property("Trusted", true).map_err(zbus::Error::from)
     });
-
     match result {
-        Ok(Ok(_)) => json!({ "ok": true, "command": "bluetooth", "subcommand": "pair", "successful": true, "output": "paired" }),
-        Ok(Err(e)) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "pair", "successful": false }),
-        Err(_) => json!({ "ok": false, "error": "timeout", "command": "bluetooth", "subcommand": "pair", "successful": false }),
+        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "pair", "successful": true, "output": "paired" }),
+        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "pair", "successful": false }),
     }
 }
 
 pub fn connect(mac: &str) -> Value {
-    execute_device_action("connect", mac, |dev| async move { dev.connect().await })
+    device_action("connect", mac, |device| device.call("Connect", &()))
 }
 
 pub fn disconnect(mac: &str) -> Value {
-    execute_device_action("disconnect", mac, |dev| async move { dev.disconnect().await })
+    device_action("disconnect", mac, |device| device.call("Disconnect", &()))
 }
 
 pub fn forget(mac: &str) -> Value {
-    let mac_str = mac.to_string();
-    std::thread::spawn(move || {
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(rt) => rt,
-            Err(e) => return json!({ "ok": false, "error": e.to_string() }),
-        };
-
-        let result = runtime.block_on(async {
-            let addr: Address = mac_str.parse().map_err(|_| format!("Invalid MAC address: {}", mac_str))?;
-            let session = Session::new().await.map_err(|e| e.to_string())?;
-            let adapter = session.default_adapter().await.map_err(|e| e.to_string())?;
-            adapter.remove_device(addr).await.map_err(|e| e.to_string())
+    let result = parse_mac(mac)
+        .ok_or_else(|| format!("Invalid MAC address: {}", mac))
+        .and_then(|mac| {
+            with_timeout(BT_TIMEOUT, move || {
+                let conn = system()?;
+                let adapter_path = adapter_path(&conn)?;
+                let device = zvariant::ObjectPath::try_from(device_path(&adapter_path, &mac))
+                    .map_err(|e| e.to_string())?;
+                let adapter = proxy(&conn, adapter_path, ADAPTER)?;
+                adapter.call::<_, _, ()>("RemoveDevice", &(device,)).map_err(|e| e.to_string())
+            })
         });
-
-        match result {
-            Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "forget", "successful": true, "output": "forgotten" }),
-            Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "forget", "successful": false }),
-        }
-    })
-    .join()
-    .unwrap_or_else(|_| json!({ "ok": false, "error": "thread panicked", "command": "bluetooth", "subcommand": "forget", "successful": false }))
+    match result {
+        Ok(_) => json!({ "ok": true, "command": "bluetooth", "subcommand": "forget", "successful": true, "output": "forgotten" }),
+        Err(e) => json!({ "ok": false, "error": e, "command": "bluetooth", "subcommand": "forget", "successful": false }),
+    }
 }
 
 pub fn trust(mac: &str) -> Value {
-    execute_device_action("trust", mac, |dev| async move { dev.set_trusted(true).await })
+    device_action("trust", mac, |device| device.set_property("Trusted", true).map_err(zbus::Error::from))
 }
 
 pub fn untrust(mac: &str) -> Value {
-    execute_device_action("untrust", mac, |dev| async move { dev.set_trusted(false).await })
+    device_action("untrust", mac, |device| device.set_property("Trusted", false).map_err(zbus::Error::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn props(entries: Vec<(&str, OwnedValue)>) -> Properties {
+        entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    }
+
+    fn path(p: &str) -> OwnedObjectPath {
+        OwnedObjectPath::try_from(p).unwrap()
+    }
+
+    fn device(adapter: &str, mac: &str, name: &str, paired: bool, connected: bool) -> HashMap<String, Properties> {
+        let adapter = OwnedValue::from(zvariant::ObjectPath::try_from(adapter).unwrap());
+        [(
+            DEVICE.to_string(),
+            props(vec![
+                ("Adapter", adapter),
+                ("Address", OwnedValue::from(zvariant::Str::from(mac.to_string()))),
+                ("Name", OwnedValue::from(zvariant::Str::from(name.to_string()))),
+                ("Paired", OwnedValue::from(paired)),
+                ("Connected", OwnedValue::from(connected)),
+                ("Trusted", OwnedValue::from(paired)),
+            ]),
+        )]
+        .into_iter()
+        .collect()
+    }
+
+    fn objects(powered: bool) -> Objects {
+        let adapter = |powered: bool| -> HashMap<String, Properties> {
+            [(ADAPTER.to_string(), props(vec![("Powered", OwnedValue::from(powered)), ("Discovering", OwnedValue::from(false))]))]
+                .into_iter()
+                .collect()
+        };
+        [
+            (path("/org/bluez/hci1"), adapter(false)),
+            (path("/org/bluez/hci0"), adapter(powered)),
+            (path("/org/bluez/hci0/dev_AA"), device("/org/bluez/hci0", "aa:00:00:00:00:01", "Zeta", true, false)),
+            (path("/org/bluez/hci0/dev_BB"), device("/org/bluez/hci0", "BB:00:00:00:00:02", "Alpha", true, false)),
+            (path("/org/bluez/hci0/dev_CC"), device("/org/bluez/hci0", "CC:00:00:00:00:03", "Mouse", true, true)),
+            (path("/org/bluez/hci0/dev_DD"), device("/org/bluez/hci0", "DD:00:00:00:00:04", "", false, false)),
+            (path("/org/bluez/hci1/dev_EE"), device("/org/bluez/hci1", "EE:00:00:00:00:05", "Other", true, true)),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn the_snapshot_lists_the_default_adapters_paired_devices_connected_first() {
+        let snap = snapshot(&objects(true), false).unwrap();
+        assert_eq!(snap["state"], "connected");
+        let names: Vec<&str> = snap["devices"].as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["Mouse", "Alpha", "Zeta"], "hci1's device is not listed");
+        assert_eq!(snap["devices"][2]["mac"], "AA:00:00:00:00:01", "upper-cased");
+        assert_eq!(snap["devices"][0]["connected"], "yes");
+    }
+
+    #[test]
+    fn unpaired_devices_are_listed_on_request_named_by_address() {
+        let snap = snapshot(&objects(true), true).unwrap();
+        let devices = snap["devices"].as_array().unwrap();
+        assert_eq!(devices.len(), 4);
+        assert!(devices.iter().any(|d| d["name"] == "DD:00:00:00:00:04" && d["paired"] == "no"));
+    }
+
+    #[test]
+    fn a_powered_off_adapter_reports_off_with_no_devices() {
+        let snap = snapshot(&objects(false), false).unwrap();
+        assert_eq!((snap["state"].as_str(), snap["devices"].as_array().unwrap().len()), (Some("off"), 0));
+        assert!(snapshot(&Objects::new(), false).is_err(), "no adapter");
+    }
+
+    #[test]
+    fn macs_are_validated_and_map_to_bluez_paths() {
+        assert_eq!(parse_mac("aa:bb:cc:dd:ee:0f").as_deref(), Some("AA:BB:CC:DD:EE:0F"));
+        assert_eq!(parse_mac("aa:bb:cc:dd:ee"), None);
+        assert_eq!(parse_mac("zz:bb:cc:dd:ee:ff"), None);
+        assert_eq!(device_path("/org/bluez/hci0", "AA:BB:CC:DD:EE:0F"), "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_0F");
+    }
 }
