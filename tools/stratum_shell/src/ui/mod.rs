@@ -433,7 +433,9 @@ pub fn paint_text_centered(
     ctx.text_text(list, value, x, baseline, style);
 }
 
-/// A standalone icon glyph centred in `rect`, in `[appearance] icon_font`.
+/// A standalone icon glyph centred in `rect` by its ink, in
+/// `[appearance] icon_font`. (A proportional Nerd Font's icons overflow their
+/// advance, so centring by advance put them to the right of their pill.)
 pub fn paint_icon_centered(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,
@@ -448,10 +450,16 @@ pub fn paint_icon_centered(
         weight: 400,
         color,
     };
-    let width = ctx.text.measure(glyph, &style).0;
-    let (ascent, line_height) = ctx.text.metrics(&style);
-    let baseline = rect.y + (rect.height - line_height) * 0.5 + ascent;
-    ctx.text_text(list, glyph, rect.x + (rect.width - width) * 0.5, baseline, style);
+    let (cx, cy) = (rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
+    let (x, baseline) = match ctx.text.ink_bounds(glyph, &style) {
+        Some((left, top, right, bottom)) => (cx - (left + right) * 0.5, cy - (top + bottom) * 0.5),
+        None => {
+            let width = ctx.text.measure(glyph, &style).0;
+            let (ascent, line_height) = ctx.text.metrics(&style);
+            (cx - width * 0.5, rect.y + (rect.height - line_height) * 0.5 + ascent)
+        }
+    };
+    ctx.text_text(list, glyph, x, baseline, style);
 }
 
 /// [`paint_text_centered`], turned clockwise by `radians` about the centre of

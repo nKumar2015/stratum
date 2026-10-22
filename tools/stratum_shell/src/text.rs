@@ -219,6 +219,31 @@ impl TextEngine {
         (ascent, line_height)
     }
 
+    /// The inked box of `text` relative to its pen origin on the baseline:
+    /// `(left, top, right, bottom)` in logical pixels, y down. `None` when
+    /// nothing is drawn.
+    ///
+    /// Centring by advance is right for text but not for icon glyphs: a
+    /// proportional Nerd Font draws its icons past their advance, so an
+    /// advance-centred icon sits to the right.
+    pub fn ink_bounds(&mut self, text: &str, style: &TextStyle) -> Option<(f32, f32, f32, f32)> {
+        // Rasterized larger than drawn, for sub-pixel accuracy.
+        const OVERSAMPLE: f32 = 4.0;
+        let run = self.shape(text, style, 0.0, 0.0);
+        let mut bounds: Option<(f32, f32, f32, f32)> = None;
+        for (glyph, raster) in self.rasterize_run(&run, OVERSAMPLE) {
+            let left = glyph.x + raster.left as f32 / OVERSAMPLE;
+            let top = glyph.y - raster.top as f32 / OVERSAMPLE;
+            let right = left + raster.width as f32 / OVERSAMPLE;
+            let bottom = top + raster.height as f32 / OVERSAMPLE;
+            bounds = Some(match bounds {
+                Some((l, t, r, b)) => (l.min(left), t.min(top), r.max(right), b.max(bottom)),
+                None => (left, top, right, bottom),
+            });
+        }
+        bounds
+    }
+
     /// Rasterize one glyph for the shaped run.
     ///
     /// `font_id` comes from shaping, so per-glyph fallback faces are respected.
@@ -514,5 +539,23 @@ mod glyph_availability_tests {
         let run = engine.shape("\u{f0581}", &style, 0.0, 0.0);
         assert_eq!(run.glyphs.len(), 1, "one codepoint should shape to one glyph");
         assert_ne!(run.glyphs[0].glyph_id, 0, "icon must not be .notdef");
+    }
+
+    #[test]
+    fn a_proportional_nerd_font_icon_overflows_its_advance() {
+        let mut engine = TextEngine::new();
+        let family = "JetBrainsMonoNL Nerd Font";
+        if !super::fonts_available_for(&mut engine, family) {
+            eprintln!("skipping: {family} not available");
+            return;
+        }
+        let style = TextStyle { family: Arc::from(family), size: 20.0, weight: 400, color: Color::WHITE };
+        let advance = engine.measure("\u{f0581}", &style).0;
+        let (left, top, right, bottom) = engine.ink_bounds("\u{f0581}", &style).expect("inked");
+        // Why icons are centred by ink: this one is drawn wider than it
+        // advances, so centring the advance pushes it right.
+        assert!(right > advance + 1.0, "ink {left}..{right}, advance {advance}");
+        assert!(top < 0.0 && bottom > top, "above the baseline: {top}..{bottom}");
+        assert_eq!(engine.ink_bounds(" ", &style), None);
     }
 }

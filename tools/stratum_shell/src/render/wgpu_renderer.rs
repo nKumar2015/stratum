@@ -30,6 +30,9 @@ use super::Gpu;
 use crate::text::{RasterGlyph, TextEngine};
 
 const ATLAS_SIZE: u32 = 1024;
+/// Clear texels around each atlas entry, so linear filtering at a quad's edge
+/// reads transparency rather than a neighbour (`Atlas::allocate`).
+const ATLAS_GUTTER: u32 = 1;
 
 /// Tessellated paths kept before unused ones are dropped.
 const PATH_CACHE_LIMIT: usize = 256;
@@ -1150,7 +1153,7 @@ impl Atlas {
                 self.data[dst..dst + len].copy_from_slice(&pixels[src..src + len]);
             }
         }
-        self.flush_region(gpu, x, y, width, height);
+        self.flush_entry(gpu, x, y, width, height);
         Some(self.uv(x, y, width, height))
     }
 
@@ -1167,7 +1170,7 @@ impl Atlas {
                 self.data[dst + 3] = a;
             }
         }
-        self.flush_region(gpu, x, y, glyph.width, glyph.height);
+        self.flush_entry(gpu, x, y, glyph.width, glyph.height);
         Some(self.uv(x, y, glyph.width, glyph.height))
     }
 
@@ -1176,13 +1179,33 @@ impl Atlas {
         self.packer.begin_frame();
     }
 
+    /// Room for a `w`×`h` entry inside a cleared gutter of `ATLAS_GUTTER`
+    /// texels. Returns the entry's origin; upload it, then flush with
+    /// [`Self::flush_entry`] so the gutter reaches the GPU too.
+    ///
+    /// The sampler filters linearly, so a quad at a fractional position reads
+    /// a little past its entry's edge. Without a gutter that was the next
+    /// entry, or a stale one from an earlier frame (the atlas is repacked
+    /// every frame and never cleared), which drew as a faint line beside the
+    /// glyph.
     fn allocate(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
-        let (pos, wrapped) = self.packer.allocate(w, h)?;
+        let g = ATLAS_GUTTER;
+        let ((x, y), wrapped) = self.packer.allocate(w + 2 * g, h + 2 * g)?;
         if wrapped {
             // Out of room within a single frame. A real atlas would evict by LRU.
             self.data.fill(0);
         }
-        Some(pos)
+        for row in y..y + h + 2 * g {
+            let start = ((row * ATLAS_SIZE + x) * 4) as usize;
+            self.data[start..start + ((w + 2 * g) * 4) as usize].fill(0);
+        }
+        Some((x + g, y + g))
+    }
+
+    /// Flush an entry placed by [`Self::allocate`], with its gutter.
+    fn flush_entry(&mut self, gpu: &Gpu, x: u32, y: u32, w: u32, h: u32) {
+        let g = ATLAS_GUTTER;
+        self.flush_region(gpu, x - g, y - g, w + 2 * g, h + 2 * g);
     }
 
     fn uv(&self, x: u32, y: u32, w: u32, h: u32) -> (f32, f32, f32, f32) {
