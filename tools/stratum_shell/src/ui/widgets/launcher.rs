@@ -29,7 +29,7 @@ impl Widget for Launcher {
         rect: Rect,
         _input: &InputState,
     ) {
-        ui::paint_text_centered(ctx, list, "\u{f313}", rect, ctx.metrics.typography.icon, ctx.theme.primary);
+        ui::paint_icon_centered(ctx, list, "\u{f313}", rect, ctx.metrics.typography.icon, ctx.theme.primary);
         self.rect = Some(rect);
     }
 

@@ -15,6 +15,9 @@ font_size = 13.0        # logical px
 corner_radius = 15.0    # framed widgets and menus
 animation_ms = 180      # 0 disables animation
 framed_border = true
+# Sidebar logo and status glyphs. A proportional Nerd Font ("… Nerd Font",
+# not "… Nerd Font Mono") draws icons at their full size, as Quickshell did.
+icon_font = "JetBrainsMonoNL Nerd Font"
 
 [behavior]
 poll_ms = 3000          # widgets without push updates

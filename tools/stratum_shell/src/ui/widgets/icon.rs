@@ -168,7 +168,7 @@ impl Widget for Icon {
     ) {
         self.rects.insert(ctx.output_name.to_string(), rect);
         let (glyph, color) = self.kind.appearance(ctx);
-        ui::paint_text_centered(ctx, list, glyph, rect, ctx.metrics.typography.icon, color);
+        ui::paint_icon_centered(ctx, list, glyph, rect, ctx.metrics.typography.icon, color);
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {

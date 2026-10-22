@@ -363,6 +363,11 @@ pub struct AppearanceConfig {
     pub animation_ms: u32,
     /// Draw a 1px border around framed widgets.
     pub framed_border: bool,
+    /// Font for the sidebar's standalone icons (the launcher logo and the
+    /// audio/Bluetooth/Wi-Fi glyphs). QML set no family on these, so
+    /// fontconfig fell back to a proportional Nerd Font, whose icons are
+    /// about half again as wide as a "Mono" variant's single-cell ones.
+    pub icon_font: String,
 }
 
 impl Default for AppearanceConfig {
@@ -372,6 +377,7 @@ impl Default for AppearanceConfig {
             corner_radius: 15.0,
             animation_ms: 180,
             framed_border: true,
+            icon_font: "JetBrainsMonoNL Nerd Font".into(),
         }
     }
 }

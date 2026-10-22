@@ -433,6 +433,27 @@ pub fn paint_text_centered(
     ctx.text_text(list, value, x, baseline, style);
 }
 
+/// A standalone icon glyph centred in `rect`, in `[appearance] icon_font`.
+pub fn paint_icon_centered(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    glyph: &str,
+    rect: Rect,
+    size: f32,
+    color: Color,
+) {
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.appearance.icon_font.as_str()),
+        size,
+        weight: 400,
+        color,
+    };
+    let width = ctx.text.measure(glyph, &style).0;
+    let (ascent, line_height) = ctx.text.metrics(&style);
+    let baseline = rect.y + (rect.height - line_height) * 0.5 + ascent;
+    ctx.text_text(list, glyph, rect.x + (rect.width - width) * 0.5, baseline, style);
+}
+
 /// [`paint_text_centered`], turned clockwise by `radians` about the centre of
 /// `rect` (QML's `rotation` on a centred item).
 pub fn paint_text_centered_rotated(
