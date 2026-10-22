@@ -26,6 +26,7 @@ pub struct Metrics {
     pub polkit: PolkitMetrics,
     pub notification_card: NotificationCardMetrics,
     pub theme_switcher: ThemeSwitcherMetrics,
+    pub hover_menu: HoverMenuMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -45,6 +46,7 @@ impl Default for Metrics {
             polkit: PolkitMetrics::default(),
             notification_card: NotificationCardMetrics::default(),
             theme_switcher: ThemeSwitcherMetrics::default(),
+            hover_menu: HoverMenuMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -567,6 +569,71 @@ impl Default for ThemeSwitcherMetrics {
             empty_text: 12.0,
             max_rows: 8,
             scrim_alpha: 0.56,
+        }
+    }
+}
+
+/// The hover menus beside the status icons.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HoverMenuMetrics {
+    /// Milliseconds the pointer must rest on an icon before its menu opens.
+    pub open_ms: u64,
+    /// Milliseconds with neither the icon nor the menu hovered before it
+    /// closes; long enough to cross the gap between them.
+    pub close_ms: u64,
+    pub width: f32,
+    /// Gap between the rail and the menu.
+    pub offset: f32,
+    pub padding: f32,
+    pub radius: f32,
+    pub border: f32,
+    pub title: f32,
+    pub text: f32,
+    pub caption: f32,
+    pub icon: f32,
+    /// Line height as a multiple of the text size.
+    pub line_height: f32,
+    pub row_height: f32,
+    pub row_gap: f32,
+    pub section_gap: f32,
+    pub gap: f32,
+    pub close: f32,
+    pub button_height: f32,
+    pub button_radius: f32,
+    /// Width reserved for the volume percentage.
+    pub value_width: f32,
+    /// Where values start in a label/value row, as a fraction of the width.
+    pub stat_split: f32,
+    /// Bluetooth devices listed before "+N more".
+    pub max_devices: usize,
+}
+
+impl Default for HoverMenuMetrics {
+    fn default() -> Self {
+        Self {
+            open_ms: 350,
+            close_ms: 800,
+            width: 280.0,
+            offset: 4.0,
+            padding: 12.0,
+            radius: 12.0,
+            border: 1.0,
+            title: 14.0,
+            text: 12.0,
+            caption: 11.0,
+            icon: 16.0,
+            line_height: 1.45,
+            row_height: 28.0,
+            row_gap: 2.0,
+            section_gap: 10.0,
+            gap: 6.0,
+            close: 20.0,
+            button_height: 28.0,
+            button_radius: 6.0,
+            value_width: 38.0,
+            stat_split: 0.38,
+            max_devices: 6,
         }
     }
 }

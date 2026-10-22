@@ -1,18 +1,26 @@
 //! Battery indicator.
 
-use crate::render::display_list::{DisplayList, Rect};
+use std::collections::HashMap;
+
+use crate::render::display_list::{DisplayList, Point, Rect};
 use crate::ui::control_center::Page;
+use crate::ui::hover_menu::HoverKind;
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 pub struct Battery {
-    last_rect: Rect,
+    /// Rect from the last paint on each output; see `Icon` for why per output.
+    rects: HashMap<String, Rect>,
 }
 
 impl Battery {
     pub fn new() -> Self {
         Self {
-            last_rect: Rect::EMPTY,
+            rects: HashMap::new(),
         }
+    }
+
+    fn hit(&self, output: &str, point: Point) -> Option<Rect> {
+        self.rects.get(output).copied().filter(|r| r.contains(point))
     }
 }
 
@@ -38,7 +46,7 @@ impl Widget for Battery {
         rect: Rect,
         _input: &InputState,
     ) {
-        self.last_rect = rect;
+        self.rects.insert(ctx.output_name.to_string(), rect);
         let battery = ctx.state.battery.get();
         let percent = battery["battery"]["pct"]
             .as_u64()
@@ -74,8 +82,11 @@ impl Widget for Battery {
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {
-        self.last_rect
-            .contains(ctx.point)
-            .then_some(Action::OpenPanel(Page::Battery))
+        self.hit(ctx.output_name, ctx.point)
+            .map(|_| Action::OpenPanel(Page::Battery))
+    }
+
+    fn hover_target(&self, output: &str, point: Point) -> Option<(HoverKind, Rect)> {
+        self.hit(output, point).map(|rect| (HoverKind::Battery, rect))
     }
 }

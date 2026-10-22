@@ -129,6 +129,13 @@ pub struct App {
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
+    /// Hover menus beside the status icons, one overlay surface per output.
+    hover_menus: crate::ui::hover_menu::HoverMenus,
+    hover_surfaces: Vec<SurfaceEntry>,
+    /// Size and placement last applied to the hover surface, and the output.
+    hover_geometry: Option<(u32, (i32, i32), String)>,
+    /// A press landed on the hover menu since its last paint.
+    hover_clicked: bool,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -249,6 +256,10 @@ impl App {
             polkit_events: None,
             theme_switcher: crate::theme_switcher::ThemeSwitcher::new(),
             theme_surfaces: Vec::new(),
+            hover_menus: crate::ui::hover_menu::HoverMenus::new(),
+            hover_surfaces: Vec::new(),
+            hover_geometry: None,
+            hover_clicked: false,
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -325,6 +336,11 @@ impl App {
             || self.control_center.animating()
         {
             return std::time::Duration::from_millis(16);
+        }
+        // A hover-menu timer is running; it needs to fire close to on time,
+        // not on the next one-second tick.
+        if self.hover_menus.intent.pending() {
+            return std::time::Duration::from_millis(50);
         }
         // The clock changes once a minute; a one-second wakeup is enough to
         // catch it without spinning.
@@ -693,6 +709,86 @@ impl App {
             if entry.mapped {
                 entry.set_keyboard_exclusive(true);
             }
+        }
+
+        // Hover menu. Painted once per change; the painted height sizes the
+        // surface, and a size change waits for the configure before drawing.
+        if self.hover_menus.intent.pending() {
+            self.update_hover();
+        }
+        if state_changed {
+            self.mark_hover_dirty();
+        }
+        self.hover_menus.tick(dt);
+        let open_hover = self.hover_menus.intent.open().cloned();
+        let mut hover_events = Vec::new();
+        for i in 0..self.hover_surfaces.len() {
+            let entry = &self.hover_surfaces[i];
+            let Some(menu) = open_hover.as_ref().filter(|o| o.output == entry.output_name) else {
+                self.hover_surfaces[i].unmap();
+                continue;
+            };
+            let applied = self.hover_geometry.as_ref().filter(|g| g.2 == entry.output_name).cloned();
+            if applied.is_some() && (!entry.dirty || !self.hover_surfaces[i].ready()) {
+                continue;
+            }
+            let entry = &self.hover_surfaces[i];
+            let input = crate::ui::InputState {
+                pointer: self
+                    .pointer
+                    .as_ref()
+                    .filter(|(surface, _, _)| surface == entry.layer.wl_surface())
+                    .map(|(_, x, y)| (*x, *y)),
+                pressed: self.pointer_pressed,
+            };
+            let output_name = entry.output_name.clone();
+            let output_size = entry.output_logical_size;
+            let clicked = std::mem::take(&mut self.hover_clicked);
+            let mut ctx = crate::ui::PaintCtx {
+                theme: &theme,
+                appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
+                text: &mut self.text,
+                icons: &mut self.icons,
+                state: &self.state,
+                themes: &self.config.themes,
+                output_name: &output_name,
+                axis: self.config.sidebar.axis(),
+                dt,
+            };
+            let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+            let (height, events) = self.hover_menus.paint(
+                &mut ctx,
+                &mut list,
+                menu.kind,
+                crate::render::display_list::Point::new(0.0, 0.0),
+                &input,
+                clicked,
+            );
+            hover_events.extend(events);
+            let width = self.config.metrics.hover_menu.width;
+            let height = height.ceil().max(1.0);
+            let placement = self.hover_placement(menu, (width, height), output_size);
+            let geometry = (height as u32, placement, output_name);
+            let entry = &mut self.hover_surfaces[i];
+            if Some(&geometry) != applied.as_ref() {
+                entry.layer.set_size(width as u32, geometry.0);
+                entry.layer.set_margin(placement.1, 0, 0, placement.0);
+                entry.layer.commit();
+                entry.configured = false;
+                entry.awaiting_configure = true;
+                entry.dirty = true;
+                self.hover_geometry = Some(geometry);
+                continue;
+            }
+            entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+            entry.dirty = false;
+        }
+        if open_hover.is_none() {
+            self.hover_geometry = None;
+        }
+        if !hover_events.is_empty() {
+            self.apply_hover_events(hover_events);
         }
 
         // Theme switcher, on the output it opened on.
@@ -1172,6 +1268,7 @@ impl App {
         self.session_lock = Some(session_lock);
         // Nothing else should hold the keyboard or a popup over the lock.
         self.power_menu.close();
+        self.hover_menus.intent.close();
         if self.tray_menu.target().is_some() {
             self.actions.push(crate::actions::SystemAction::TrayMenuClose);
             self.tray_menu.close();
@@ -1388,6 +1485,88 @@ impl App {
         for entry in &mut self.theme_surfaces {
             entry.dirty = true;
         }
+    }
+
+    /// Feed the pointer to the hover-menu timers: the status icon it rests on
+    /// (on a bar surface) and whether it is over the open menu. Called on
+    /// pointer events and every frame while a timer runs.
+    fn update_hover(&mut self) {
+        use crate::ui::hover_menu::OpenMenu;
+        let m = &self.config.metrics.hover_menu;
+        let (open_after, close_after) = (
+            std::time::Duration::from_millis(m.open_ms),
+            std::time::Duration::from_millis(m.close_ms),
+        );
+        let (icon, over_menu) = match &self.pointer {
+            Some((surface, x, y)) => {
+                let point = crate::render::display_list::Point::new(*x, *y);
+                let icon = self
+                    .surfaces
+                    .iter()
+                    .find(|e| e.layer.wl_surface() == surface)
+                    .and_then(|bar| {
+                        let (kind, rect) = self.sidebar.hover_target(&bar.output_name, point)?;
+                        Some(OpenMenu {
+                            kind,
+                            output: bar.output_name.clone(),
+                            anchor_x: rect.x + rect.width * 0.5,
+                            anchor_y: rect.y + rect.height * 0.5,
+                        })
+                    });
+                let over = self.hover_surfaces.iter().any(|e| e.layer.wl_surface() == surface);
+                (icon, over)
+            }
+            None => (None, false),
+        };
+        // Nothing opens over the lock screen.
+        let icon = icon.filter(|_| !self.lock.active());
+        if self
+            .hover_menus
+            .intent
+            .update(std::time::Instant::now(), icon, over_menu, open_after, close_after)
+        {
+            self.mark_hover_dirty();
+        }
+    }
+
+    fn mark_hover_dirty(&mut self) {
+        for entry in &mut self.hover_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// Where the hover menu goes on an output of `output_size`: beside the
+    /// rail, centred on the icon, kept on screen.
+    fn hover_placement(&self, menu: &crate::ui::hover_menu::OpenMenu, size: (f32, f32), output_size: (f32, f32)) -> (i32, i32) {
+        let m = &self.config.metrics.hover_menu;
+        let bar = &self.config.sidebar;
+        let (w, h) = size;
+        let (ow, oh) = output_size;
+        let clamp = |v: f32, len: f32, total: f32| v.min(total - len - m.offset).max(m.offset);
+        let (x, y) = match bar.position {
+            SidebarPosition::Left => (bar.width as f32 + m.offset, clamp(menu.anchor_y - h * 0.5, h, oh)),
+            SidebarPosition::Right => (ow - bar.width as f32 - m.offset - w, clamp(menu.anchor_y - h * 0.5, h, oh)),
+            SidebarPosition::Top => (clamp(menu.anchor_x - w * 0.5, w, ow), bar.height as f32 + m.offset),
+            SidebarPosition::Bottom => (clamp(menu.anchor_x - w * 0.5, w, ow), oh - bar.height as f32 - m.offset - h),
+        };
+        (x.round() as i32, y.round() as i32)
+    }
+
+    /// Carry out what a hover menu asked for.
+    fn apply_hover_events(&mut self, events: Vec<crate::ui::hover_menu::MenuEvent>) {
+        use crate::ui::hover_menu::MenuEvent;
+        for event in events {
+            match event {
+                MenuEvent::System(action) => self.actions.push(action),
+                MenuEvent::Close => self.hover_menus.intent.close(),
+                MenuEvent::OpenPage(page) => {
+                    self.hover_menus.intent.close();
+                    self.control_center.show(page);
+                    self.mark_all_dirty();
+                }
+            }
+        }
+        self.mark_hover_dirty();
     }
 
     /// Carry out what the theme switcher asked for.
@@ -1846,6 +2025,29 @@ impl App {
                     .with_output_logical_size(output_logical_size),
             );
 
+            // Hover menu: sized to its contents and moved beside the icon with
+            // margins, like the tray menu. A size is set before the first
+            // commit so it cannot come up output-sized and swallow clicks.
+            let hover_wl = self.compositor_state.create_surface(qh);
+            let hover_layer = self.layer_shell.create_layer_surface(
+                qh,
+                hover_wl,
+                Layer::Overlay,
+                Some("stratum-hovermenu"),
+                Some(output),
+            );
+            hover_layer.set_anchor(Anchor::TOP | Anchor::LEFT);
+            hover_layer.set_exclusive_zone(-1);
+            hover_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            let hover_metrics = &self.config.metrics.hover_menu;
+            hover_layer.set_size(hover_metrics.width as u32, hover_metrics.row_height as u32);
+            hover_layer.commit();
+            self.hover_surfaces.push(
+                SurfaceEntry::new(hover_layer, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
             // Tray context menu: a small overlay pinned just inside the rail.
             // It is sized to its contents, so it starts hidden and is mapped
             // only while a menu is open.
@@ -2296,6 +2498,7 @@ impl OutputHandler for App {
                 .chain(self.power_surfaces.iter_mut())
                 .chain(self.polkit_surfaces.iter_mut())
                 .chain(self.theme_surfaces.iter_mut())
+                .chain(self.hover_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
                 if entry.output.as_ref() == Some(&output) {
@@ -2326,6 +2529,7 @@ impl LayerShellHandler for App {
         self.power_surfaces.retain(|entry| &entry.layer != layer);
         self.polkit_surfaces.retain(|entry| &entry.layer != layer);
         self.theme_surfaces.retain(|entry| &entry.layer != layer);
+        self.hover_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
@@ -2360,7 +2564,12 @@ impl LayerShellHandler for App {
             return;
         }
 
-        if let Some(entry) = self.tray_menu_surfaces.iter_mut().find(|e| &e.layer == layer) {
+        if let Some(entry) = self
+            .tray_menu_surfaces
+            .iter_mut()
+            .chain(self.hover_surfaces.iter_mut())
+            .find(|e| &e.layer == layer)
+        {
             // The compositor may grant a different size than requested; keep
             // whatever it gave so the panel is drawn to fit.
             let (width, height) = configure.new_size;
@@ -2558,6 +2767,13 @@ impl PointerHandler for App {
                 self.apply_polkit_action(action);
                 return;
             }
+            // The hover menu is immediate-mode: the press is handed to its
+            // next paint, which knows where its controls are.
+            if self.hover_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                self.hover_clicked = true;
+                self.mark_hover_dirty();
+                return;
+            }
             if self.theme_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
                 let themes = self.theme_names();
                 let action = self.theme_switcher.on_click(point, &themes);
@@ -2636,6 +2852,9 @@ impl PointerHandler for App {
                     changed = true;
                 }
             } else {
+                // Clicking a status icon opens its full page, so its hover
+                // menu goes, as in the QML shell.
+                self.hover_menus.intent.close();
                 // A click elsewhere dismisses an open tray menu, the way
                 // clicking away from a popup does in the QML shell.
                 if self.tray_menu.target().is_some() {
@@ -2693,6 +2912,17 @@ impl PointerHandler for App {
                 entry.dirty = true;
             }
         }
+        // Hover menus: their timers follow the pointer, and the open menu
+        // repaints as the pointer moves over it (row highlights, a dragged
+        // slider).
+        self.update_hover();
+        let over_hover = self.pointer.as_ref().is_some_and(|(surface, _, _)| {
+            self.hover_surfaces.iter().any(|t| t.layer.wl_surface() == surface)
+        });
+        if over_hover || self.pointer_pressed {
+            self.mark_hover_dirty();
+        }
+
         // Hovering a theme row selects it, as in the QML switcher.
         let over_themes = self.pointer.as_ref().and_then(|(surface, x, y)| {
             self.theme_surfaces

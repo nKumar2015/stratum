@@ -11,6 +11,7 @@ use crate::render::display_list::{
 pub mod animation;
 pub mod control_center;
 pub mod controls;
+pub mod hover_menu;
 pub mod notification_card;
 pub mod pages;
 pub mod sidebar;
@@ -171,6 +172,13 @@ pub trait Widget {
 
     /// Handle a click at `point`, optionally returning an action for the shell.
     fn on_click(&mut self, _ctx: &ClickCtx<'_>) -> Option<Action> {
+        None
+    }
+
+    /// The hover menu this widget opens when the pointer rests on it at
+    /// `point` on `output`, with the widget's rect (which the menu anchors
+    /// beside).
+    fn hover_target(&self, _output: &str, _point: Point) -> Option<(hover_menu::HoverKind, Rect)> {
         None
     }
 

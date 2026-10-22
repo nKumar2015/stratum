@@ -17,7 +17,7 @@ Status: `todo` · `wip` · `verified`
 | Workspaces | panel section | 10-workspace window around the active workspace, active/occupied/muted colours, click and scroll-wheel to switch, animated scroll to the active row | todo |
 | App title | panel section | Active window title via Hyprland, app icon from the window class, marquee when the title overflows | wip — each monitor shows its own workspace's most recently focused window (seen on Hyprland: HDMI showed kitty, eDP's empty workspace showed Desktop), with the app icon from its desktop entry or class. Elided; no marquee yet |
 | Tray | panel section | StatusNotifierItem icons, left-click activate, right-click opens the item's DBusMenu, hover-out auto-close | wip — icons render on both monitors, both as watcher owner and as a consumer of Quickshell's watcher; activation/menu not yet exercised against a real app; no hover-out auto-close |
-| Quick icons (audio / BT / wifi) | panel section | Rounded container, per-icon state colour, hover opens the corresponding hover menu on the focused monitor | todo |
+| Quick icons (audio / BT / wifi) | panel section | Rounded container, per-icon state colour, hover opens the corresponding hover menu on the focused monitor | wip — container and state colours; resting on an icon opens its menu beside it on that monitor (exercised in headless sway, not yet on Hyprland). Icon hit areas are now per output |
 | Battery | panel section | Percentage, charging/low/critical states and icons | todo |
 | Clock | panel section | Time, updated each minute, aligned to the minute boundary | todo |
 
@@ -26,13 +26,13 @@ Status: `todo` · `wip` · `verified`
 | Surface | Kind | Behaviour to preserve | Status |
 |---|---|---|---|
 | Audio menu | popup overlay | Output/input device lists with selection, per-device volume slider, mute, EQ panel access, optimistic selection guard (pending value wins until confirmed or 5s) | todo |
-| Audio hover menu | popup overlay | Compact volume + devices, lightweight fast path | todo |
+| Audio hover menu | popup overlay | Compact volume + devices, lightweight fast path | wip — volume slider (0–150%), output and input lists with optimistic selection. Opening and layout seen in headless sway (no PipeWire there, so lists were empty); device clicks not exercised live |
 | Equalizer panel | popup section | Parametric EQ response curve, draggable band points (drag changes gain; frequency fixed per band), numeric band fields, per-band enable, add/remove band, preamp, apply, reset-to-flat, preset list with builtin/custom distinction, save/delete preset | todo |
 | Bluetooth menu | popup overlay | Adapter power/scan toggle, paired and discovered device lists, pair/connect/disconnect/forget/trust, device detail panel | todo |
-| Bluetooth hover menu | popup overlay | Compact connect/disconnect for known devices | todo |
+| Bluetooth hover menu | popup overlay | Compact connect/disconnect for known devices | wip — up to six paired devices with connect/disconnect, "+N more". Seen with real devices; connect not clicked in tests (it acts on the real adapter) |
 | Wi-Fi menu | popup overlay | Enable/disable radio, known networks with connect/disconnect/forget, scan list, password entry for secured networks, active connection detail | todo |
-| Wi-Fi hover menu | popup overlay | Compact SSID/signal, quick connect | todo |
-| Battery hover menu | popup overlay | Percentage, state, projected time, power-profile selection (low-power/balanced/performance) | todo |
+| Wi-Fi hover menu | popup overlay | Compact SSID/signal, quick connect | wip — active connections with IP, gateway, device, signal and bars, as the QML menu showed (it had no connect action either). Seen with real connections |
+| Battery hover menu | popup overlay | Percentage, state, projected time, power-profile selection (low-power/balanced/performance) | wip — state and percentage, screen-on time, projected time or status, rate, Saver/Normal/Performance. Seen with real data; profile clicks not exercised (they write the real platform profile) |
 | Dashboard menu | popup overlay | Calendar grid with month navigation and a ±3-month sliding window, music panel, performance panel; `watch`/`unwatch` lifecycle so the daemon only streams the visible month | todo |
 | Theme switcher | fullscreen overlay, exclusive keyboard | Search filter, up/down/enter/escape navigation, applies theme immediately | wip — `theme open/close/toggle` over IPC; search, wrapping arrows, Return, Escape, click outside to close, hover to select, click to apply. All exercised in headless sway (keyboard via wtype, pointer via a virtual pointer); not yet on Hyprland. The list scrolls past `max_rows`, which the QML list did not |
 

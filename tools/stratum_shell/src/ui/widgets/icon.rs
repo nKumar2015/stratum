@@ -4,8 +4,11 @@
 //! muted sink or a radio that is off reads differently at a glance. The glyph
 //! table comes from the QML sidebar widgets.
 
-use crate::render::display_list::{Color, DisplayList, Rect};
+use std::collections::HashMap;
+
+use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::control_center::Page;
+use crate::ui::hover_menu::HoverKind;
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 /// Which subsystem a status icon opens.
@@ -25,12 +28,20 @@ impl IconKind {
         }
     }
 
+    fn hover(self) -> HoverKind {
+        match self {
+            IconKind::Audio => HoverKind::Audio,
+            IconKind::Bluetooth => HoverKind::Bluetooth,
+            IconKind::Wifi => HoverKind::Wifi,
+        }
+    }
+
     /// Glyph and colour for the current system state.
     ///
     /// The QML sidebar varied the glyph by signal strength and mute state; the
     /// important part is that a disabled or muted subsystem reads differently
     /// from an active one at a glance.
-    fn appearance(self, ctx: &PaintCtx<'_>) -> (&'static str, Color) {
+    pub(crate) fn appearance(self, ctx: &PaintCtx<'_>) -> (&'static str, Color) {
         match self {
             IconKind::Bluetooth => {
                 let bluetooth = ctx.state.bluetooth.get();
@@ -112,19 +123,26 @@ impl IconKind {
     }
 }
 
-/// A status icon that opens its page in the control centre.
+/// A status icon that opens its page in the control centre, and its hover
+/// menu when the pointer rests on it.
 pub struct Icon {
     pub kind: IconKind,
-    /// Rect from the last paint, used for hit-testing.
-    last_rect: Rect,
+    /// Rect from the last paint on each output, for hit-testing. Keyed by
+    /// output because the widget tree is shared and the rails differ in
+    /// height: one rect would only match the monitor painted last.
+    rects: HashMap<String, Rect>,
 }
 
 impl Icon {
     pub fn new(kind: IconKind) -> Self {
         Self {
             kind,
-            last_rect: Rect::EMPTY,
+            rects: HashMap::new(),
         }
+    }
+
+    fn hit(&self, output: &str, point: Point) -> Option<Rect> {
+        self.rects.get(output).copied().filter(|r| r.contains(point))
     }
 }
 
@@ -144,15 +162,17 @@ impl Widget for Icon {
         rect: Rect,
         _input: &InputState,
     ) {
-        self.last_rect = rect;
+        self.rects.insert(ctx.output_name.to_string(), rect);
         let (glyph, color) = self.kind.appearance(ctx);
         ui::paint_text_centered(ctx, list, glyph, rect, ctx.metrics.typography.icon, color);
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {
-        if !self.last_rect.contains(ctx.point) {
-            return None;
-        }
+        self.hit(ctx.output_name, ctx.point)?;
         Some(Action::OpenPanel(self.kind.page()))
+    }
+
+    fn hover_target(&self, output: &str, point: Point) -> Option<(HoverKind, Rect)> {
+        self.hit(output, point).map(|rect| (self.kind.hover(), rect))
     }
 }

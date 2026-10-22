@@ -292,6 +292,30 @@ empty_text = 12.0
 max_rows = 8            # rows shown before the list scrolls
 scrim_alpha = 0.56      # dimming behind the card
 
+[metrics.hover_menu]
+open_ms = 350           # rest on an icon this long to open its menu
+close_ms = 800          # closes this long after leaving both icon and menu
+width = 280.0
+offset = 4.0            # gap between the rail and the menu
+padding = 12.0
+radius = 12.0
+border = 1.0
+title = 14.0
+text = 12.0
+caption = 11.0
+icon = 16.0
+line_height = 1.45
+row_height = 28.0
+row_gap = 2.0
+section_gap = 10.0
+gap = 6.0
+close = 20.0            # close button
+button_height = 28.0    # power-mode buttons
+button_radius = 6.0
+value_width = 38.0      # volume percentage
+stat_split = 0.38       # where values start in label/value rows
+max_devices = 6         # Bluetooth devices before "+N more"
+
 [metrics.window]
 width = 520             # settings window, initial size
 height = 640

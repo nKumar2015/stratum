@@ -98,6 +98,15 @@ impl Sidebar {
         self.on_click_with(point, output_name, input, ui::MouseButton::Left)
     }
 
+    /// The hover menu the widget under `point` on `output` opens, if any.
+    pub fn hover_target(
+        &self,
+        output: &str,
+        point: Point,
+    ) -> Option<(crate::ui::hover_menu::HoverKind, crate::render::display_list::Rect)> {
+        self.widgets.iter().find_map(|widget| widget.hover_target(output, point))
+    }
+
     /// Route a click with an explicit button. The tray uses right-click for its
     /// context menu.
     pub fn on_click_with(

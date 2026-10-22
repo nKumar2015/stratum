@@ -57,8 +57,17 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: hover menus, audio EQ panel, screenshots, dashboard,
-notification snapshot persistence, the title marquee.
+Not implemented: audio EQ panel, screenshots, dashboard, notification snapshot
+persistence, the title marquee.
+
+**Hover menus** (`ui/hover_menu.rs`) open after resting on a status icon and
+close once neither the icon nor the menu has been hovered for a grace period;
+the timing is `HoverIntent`, which is pure and tested. Widgets report what
+they open through `Widget::hover_target`, keyed by output. The menu is
+immediate-mode and painted once per change: the painted height sizes the
+surface, and a size change waits for the configure before drawing. Their
+actions are real (audio devices, Bluetooth, the platform power profile), so
+live tests must not click them.
 
 App icons come from `IconTheme::load_app_icon`, which maps a window class to
 its desktop entry's `Icon` (`desktop.rs`) before trying the class as an icon

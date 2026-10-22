@@ -146,6 +146,14 @@ impl Widget for QuickPanel {
         self.children.iter_mut().find_map(|child| child.on_click(ctx))
     }
 
+    fn hover_target(
+        &self,
+        output: &str,
+        point: crate::render::display_list::Point,
+    ) -> Option<(crate::ui::hover_menu::HoverKind, Rect)> {
+        self.children.iter().find_map(|child| child.hover_target(output, point))
+    }
+
     fn tick(&mut self, dt: f32) -> bool {
         crate::ui::tick_all(&mut self.children, dt)
     }
