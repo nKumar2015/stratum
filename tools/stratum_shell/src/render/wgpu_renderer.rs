@@ -246,12 +246,22 @@ impl SurfaceRenderer {
             .find(|mode| caps.alpha_modes.contains(mode))
             .unwrap_or(caps.alpha_modes[0]);
 
+        // Not Fifo. On Wayland, Fifo makes a present wait for the surface's
+        // frame callback, and a surface the compositor is not showing (an
+        // overlay unmapped mid-frame, anything behind the lock screen) never
+        // gets one: the present blocked forever and froze the whole event
+        // loop. Wayland compositors never tear, and the shell paces its own
+        // redraws, so Mailbox costs nothing and never waits on a callback.
+        let present_mode = [wgpu::PresentMode::Mailbox, wgpu::PresentMode::Immediate]
+            .into_iter()
+            .find(|mode| caps.present_modes.contains(mode))
+            .unwrap_or(wgpu::PresentMode::Fifo);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.0.max(1),
             height: size.1.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
