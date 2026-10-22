@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::pam::Secret;
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
-use crate::ui::password_field::{FieldKey, FieldStyle, PasswordField};
+use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
 /// One request from polkitd.
@@ -66,7 +66,7 @@ pub struct PolkitDialog {
     /// The last request that was closed. The published state keeps showing it
     /// as active until the agent reports the end, which must not reopen it.
     closed: Option<String>,
-    field: PasswordField,
+    field: TextField,
     verifying: bool,
     error: Option<String>,
     /// Output the dialog opened on.
@@ -80,7 +80,7 @@ impl PolkitDialog {
         Self {
             request: None,
             closed: None,
-            field: PasswordField::new(),
+            field: TextField::new(),
             verifying: false,
             error: None,
             target: None,
@@ -421,6 +421,8 @@ impl PolkitDialog {
                 text: m.field_text,
                 padding: m.field_padding,
                 caret_width: m.caret_width,
+                masked: true,
+                placeholder: None,
             },
             self.verifying,
         );

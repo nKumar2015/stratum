@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::pam::Secret;
 use crate::render::display_list::{Color, DisplayList, Image, Rect};
-use crate::ui::password_field::{FieldKey, FieldStyle, PasswordField};
+use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl PartialEq for KeyOutcome {
 
 pub struct LockScreen {
     phase: Phase,
-    field: PasswordField,
+    field: TextField,
     /// A PAM check is running; input is held until it answers.
     checking: bool,
     /// The last attempt failed. Cleared by the next keypress.
@@ -64,7 +64,7 @@ impl LockScreen {
     pub fn new() -> Self {
         Self {
             phase: Phase::Unlocked,
-            field: PasswordField::new(),
+            field: TextField::new(),
             checking: false,
             failed: false,
             reason: None,
@@ -339,6 +339,8 @@ impl LockScreen {
                 text: m.field_text,
                 padding: m.field_padding,
                 caret_width: m.caret_width,
+                masked: true,
+                placeholder: None,
             },
             self.checking,
         );
@@ -662,7 +664,7 @@ mod tests {
         assert_eq!(lock.status().as_deref(), Some("Your account has expired"));
     }
 
-    /// Editing keys are the field's (tested in `password_field`); Escape is
+    /// Editing keys are the field's (tested in `text_field`); Escape is
     /// the lock's own: there is nothing to close, so it clears.
     #[test]
     fn escape_clears_the_field() {

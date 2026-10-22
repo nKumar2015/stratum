@@ -42,8 +42,8 @@ Status: `todo` · `wip` · `verified`
 |---|---|---|---|
 | System OSD | layer-shell overlay | Volume and brightness channels, icon by level, fade in/out, absolute volume baseline at 150% ceiling, poll while visible | todo |
 | Notification listener | background service | Own `org.freedesktop.Notifications` server, snapshot persistence across restarts, identity-based replacement of same-app/summary notifications | todo |
-| Notification center | popup overlay | Notification list, dismiss individual, clear all, do-not-disturb toggle, inline reply with action buttons | todo |
-| Notification toasts | popup overlay | Appear per notification with app icon/name/summary/body, urgency styling, auto-expiry, click to dismiss, inline reply field | todo |
+| Notification center | popup overlay | Notification list, dismiss individual, clear all, do-not-disturb toggle, inline reply with action buttons | wip — the Notifications page of the settings window: list, dismiss, clear all, DND over IPC, action buttons, default action on click, and the last reply (as the QML centre showed, no field). Page actions implemented but not yet clicked in a running shell |
+| Notification toasts | popup overlay | Appear per notification with app icon/name/summary/body, urgency styling, auto-expiry, click to dismiss, inline reply field | wip — name/summary/body (markup flattened), urgency stripe, expiry paused while hovered or replying, action buttons, default action on click (dismiss when there is none), inline reply. Exercised in headless sway with notify-send and gdbus: `ActionInvoked`, `NotificationReplied`, one `NotificationClosed` each. No app icon yet |
 
 ## Interactive / privileged
 

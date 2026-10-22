@@ -126,8 +126,6 @@ pub struct App {
     polkit_agent: Option<Arc<stratum_sys::managers::polkit::PolkitAgent>>,
     polkit_runtime: Option<tokio::runtime::Handle>,
     polkit_events: Option<calloop::channel::Sender<PolkitEvent>>,
-    /// Toast rects from the last paint, for click-to-dismiss.
-    toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -246,7 +244,6 @@ impl App {
             polkit_agent: None,
             polkit_runtime: None,
             polkit_events: None,
-            toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -494,6 +491,11 @@ impl App {
                             }
                         }
                     }
+                    crate::actions::SystemAction::InvokeNotification(id, key) => {
+                        if let Some(server) = &self.notifications {
+                            server.invoke(id, &key);
+                        }
+                    }
                     crate::actions::SystemAction::SetTheme(name) => {
                         // Theme is shell-owned state, not a system action.
                         if self.switch_theme(&name) {
@@ -541,55 +543,52 @@ impl App {
             entry.dirty = false;
         }
 
-        // Toast stack. Hits are collected so a click on a card can dismiss it.
-        // An empty stack unmaps, for the same reason as the OSD.
-        self.toast_hits.clear();
+        // Toast stack. The stack keeps its card layouts for clicks and hover.
+        // An empty stack unmaps, for the same reason as the OSD. The surface
+        // takes keyboard focus only while a reply field on it has focus.
         let toasts_visible = !self.toasts.is_empty();
+        let toast_keyboard = self.toasts.keyboard_output().map(str::to_string);
         for entry in &mut self.toast_surfaces {
             if !toasts_visible {
                 entry.unmap();
                 continue;
             }
-            if !entry.ready() || !entry.dirty {
+            if !entry.ready() {
                 continue;
             }
-            let output_name = entry.output_name.clone();
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
-            let rect = entry.logical_rect();
-            let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
-            let hits = self.toasts.paint(&mut ctx, &mut list, rect);
+            if entry.dirty {
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                let bounds = self.toasts.paint(&mut ctx, &mut list, rect);
 
-            // The surface spans the full screen height so the stack can grow,
-            // but only the cards themselves should take clicks. Everything
-            // else must fall through to the window underneath. This has to be
-            // set before the commit that `render_list` performs, or the region
-            // only takes effect one frame late.
-            let bounds = hits
-                .iter()
-                .fold(None::<crate::render::display_list::Rect>, |acc, (card, _)| {
-                    Some(match acc {
-                        None => *card,
-                        Some(acc) => crate::render::display_list::union(acc, *card),
-                    })
-                });
-            entry.set_input_region(&self.compositor_state, bounds);
-
-            // Only the surface the pointer is over can receive a click, so
-            // merging the stacks is safe: at most one output is interactive.
-            self.toast_hits.extend(hits);
-            entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
-            entry.dirty = false;
+                // The surface spans the full screen height so the stack can
+                // grow, but only the cards themselves should take clicks.
+                // Everything else must fall through to the window underneath.
+                // This has to be set before the commit that `render_list`
+                // performs, or the region only takes effect one frame late.
+                entry.set_input_region(&self.compositor_state, bounds);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
+            // As with the power menu, focus is requested only once a buffer is
+            // attached.
+            let wants_keys = toast_keyboard.as_deref() == Some(entry.output_name.as_str());
+            if entry.mapped {
+                entry.set_keyboard_exclusive(wants_keys);
+            }
         }
 
         // Power menu. Only the output it opened on is painted and given
@@ -1009,6 +1008,34 @@ impl App {
             }
         }) {
             warn!("failed to insert polkit event source: {err}");
+        }
+    }
+
+    /// Carry out what a click or key on the toast stack asked for.
+    fn apply_toast_action(&mut self, action: crate::toasts::ToastAction) {
+        use crate::toasts::ToastAction;
+        match action {
+            ToastAction::None => return,
+            ToastAction::Redraw => {}
+            // Reason 2 is "dismissed by the user".
+            ToastAction::Dismiss(id) => {
+                if let Some(server) = &self.notifications {
+                    server.close(id, 2);
+                }
+            }
+            ToastAction::Invoke(id, key) => {
+                if let Some(server) = &self.notifications {
+                    server.invoke(id, &key);
+                }
+            }
+            ToastAction::Reply(id, text) => {
+                if let Some(server) = &self.notifications {
+                    server.reply(id, &text);
+                }
+            }
+        }
+        for entry in &mut self.toast_surfaces {
+            entry.dirty = true;
         }
     }
 
@@ -2464,17 +2491,14 @@ impl PointerHandler for App {
                 }
                 changed = true;
             } else if on_toast {
-                if let Some((_, id)) = self
-                    .toast_hits
+                let output = self
+                    .toast_surfaces
                     .iter()
-                    .find(|(rect, _)| rect.contains(point))
-                    .copied()
-                {
-                    self.toasts.dismiss(id);
-                    if let Some(server) = &self.notifications {
-                        server.close(id, 2);
-                    }
-                }
+                    .find(|t| t.layer.wl_surface() == &surface)
+                    .map(|t| t.output_name.clone())
+                    .unwrap_or_default();
+                let action = self.toasts.on_click(point, &output);
+                self.apply_toast_action(action);
                 changed = true;
             } else if in_settings {
                 if let Some(window) = self.settings.as_ref() {
@@ -2541,6 +2565,19 @@ impl PointerHandler for App {
                     settings.dirty = true;
                 }
                 changed = true;
+            }
+        }
+
+        // The card under the pointer is highlighted and does not expire.
+        let over_toast = self.pointer.as_ref().and_then(|(surface, x, y)| {
+            self.toast_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == surface)
+                .then(|| crate::render::display_list::Point::new(*x, *y))
+        });
+        if self.toasts.set_pointer(over_toast) {
+            for entry in &mut self.toast_surfaces {
+                entry.dirty = true;
             }
         }
 
@@ -2670,6 +2707,16 @@ impl KeyboardHandler for App {
                 .polkit_dialog
                 .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
             self.apply_polkit_action(action);
+            return;
+        }
+
+        // A focused toast reply field holds the keyboard until sent or
+        // abandoned.
+        if self.toasts.wants_keys() {
+            let action = self
+                .toasts
+                .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
+            self.apply_toast_action(action);
             return;
         }
 

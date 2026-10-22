@@ -56,8 +56,8 @@ the IPC socket, the lock screen, and the polkit dialog (both verified only
 against fixtures in a nested compositor; see below).
 
 Not implemented: hover menus, theme switcher
-overlay, audio EQ panel, notification actions/inline reply, screenshots,
-dashboard, app icon beside the window title. See
+overlay, audio EQ panel, screenshots, dashboard, app icons (beside the window
+title and on notification cards), notification snapshot persistence. See
 `docs/native-shell-parity.md`.
 
 **Tray activation** works: left click sends `Activate`, middle click
@@ -147,6 +147,26 @@ rules found in sway, both handled by `SurfaceEntry`:
 
 The renderer must also release a `Suboptimal` frame before reconfiguring the
 surface; reconfiguring while holding it is a fatal wgpu validation error.
+
+Surfaces present with **Mailbox, not Fifo**. Under Fifo a present waits for the
+surface's frame callback, which a hidden surface (an overlay unmapped while a
+frame was in flight, anything behind the lock) never receives, and the event
+loop froze. Measured idle CPU is the same either way.
+
+**Notifications.** Toasts and the page share `ui/notification_card.rs`, whose
+`layout` produces every rect that `paint` draws and `hit` resolves. The server
+emits `ActionInvoked` and `NotificationReplied` (the `inline-reply`
+capability), closing afterwards unless the notification is `resident`. A
+focused toast reply field takes exclusive keyboard focus on that output's toast
+surface. The QML centre showed only the last reply, never a field, and so does
+the page.
+
+**Clicking in headless sway.** It has no pointer device, so the shell never gets
+a `wl_pointer`, and `swaymsg seat … cursor` clicks go nowhere. Use a persistent
+`zwlr_virtual_pointer_v1` client started before the shell (the scratch tool
+used for the notification tests reads `click X Y` lines from a FIFO). One-shot
+tools such as `wlrctl` attach and detach the device per command, which races
+the shell binding its pointer.
 
 ### Decisions made with the user (2026-10-21)
 

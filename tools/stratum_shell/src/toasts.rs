@@ -1,17 +1,27 @@
 //! Notification toasts.
 //!
 //! A stack of transient cards in the corner, shown when notifications arrive
-//! and dismissed on hover, click, or expiry. Sticky notifications (critical
-//! urgency, or an explicit "never expire") stay until dismissed.
+//! and removed on dismissal or expiry. Sticky notifications (critical urgency,
+//! or an explicit "never expire") stay until dismissed. As in the QML toast, a
+//! card does not expire while the pointer is over it or its reply field has
+//! focus.
 //!
-//! Toasts live on their own overlay-layer surface per output, sharing the OSD's
-//! surface pattern: no exclusive zone and no keyboard input.
+//! Cards are drawn by `ui::notification_card`: clicking the card runs the
+//! notification's default action (or dismisses it when it has none), buttons
+//! run the other actions, and notifications that accept one get an inline
+//! reply field. Typing needs keyboard focus, so the toast surface takes
+//! exclusive focus only while a reply field is focused.
+//!
+//! Toasts live on their own overlay-layer surface per output. Every output's
+//! stack has the same width and anchor, so one set of card layouts serves all.
 
 use std::collections::HashMap;
 
 use crate::notifications::Notification;
-use crate::render::display_list::{Color, DisplayList, Rect};
+use crate::render::display_list::{DisplayList, Point, Rect};
 use crate::ui::animation::Tween;
+use crate::ui::notification_card::{self, CardHit, CardLayout, CardPaint, ReplyMode};
+use crate::ui::text_field::{FieldKey, TextField};
 use crate::ui::{self, PaintCtx};
 
 /// One toast on screen.
@@ -31,6 +41,28 @@ impl Toast {
     }
 }
 
+/// What a click or key on the stack asks the caller to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToastAction {
+    None,
+    /// The stack changed; repaint.
+    Redraw,
+    /// The user closed the notification.
+    Dismiss(u32),
+    /// Run an action (`default` for a click on the card).
+    Invoke(u32, String),
+    /// Send an inline reply.
+    Reply(u32, String),
+}
+
+/// The focused reply field and the card it belongs to.
+struct ReplyFocus {
+    id: u32,
+    /// Output whose surface takes keyboard focus while typing.
+    output: String,
+    field: TextField,
+}
+
 /// The toast stack.
 pub struct Toasts {
     entries: Vec<Toast>,
@@ -40,6 +72,11 @@ pub struct Toasts {
     metrics: crate::ui::style::ToastMetrics,
     /// Do-not-disturb: keep the stack consistent, but do not add cards.
     muted: bool,
+    /// Card layouts from the last paint, for hit-testing and hover.
+    layouts: Vec<(u32, CardLayout)>,
+    /// The card under the pointer, which does not expire.
+    hovered: Option<u32>,
+    reply: Option<ReplyFocus>,
 }
 
 impl Toasts {
@@ -61,11 +98,20 @@ impl Toasts {
             dismissed: HashMap::new(),
             metrics: crate::ui::style::ToastMetrics::default(),
             muted: false,
+            layouts: Vec::new(),
+            hovered: None,
+            reply: None,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// The output whose toast surface should hold keyboard focus: the one
+    /// whose reply field is being typed into.
+    pub fn keyboard_output(&self) -> Option<&str> {
+        self.reply.as_ref().map(|r| r.output.as_str())
     }
 
     /// Reconcile the stack with the server's current list.
@@ -78,15 +124,13 @@ impl Toasts {
         self.entries.retain(|toast| live.contains(&toast.notification.id));
 
         for notification in list {
-            if self.entries.iter().any(|t| t.notification.id == notification.id) {
+            if let Some(existing) = self
+                .entries
+                .iter_mut()
+                .find(|t| t.notification.id == notification.id)
+            {
                 // Update the content in place (a replaces_id refresh).
-                if let Some(existing) = self
-                    .entries
-                    .iter_mut()
-                    .find(|t| t.notification.id == notification.id)
-                {
-                    existing.notification = notification.clone();
-                }
+                existing.notification = notification.clone();
                 continue;
             }
             if self.dismissed.contains_key(&notification.id) {
@@ -125,13 +169,18 @@ impl Toasts {
                 self.dismissed.insert(removed.notification.id, ());
             }
         }
+        self.drop_stale_reply();
     }
 
     /// Advance timers. Returns ids that expired this tick.
     pub fn tick(&mut self, dt: f32) -> Vec<u32> {
         let mut expired = Vec::new();
+        let paused = [self.hovered, self.reply.as_ref().map(|r| r.id)];
         for toast in &mut self.entries {
             toast.reveal.tick(dt);
+            if paused.contains(&Some(toast.notification.id)) {
+                continue;
+            }
             if let Some(remaining) = &mut toast.remaining {
                 *remaining -= dt;
                 if *remaining <= 0.0 {
@@ -155,144 +204,172 @@ impl Toasts {
     pub fn dismiss(&mut self, id: u32) {
         self.entries.retain(|t| t.notification.id != id);
         self.dismissed.insert(id, ());
+        self.drop_stale_reply();
     }
 
-    /// Paint the stack anchored to the top-right of `surface`.
-    ///
-    /// Returns the rects and ids for hit-testing.
+    fn drop_stale_reply(&mut self) {
+        if let Some(reply) = &self.reply {
+            if !self.entries.iter().any(|t| t.notification.id == reply.id) {
+                self.reply = None;
+            }
+        }
+    }
+
+    /// Track the pointer over the stack (`None` when it is elsewhere).
+    /// Returns true when the hovered card changed.
+    pub fn set_pointer(&mut self, point: Option<Point>) -> bool {
+        let hovered = point.and_then(|p| {
+            self.layouts
+                .iter()
+                .find(|(_, layout)| layout.card.contains(p))
+                .map(|(id, _)| *id)
+        });
+        let changed = hovered != self.hovered;
+        self.hovered = hovered;
+        changed
+    }
+
+    /// Resolve a click on the toast surface of `output`.
+    pub fn on_click(&mut self, point: Point, output: &str) -> ToastAction {
+        let Some((id, hit)) = self
+            .layouts
+            .iter()
+            .find_map(|(id, layout)| layout.hit(point).map(|hit| (*id, hit)))
+        else {
+            return ToastAction::None;
+        };
+        let Some(notification) = self
+            .entries
+            .iter()
+            .find(|t| t.notification.id == id)
+            .map(|t| t.notification.clone())
+        else {
+            return ToastAction::None;
+        };
+        // Any click outside the focused field gives up keyboard focus.
+        if hit != CardHit::ReplyField && hit != CardHit::Send {
+            self.reply = None;
+        }
+        match hit {
+            CardHit::Dismiss => {
+                self.dismiss(id);
+                ToastAction::Dismiss(id)
+            }
+            CardHit::Action(key) => ToastAction::Invoke(id, key),
+            CardHit::Body if notification.has_default_action() => {
+                ToastAction::Invoke(id, "default".to_string())
+            }
+            // Without a default action a click dismisses, as it always has.
+            CardHit::Body => {
+                self.dismiss(id);
+                ToastAction::Dismiss(id)
+            }
+            CardHit::ReplyField => {
+                if self.reply.as_ref().map(|r| r.id) != Some(id) {
+                    self.reply = Some(ReplyFocus {
+                        id,
+                        output: output.to_string(),
+                        field: TextField::new(),
+                    });
+                }
+                ToastAction::Redraw
+            }
+            CardHit::Send => self.send(id),
+        }
+    }
+
+    fn send(&mut self, id: u32) -> ToastAction {
+        let Some(reply) = self.reply.as_mut().filter(|r| r.id == id) else {
+            return ToastAction::None;
+        };
+        let Some(text) = reply.field.take() else {
+            return ToastAction::None;
+        };
+        let text = text.expose().trim().to_string();
+        self.reply = None;
+        if text.is_empty() {
+            return ToastAction::Redraw;
+        }
+        ToastAction::Reply(id, text)
+    }
+
+    /// Whether keys should come here: a reply field has focus.
+    pub fn wants_keys(&self) -> bool {
+        self.reply.is_some()
+    }
+
+    pub fn key(
+        &mut self,
+        keysym: smithay_client_toolkit::seat::keyboard::Keysym,
+        text: Option<&str>,
+        ctrl: bool,
+    ) -> ToastAction {
+        let Some(reply) = self.reply.as_mut() else {
+            return ToastAction::None;
+        };
+        match reply.field.key(keysym, text, ctrl) {
+            FieldKey::Ignored => ToastAction::None,
+            FieldKey::Changed => ToastAction::Redraw,
+            FieldKey::Submit(text) => {
+                let id = reply.id;
+                let text = text.expose().trim().to_string();
+                self.reply = None;
+                if text.is_empty() {
+                    ToastAction::Redraw
+                } else {
+                    ToastAction::Reply(id, text)
+                }
+            }
+            FieldKey::Escape => {
+                self.reply = None;
+                ToastAction::Redraw
+            }
+        }
+    }
+
+    /// Paint the stack anchored to the top-right of `surface`. The card
+    /// layouts are kept for hit-testing; the union of the cards is returned
+    /// for the surface's input region.
     pub fn paint(
-        &self,
+        &mut self,
         ctx: &mut PaintCtx<'_>,
         list: &mut DisplayList,
         surface: Rect,
-    ) -> Vec<(Rect, u32)> {
-        let m = &self.metrics;
-        let width = m.card_width.min(surface.width - 24.0);
-        let mut y = surface.y + 12.0;
-        let mut hits = Vec::new();
+    ) -> Option<Rect> {
+        let m = self.metrics.clone();
+        let width = m.card_width.min(surface.width - m.margin as f32 * 2.0);
+        let mut y = surface.y + m.margin as f32;
+        let mut layouts = Vec::with_capacity(self.entries.len());
+        let mut bounds: Option<Rect> = None;
 
         for toast in &self.entries {
             let reveal = toast.reveal.value().clamp(0.0, 1.2);
-            let alpha = reveal.min(1.0);
-
-            // Measure the body by wrapping roughly: two lines at most.
-            let body_lines = if toast.notification.body.is_empty() { 0 } else { 2 };
-            let height = m.header_height + body_lines as f32 * m.body_line_height;
-
             // Slide in from the right.
             let offset = (1.0 - reveal).max(0.0) * m.slide_distance;
-            let card = Rect {
-                x: surface.x + surface.width - width - 12.0 + offset,
-                y,
-                width,
-                height,
-                radius: m.radius,
-                color: Color::TRANSPARENT,
-            };
-
-            let fill = Color::rgba(
-                ctx.theme.surface_high.r,
-                ctx.theme.surface_high.g,
-                ctx.theme.surface_high.b,
-                0.98 * alpha,
-            );
-            ui::paint_frame(
+            let x = surface.x + surface.width - width - m.margin as f32 + offset;
+            let id = toast.notification.id;
+            let layout = notification_card::layout(ctx, &toast.notification, Point::new(x, y), width, ReplyMode::Field);
+            let reply = self.reply.as_ref().filter(|r| r.id == id).map(|r| &r.field);
+            notification_card::paint(
+                ctx,
                 list,
-                card,
-                fill,
-                ctx.theme.outline.with_alpha(alpha),
-                ctx.appearance.framed_border,
+                &toast.notification,
+                &layout,
+                CardPaint {
+                    alpha: reveal.min(1.0),
+                    hovered: self.hovered == Some(id),
+                    reply,
+                },
             );
-
-            // Urgency stripe.
-            let accent = match toast.notification.urgency {
-                2 => ctx.theme.error,
-                0 => ctx.theme.text_muted,
-                _ => ctx.theme.primary,
-            }
-            .with_alpha(alpha);
-            list.push_rect(Rect {
-                x: card.x,
-                y: card.y,
-                width: m.stripe_width,
-                height: card.height,
-                radius: 0.0,
-                color: accent,
+            y += layout.card.height + m.gap;
+            bounds = Some(match bounds {
+                None => layout.card,
+                Some(acc) => crate::render::display_list::union(acc, layout.card),
             });
-
-            let text = ctx.theme.text_main.with_alpha(alpha);
-            let muted = ctx.theme.text_muted.with_alpha(alpha);
-
-            // App name, then summary.
-            if !toast.notification.app_name.is_empty() {
-                ui::paint_text_vcentered(
-                    ctx,
-                    list,
-                    &toast.notification.app_name,
-                    card.x + 14.0,
-                    Rect {
-                        height: 20.0,
-                        ..card
-                    },
-                    ctx.metrics.typography.caption,
-                    ctx.metrics.typography.weight_bold,
-                    muted,
-                );
-            }
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &toast.notification.summary,
-                card.x + 14.0,
-                Rect {
-                    y: card.y + 6.0,
-                    height: 26.0,
-                    width: card.width - 60.0,
-                    ..card
-                },
-                13.0,
-                600,
-                text,
-            );
-
-            if !toast.notification.body.is_empty() {
-                let body = truncate(&toast.notification.body, 90);
-                ui::paint_text_vcentered(
-                    ctx,
-                    list,
-                    &body,
-                    card.x + 14.0,
-                    Rect {
-                        y: card.y + 30.0,
-                        height: 32.0,
-                        width: card.width - 28.0,
-                        ..card
-                    },
-                    m.body,
-                    ctx.metrics.typography.weight_regular,
-                    muted,
-                );
-            }
-
-            // Dismiss affordance.
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                "\u{f0156}",
-                card.x + card.width - 24.0,
-                Rect {
-                    height: 24.0,
-                    ..card
-                },
-                m.icon,
-                ctx.metrics.typography.weight_regular,
-                muted,
-            );
-
-            hits.push((card, toast.notification.id));
-            y += height + m.gap;
+            layouts.push((id, layout));
         }
-        hits
+        self.layouts = layouts;
+        bounds
     }
 }
 
@@ -302,22 +379,11 @@ impl Default for Toasts {
     }
 }
 
-/// Trim a string to roughly `max` characters, adding an ellipsis.
-fn truncate(value: &str, max: usize) -> String {
-    let mut out = String::with_capacity(max.min(value.len()) + 1);
-    for (count, ch) in value.chars().enumerate() {
-        if count >= max {
-            out.push('\u{2026}');
-            break;
-        }
-        out.push(ch);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::display_list::Color;
+    use smithay_client_toolkit::seat::keyboard::Keysym;
 
     fn notification(id: u32, urgency: u8, timeout: i32) -> Notification {
         Notification {
@@ -329,7 +395,40 @@ mod tests {
             actions: Vec::new(),
             urgency,
             expire_timeout: timeout,
-            image_path: None,
+            ..Default::default()
+        }
+    }
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+            radius: 0.0,
+            color: Color::TRANSPARENT,
+        }
+    }
+
+    /// A stack holding one card with a fixed layout, so clicks can be tested
+    /// without fonts: card 300x140, an action, and a reply row.
+    fn stack_with(n: Notification) -> Toasts {
+        let mut toasts = Toasts::new();
+        toasts.sync(std::slice::from_ref(&n));
+        let layout = crate::ui::notification_card::test_layout(
+            rect(0.0, 0.0, 300.0, 140.0),
+            rect(270.0, 5.0, 22.0, 22.0),
+            vec![(rect(14.0, 70.0, 74.0, 26.0), "mark".into(), "Mark".into())],
+            Some(rect(14.0, 104.0, 200.0, 30.0)),
+            Some(rect(220.0, 104.0, 52.0, 30.0)),
+        );
+        toasts.layouts = vec![(n.id, layout)];
+        toasts
+    }
+
+    fn type_text(toasts: &mut Toasts, text: &str) {
+        for ch in text.chars() {
+            toasts.key(Keysym::a, Some(&ch.to_string()), false);
         }
     }
 
@@ -366,6 +465,15 @@ mod tests {
     }
 
     #[test]
+    fn hovering_pauses_expiry() {
+        let mut toasts = stack_with(notification(1, 1, 1000));
+        assert!(toasts.set_pointer(Some(Point::new(150.0, 40.0))));
+        assert!(toasts.tick(5.0).is_empty(), "a hovered card does not expire");
+        toasts.set_pointer(None);
+        assert_eq!(toasts.tick(1.5), vec![1]);
+    }
+
+    #[test]
     fn dismiss_is_final() {
         let mut toasts = Toasts::new();
         toasts.sync(&[notification(1, 1, 5000)]);
@@ -397,8 +505,59 @@ mod tests {
     }
 
     #[test]
-    fn truncate_adds_ellipsis() {
-        assert_eq!(truncate("hello", 10), "hello");
-        assert_eq!(truncate("hello world", 5), "hello\u{2026}");
+    fn clicks_run_actions_or_dismiss() {
+        let mut with_default = notification(1, 1, 5000);
+        with_default.actions = vec!["default".into(), "Open".into(), "mark".into(), "Mark".into()];
+        let mut toasts = stack_with(with_default);
+        assert_eq!(toasts.on_click(Point::new(20.0, 80.0), "a"), ToastAction::Invoke(1, "mark".into()));
+        assert_eq!(toasts.on_click(Point::new(150.0, 40.0), "a"), ToastAction::Invoke(1, "default".into()));
+        assert_eq!(toasts.on_click(Point::new(280.0, 10.0), "a"), ToastAction::Dismiss(1));
+        assert!(toasts.is_empty());
+
+        // No default action: the body click dismisses.
+        let mut toasts = stack_with(notification(2, 1, 5000));
+        assert_eq!(toasts.on_click(Point::new(150.0, 40.0), "a"), ToastAction::Dismiss(2));
+    }
+
+    #[test]
+    fn reply_takes_focus_types_and_sends() {
+        let mut n = notification(1, 1, 1000);
+        n.reply_placeholder = Some("Reply...".into());
+        let mut toasts = stack_with(n);
+        assert!(!toasts.wants_keys());
+        assert_eq!(toasts.on_click(Point::new(20.0, 110.0), "HDMI-A-1"), ToastAction::Redraw);
+        assert!(toasts.wants_keys());
+        assert_eq!(toasts.keyboard_output(), Some("HDMI-A-1"));
+        assert!(toasts.tick(5.0).is_empty(), "a card being replied to does not expire");
+
+        type_text(&mut toasts, " on my way ");
+        assert_eq!(toasts.key(Keysym::Return, None, false), ToastAction::Reply(1, "on my way".into()));
+        assert!(!toasts.wants_keys(), "sending gives the keyboard back");
+    }
+
+    #[test]
+    fn send_button_and_escape() {
+        let mut n = notification(1, 1, 5000);
+        n.reply_placeholder = Some("Reply...".into());
+        let mut toasts = stack_with(n);
+        // Send with nothing typed (and no focus) does nothing.
+        assert_eq!(toasts.on_click(Point::new(230.0, 110.0), "a"), ToastAction::None);
+        toasts.on_click(Point::new(20.0, 110.0), "a");
+        type_text(&mut toasts, "ok");
+        assert_eq!(toasts.on_click(Point::new(230.0, 110.0), "a"), ToastAction::Reply(1, "ok".into()));
+
+        toasts.on_click(Point::new(20.0, 110.0), "a");
+        assert_eq!(toasts.key(Keysym::Escape, None, false), ToastAction::Redraw);
+        assert!(!toasts.wants_keys());
+    }
+
+    #[test]
+    fn focus_is_dropped_with_its_card() {
+        let mut n = notification(1, 1, 5000);
+        n.reply_placeholder = Some("Reply...".into());
+        let mut toasts = stack_with(n);
+        toasts.on_click(Point::new(20.0, 110.0), "a");
+        toasts.sync(&[]);
+        assert!(!toasts.wants_keys(), "a closed notification releases the keyboard");
     }
 }

@@ -24,6 +24,7 @@ pub struct Metrics {
     pub tray_menu: TrayMenuMetrics,
     pub lock: LockMetrics,
     pub polkit: PolkitMetrics,
+    pub notification_card: NotificationCardMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -41,6 +42,7 @@ impl Default for Metrics {
             tray_menu: TrayMenuMetrics::default(),
             lock: LockMetrics::default(),
             polkit: PolkitMetrics::default(),
+            notification_card: NotificationCardMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -423,6 +425,71 @@ impl Default for PolkitMetrics {
             confirm_width: 120.0,
             button_gap: 12.0,
             scrim_alpha: 0.8,
+        }
+    }
+}
+
+/// A notification card, shared by the toasts and the notifications page.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotificationCardMetrics {
+    /// Inner padding, and the gap from the urgency stripe.
+    pub padding: f32,
+    /// Vertical gap between the card's rows.
+    pub row_gap: f32,
+    /// Text sizes.
+    pub app: f32,
+    pub summary: f32,
+    pub body: f32,
+    /// Lines of body shown before it is elided.
+    pub body_lines: usize,
+    /// Line height as a multiple of the text size.
+    pub line_height: f32,
+    /// The close button in the top-right corner.
+    pub dismiss: f32,
+    pub dismiss_icon: f32,
+    /// Action buttons.
+    pub button_height: f32,
+    pub button_min_width: f32,
+    pub button_padding: f32,
+    pub button_gap: f32,
+    pub button_radius: f32,
+    pub button_text: f32,
+    /// The inline reply row.
+    pub reply_height: f32,
+    pub reply_radius: f32,
+    pub reply_border: f32,
+    pub reply_padding: f32,
+    pub reply_text: f32,
+    pub send_width: f32,
+    pub caret_width: f32,
+}
+
+impl Default for NotificationCardMetrics {
+    fn default() -> Self {
+        Self {
+            padding: 14.0,
+            row_gap: 8.0,
+            app: 11.0,
+            summary: 13.0,
+            body: 12.0,
+            body_lines: 3,
+            line_height: 1.35,
+            dismiss: 22.0,
+            dismiss_icon: 12.0,
+            button_height: 26.0,
+            button_min_width: 74.0,
+            button_padding: 9.0,
+            button_gap: 6.0,
+            button_radius: 6.0,
+            button_text: 12.0,
+            reply_height: 30.0,
+            reply_radius: 6.0,
+            reply_border: 1.0,
+            reply_padding: 8.0,
+            reply_text: 12.0,
+            send_width: 52.0,
+            caret_width: 1.5,
         }
     }
 }

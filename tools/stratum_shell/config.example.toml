@@ -239,6 +239,30 @@ confirm_width = 120.0
 button_gap = 12.0
 scrim_alpha = 0.8       # dimming behind the card
 
+[metrics.notification_card]   # toasts and the notifications page
+padding = 14.0
+row_gap = 8.0
+app = 11.0              # app name
+summary = 13.0
+body = 12.0
+body_lines = 3          # body lines before it is elided
+line_height = 1.35      # multiple of the text size
+dismiss = 22.0          # close button
+dismiss_icon = 12.0
+button_height = 26.0    # action buttons
+button_min_width = 74.0
+button_padding = 9.0
+button_gap = 6.0
+button_radius = 6.0
+button_text = 12.0
+reply_height = 30.0     # inline reply row
+reply_radius = 6.0
+reply_border = 1.0
+reply_padding = 8.0
+reply_text = 12.0
+send_width = 52.0
+caret_width = 1.5
+
 [metrics.window]
 width = 520             # settings window, initial size
 height = 640

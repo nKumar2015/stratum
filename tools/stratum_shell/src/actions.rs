@@ -55,6 +55,8 @@ pub enum SystemAction {
     Dismiss(u32),
     /// Close every notification.
     DismissAll,
+    /// Run one of a notification's actions by key.
+    InvokeNotification(u32, String),
     /// Switch the active theme by name.
     SetTheme(String),
     /// Left-click a tray item.
@@ -218,7 +220,10 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             state.battery.set(managers::battery::status());
             serde_json::json!({ "ok": true })
         }
-        SystemAction::Dismiss(_) | SystemAction::DismissAll | SystemAction::SetTheme(_) => {
+        SystemAction::Dismiss(_)
+        | SystemAction::DismissAll
+        | SystemAction::InvokeNotification(..)
+        | SystemAction::SetTheme(_) => {
             // Handled by the shell, which owns the notification server; the
             // worker has nothing to do.
             return Ok(());

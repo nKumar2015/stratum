@@ -11,9 +11,10 @@ use crate::render::display_list::{
 pub mod animation;
 pub mod control_center;
 pub mod controls;
+pub mod notification_card;
 pub mod pages;
-pub mod password_field;
 pub mod sidebar;
+pub mod text_field;
 pub mod style;
 pub mod widgets;
 

@@ -1,8 +1,9 @@
 //! Notifications page: the live notification list.
 
 use crate::actions::SystemAction;
-use crate::render::display_list::{Color, DisplayList, Rect};
+use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::controls;
+use crate::ui::notification_card::{self, CardHit, CardPaint, ReplyMode};
 use crate::ui::pages::heading;
 use crate::ui::{self, InputState, PaintCtx};
 
@@ -53,82 +54,47 @@ ctx.metrics.typography.weight_regular,
             pending.push(SystemAction::DismissAll);
         }
 
-        let mut y = area.y + 42.0;
-        for notification in notifications.iter().rev().take(8) {
-            let card = Rect {
-                x: area.x,
-                y,
-                width: area.width,
-                height: 66.0,
-                radius: ctx.metrics.page.card_radius,
-                color: Color::TRANSPARENT,
-            };
-            ui::paint_frame(
-                list,
-                card,
-                ctx.theme.surface_high,
-                ctx.theme.outline,
-                ctx.appearance.framed_border,
-            );
-            list.push_rect(Rect {
-                x: card.x,
-                y: card.y,
-                width: 3.0,
-                height: card.height,
-                radius: 0.0,
-                color: match notification.urgency {
-                    2 => ctx.theme.error,
-                    0 => ctx.theme.text_muted,
-                    _ => ctx.theme.primary,
-                },
-            });
-
-            ui::paint_text_vcentered(
+        // Newest first, as many as fit. Cards are the toasts' cards, showing
+        // the last reply instead of a reply field, as the QML centre did.
+        let mut y = clear.y + clear.height + ctx.metrics.page.row_spacing;
+        let pointer = input.pointer.map(|(x, y)| Point::new(x, y));
+        for notification in notifications.iter().rev() {
+            let layout = notification_card::layout(
                 ctx,
-                list,
-                &notification.summary,
-                card.x + 14.0,
-                Rect {
-                    height: 26.0,
-                    ..card
-                },
-                ctx.metrics.typography.body,
-ctx.metrics.typography.weight_bold,
-                ctx.theme.text_main,
+                notification,
+                Point::new(area.x, y),
+                area.width,
+                ReplyMode::Preview,
             );
-            let body = if notification.app_name.is_empty() {
-                notification.body.clone()
-            } else {
-                format!("{} · {}", notification.app_name, notification.body)
-            };
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &body,
-                card.x + 14.0,
-                Rect {
-                    y: card.y + 24.0,
-                    height: 20.0,
-                    width: card.width - 90.0,
-                    ..card
-                },
-                ctx.metrics.typography.caption,
-ctx.metrics.typography.weight_regular,
-                ctx.theme.text_muted,
-            );
-
-            let dismiss = Rect {
-                x: card.x + card.width - 34.0,
-                y: card.y + (card.height - 22.0) * 0.5,
-                width: 22.0,
-                height: 22.0,
-                radius: 11.0,
-                color: Color::TRANSPARENT,
-            };
-            if controls::button(ctx, list, dismiss, "x", input, clicked, false) {
-                pending.push(SystemAction::Dismiss(notification.id));
+            if layout.card.y + layout.card.height > area.y + area.height {
+                break;
             }
-            y += 72.0;
+            let hovered = pointer.is_some_and(|p| layout.card.contains(p));
+            notification_card::paint(
+                ctx,
+                list,
+                notification,
+                &layout,
+                CardPaint {
+                    alpha: 1.0,
+                    hovered,
+                    reply: None,
+                },
+            );
+            if clicked {
+                let hit = pointer.and_then(|p| layout.hit(p));
+                match hit {
+                    Some(CardHit::Dismiss) => pending.push(SystemAction::Dismiss(notification.id)),
+                    Some(CardHit::Action(key)) => {
+                        pending.push(SystemAction::InvokeNotification(notification.id, key))
+                    }
+                    Some(CardHit::Body) if notification.has_default_action() => pending.push(
+                        SystemAction::InvokeNotification(notification.id, "default".into()),
+                    ),
+                    _ => {}
+                }
+            }
+            y += layout.card.height + ctx.metrics.page.row_spacing;
         }
     }
 }

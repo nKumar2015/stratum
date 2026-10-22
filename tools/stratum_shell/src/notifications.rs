@@ -18,7 +18,7 @@ use zbus::zvariant::OwnedValue;
 use zbus::Connection;
 
 /// One live notification.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
@@ -31,6 +31,45 @@ pub struct Notification {
     pub expire_timeout: i32,
     /// `image-path`/`image_path` hint, when present.
     pub image_path: Option<String>,
+    /// `resident` hint: the notification stays after an action is invoked.
+    pub resident: bool,
+    /// Set when the notification accepts an inline reply (an `inline-reply`
+    /// action), to the placeholder for the reply field.
+    pub reply_placeholder: Option<String>,
+    /// The last reply sent, shown on notifications that stay after replying.
+    pub last_reply: Option<String>,
+}
+
+/// The action key that marks a notification as accepting an inline reply.
+pub const INLINE_REPLY: &str = "inline-reply";
+
+impl Notification {
+    /// Action key/label pairs, without the inline-reply pseudo-action.
+    pub fn action_pairs(&self) -> Vec<(&str, &str)> {
+        self.actions
+            .chunks_exact(2)
+            .map(|pair| (pair[0].as_str(), pair[1].as_str()))
+            .filter(|(key, _)| *key != INLINE_REPLY)
+            .collect()
+    }
+
+    /// Whether the notification has a `default` action, run by clicking it.
+    pub fn has_default_action(&self) -> bool {
+        self.action_pairs().iter().any(|(key, _)| *key == "default")
+    }
+
+    /// The actions drawn as buttons: everything but `default`, which is the
+    /// click on the notification itself. An empty label falls back to the key.
+    pub fn buttons(&self) -> Vec<(String, String)> {
+        self.action_pairs()
+            .into_iter()
+            .filter(|(key, _)| *key != "default")
+            .map(|(key, label)| {
+                let label = if label.trim().is_empty() { key } else { label };
+                (key.to_string(), label.to_string())
+            })
+            .collect()
+    }
 }
 
 /// Callback the server uses to report the current notification list.
@@ -103,14 +142,20 @@ impl NotificationServer {
     /// The signal matters even though we initiated the close: a client that
     /// tracks its own notifications (libnotify, the QML shell during the
     /// migration) only frees its state when it arrives.
+    ///
+    /// Closing an id that is not live does nothing. Clients commonly call
+    /// `CloseNotification` after an action already closed the notification
+    /// (notify-send does), and a second `NotificationClosed` for it would be
+    /// spurious.
     pub fn close(&self, id: u32, reason: u32) {
         {
             let Ok(mut store) = self.store.lock() else {
                 return;
             };
-            if let Some(index) = store.by_id.remove(&id) {
-                store.notifications.remove(index);
-            }
+            let Some(index) = store.by_id.remove(&id) else {
+                return;
+            };
+            store.notifications.remove(index);
             // Reindex from the list, collecting first so the map is not
             // mutated while the list is borrowed.
             let ids: Vec<u32> = store.notifications.iter().map(|n| n.id).collect();
@@ -120,18 +165,74 @@ impl NotificationServer {
             }
         }
         self.publish();
+        self.emit("NotificationClosed", &(id, reason));
+    }
 
+    /// Run one of a notification's actions: tell the client, then close the
+    /// notification unless it asked to stay (`resident`), as the spec says.
+    pub fn invoke(&self, id: u32, key: &str) {
+        if !self.knows(id) {
+            return;
+        }
+        self.emit("ActionInvoked", &(id, key));
+        if !self.resident(id) {
+            // Reason 2 is "dismissed by the user".
+            self.close(id, 2);
+        }
+    }
+
+    /// Send an inline reply (`NotificationReplied`, the extension behind the
+    /// `inline-reply` capability), then close like an invoked action.
+    pub fn reply(&self, id: u32, text: &str) {
+        if !self.knows(id) {
+            return;
+        }
+        self.emit("NotificationReplied", &(id, text));
+        if !self.resident(id) {
+            self.close(id, 2);
+            return;
+        }
+        if let Ok(mut store) = self.store.lock() {
+            if let Some(index) = store.by_id.get(&id).copied() {
+                store.notifications[index].last_reply = Some(text.to_string());
+            }
+        }
+        self.publish();
+    }
+
+    fn knows(&self, id: u32) -> bool {
+        self.store
+            .lock()
+            .map(|store| store.by_id.contains_key(&id))
+            .unwrap_or(false)
+    }
+
+    fn resident(&self, id: u32) -> bool {
+        self.store
+            .lock()
+            .ok()
+            .and_then(|store| {
+                let index = *store.by_id.get(&id)?;
+                store.notifications.get(index).map(|n| n.resident)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Emit a signal on the notifications interface, if the name is ours.
+    fn emit<B>(&self, name: &str, body: &B)
+    where
+        B: serde::Serialize + zbus::zvariant::DynamicType,
+    {
         let connection = self.connection.lock().ok().and_then(|slot| slot.clone());
         if let Some(connection) = connection {
-            let body = (id, reason);
             if let Err(err) = connection.emit_signal(
                 None::<&str>,
                 "/org/freedesktop/Notifications",
                 "org.freedesktop.Notifications",
-                "NotificationClosed",
-                &body,
+                name,
+                body,
             ) {
-                debug!("failed to emit NotificationClosed for {id}: {err}");
+                debug!("failed to emit {name}: {err}");
             }
         }
     }
@@ -170,6 +271,27 @@ impl Served {
             .get("urgency")
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(1);
+        let resident = hints
+            .get("resident")
+            .and_then(|value| bool::try_from(value).ok())
+            .unwrap_or(false);
+        // An `inline-reply` action opts in to a reply field; KDE's hints carry
+        // the placeholder (the QML shell read the same three names).
+        let reply_placeholder = actions
+            .chunks_exact(2)
+            .any(|pair| pair[0] == INLINE_REPLY)
+            .then(|| {
+                [
+                    "x-kde-reply-placeholder-text",
+                    "x-kde-reply-placeholder",
+                    "x-kde-inline-reply-placeholder-text",
+                ]
+                .iter()
+                .find_map(|key| hints.get(*key).and_then(|v| <&str>::try_from(v).ok()))
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or("Reply...")
+                .to_string()
+            });
 
         let mut store = match self.inner.store.lock() {
             Ok(store) => store,
@@ -194,6 +316,9 @@ impl Served {
             urgency,
             expire_timeout,
             image_path,
+            resident,
+            reply_placeholder,
+            last_reply: None,
         };
 
         if let Some(index) = store.by_id.get(&id).copied() {
@@ -221,6 +346,7 @@ impl Served {
             "actions".into(),
             "icon-static".into(),
             "persistence".into(),
+            "inline-reply".into(),
         ]
     }
 
@@ -246,6 +372,13 @@ impl Served {
         id: u32,
         action_key: String,
     ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn notification_replied(
+        signal_emitter: &zbus::object_server::SignalEmitter<'_>,
+        id: u32,
+        text: String,
+    ) -> zbus::Result<()>;
 }
 
 /// SystemState-friendly snapshot of the notification list.
@@ -268,6 +401,88 @@ pub fn to_json(list: &[Notification]) -> Value {
 mod tests {
     use super::*;
 
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Deliver a notification through the served interface, as a client would.
+    fn notify(server: &Arc<NotificationServer>, actions: &[&str], hints: &[(&str, zbus::zvariant::Value<'static>)]) -> u32 {
+        let served = Served {
+            inner: Arc::clone(server),
+        };
+        let hints = hints
+            .iter()
+            .map(|(k, v)| (k.to_string(), OwnedValue::try_from(v.try_clone().unwrap()).unwrap()))
+            .collect();
+        served.notify("app".into(), 0, String::new(), "s".into(), "b".into(), strings(actions), hints, -1)
+    }
+
+    fn server() -> Arc<NotificationServer> {
+        NotificationServer::new(Arc::new(|_: Vec<Notification>| {}))
+    }
+
+    #[test]
+    fn buttons_leave_out_default_and_reply() {
+        let n = Notification {
+            actions: strings(&["default", "Open", "inline-reply", "Reply", "mark", "", "archive", "Archive"]),
+            ..Default::default()
+        };
+        assert!(n.has_default_action());
+        assert_eq!(
+            n.buttons(),
+            vec![("mark".to_string(), "mark".to_string()), ("archive".into(), "Archive".into())]
+        );
+        // A dangling key without a label is ignored rather than misread.
+        let odd = Notification {
+            actions: strings(&["default"]),
+            ..Default::default()
+        };
+        assert!(!odd.has_default_action());
+    }
+
+    #[test]
+    fn invoking_closes_unless_resident() {
+        let server = server();
+        let id = notify(&server, &["default", "Open"], &[]);
+        server.invoke(id, "default");
+        assert!(!server.knows(id), "an invoked action closes the notification");
+
+        let id = notify(&server, &["default", "Open"], &[("resident", true.into())]);
+        server.invoke(id, "default");
+        assert!(server.knows(id), "resident notifications stay");
+        server.reply(id, "hi");
+        assert!(server.knows(id));
+        let store = server.store.lock().unwrap();
+        assert_eq!(store.notifications[store.by_id[&id]].last_reply.as_deref(), Some("hi"));
+        drop(store);
+
+        // Unknown ids are ignored.
+        server.invoke(999, "default");
+    }
+
+    #[test]
+    fn inline_reply_takes_the_kde_placeholder() {
+        let server = server();
+        let id = notify(
+            &server,
+            &["inline-reply", "Reply"],
+            &[("x-kde-reply-placeholder-text", "Message Ada".into())],
+        );
+        let id2 = notify(&server, &["inline-reply", ""], &[]);
+        let id3 = notify(&server, &["default", "Open"], &[]);
+        let store = server.store.lock().unwrap();
+        let get = |id: u32| store.notifications[store.by_id[&id]].reply_placeholder.clone();
+        assert_eq!(get(id).as_deref(), Some("Message Ada"));
+        assert_eq!(get(id2).as_deref(), Some("Reply..."));
+        assert_eq!(get(id3), None);
+    }
+
+    #[test]
+    fn reply_is_advertised() {
+        let served = Served { inner: server() };
+        assert!(served.get_capabilities().contains(&"inline-reply".to_string()));
+    }
+
     #[test]
     fn replacement_keeps_one_entry() {
         let sink = Arc::new(|_: Vec<Notification>| {});
@@ -284,7 +499,7 @@ mod tests {
             actions: Vec::new(),
             urgency: 1,
             expire_timeout: 0,
-            image_path: None,
+            ..Default::default()
         });
         store.by_id.insert(id, 0);
         store.notifications[0].summary = "second".into();
@@ -314,7 +529,7 @@ mod tests {
                 actions: Vec::new(),
                 urgency: 1,
                 expire_timeout: 0,
-                image_path: None,
+                ..Default::default()
             });
             store.by_id.insert(1, 0);
         }
@@ -336,7 +551,7 @@ mod tests {
             actions: vec!["default".into(), "Open".into()],
             urgency: 2,
             expire_timeout: 3000,
-            image_path: None,
+            ..Default::default()
         }];
         let json = to_json(&list);
         assert_eq!(json["notifications"][0]["summary"], "hi");
