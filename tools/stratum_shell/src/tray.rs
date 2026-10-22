@@ -133,10 +133,12 @@ impl Tray {
                 .map_err(|err| err.to_string())?;
 
             let body = reply.body();
-            let (_revision, layout): (u32, OwnedValue) =
+            // `GetLayout` returns `(u(ia{sv}av))`: the revision and the layout
+            // node itself, which is a structure rather than a variant.
+            let (_revision, (id, properties, children)): (u32, LayoutNode) =
                 body.deserialize().map_err(|err| err.to_string())?;
             let mut entries = Vec::new();
-            decode_layout(&layout, &mut entries, 0, "0");
+            decode_node(id, &properties, &children, &mut entries, 0, "0");
             Ok(entries)
         })
     }
@@ -309,16 +311,36 @@ fn split_service(value: &str) -> (String, String) {
 ///
 /// The wire type is `(ia{sv}av)` for the node, where the `av` holds child
 /// nodes in the same shape.
-fn decode_layout(value: &OwnedValue, out: &mut Vec<MenuEntry>, depth: usize, path: &str) {
+/// One DBusMenu layout node, in its wire shape `(ia{sv}av)`.
+type LayoutNode = (
+    i32,
+    std::collections::HashMap<String, OwnedValue>,
+    Vec<OwnedValue>,
+);
+
+/// Decode a node that arrived as a variant (a child), then recurse.
+fn decode_variant(value: &OwnedValue, out: &mut Vec<MenuEntry>, depth: usize, path: &str) {
     let Ok(clone) = value.try_clone() else {
         return;
     };
-    let Ok((id, properties, children)) =
-        <(i32, std::collections::HashMap<String, OwnedValue>, Vec<OwnedValue>)>::try_from(clone)
-    else {
+    let Ok((id, properties, children)) = <LayoutNode>::try_from(clone) else {
         return;
     };
+    decode_node(id, &properties, &children, out, depth, path);
+}
 
+/// Recursively decode a DBusMenu layout node.
+///
+/// The node is `(ia{sv}av)`: id, properties, and child *variants*, each of which
+/// wraps another node in the same shape.
+fn decode_node(
+    id: i32,
+    properties: &std::collections::HashMap<String, OwnedValue>,
+    children: &[OwnedValue],
+    out: &mut Vec<MenuEntry>,
+    depth: usize,
+    path: &str,
+) {
     let text = |key: &str| {
         properties
             .get(key)
@@ -349,7 +371,7 @@ fn decode_layout(value: &OwnedValue, out: &mut Vec<MenuEntry>, depth: usize, pat
 
     for (index, child) in children.iter().enumerate() {
         let child_path = format!("{path}/{index}");
-        decode_layout(
+        decode_variant(
             child,
             out,
             if is_root { depth } else { depth + 1 },
@@ -364,28 +386,119 @@ fn decode_layout(value: &OwnedValue, out: &mut Vec<MenuEntry>, depth: usize, pat
 /// change notification for most of them.
 pub async fn serve(tray: Arc<Tray>) -> zbus::Result<()> {
     let connection = Connection::session().await?;
+
+    // Own the watcher when the name is free. During migration another shell
+    // (Quickshell) usually owns it, so fall back to *consuming* its item list:
+    // the icons and menus are the same objects either way, and both shells can
+    // then display them side by side.
+    // The object is registered before the name is requested so that no call
+    // can arrive at a name with nothing behind it; it is withdrawn again if the
+    // name turns out to be taken.
     connection
         .object_server()
         .at("/StatusNotifierWatcher", Watcher { inner: Arc::clone(&tray) })
         .await?;
-    connection.request_name("org.kde.StatusNotifierWatcher").await?;
+    let owns_watcher = match connection
+        .request_name("org.kde.StatusNotifierWatcher")
+        .await
+    {
+        Ok(()) => {
+            info!("tray watcher listening on org.kde.StatusNotifierWatcher");
+            true
+        }
+        Err(_) => {
+            connection
+                .object_server()
+                .remove::<Watcher, _>("/StatusNotifierWatcher")
+                .await?;
+            info!(
+                "org.kde.StatusNotifierWatcher is owned by another shell; \
+                 consuming its item list"
+            );
+            false
+        }
+    };
+
     if let Ok(mut slot) = tray.connection.lock() {
         *slot = Some(connection.clone());
     }
-    info!("tray watcher listening on org.kde.StatusNotifierWatcher");
+
+    // Populate immediately rather than leaving the tray empty for the first
+    // poll interval.
+    if !owns_watcher {
+        adopt_foreign_items(&tray, &connection).await;
+        refresh_items(&tray, &connection).await;
+    }
 
     // Refresh item properties periodically; SNI exposes no signal for them.
+    // When we do not own the watcher, this is also where the item list itself
+    // comes from.
     let refresh_tray = Arc::clone(&tray);
     let refresh_connection = connection.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if !owns_watcher {
+                adopt_foreign_items(&refresh_tray, &refresh_connection).await;
+            }
             refresh_items(&refresh_tray, &refresh_connection).await;
         }
     });
 
     std::future::pending::<()>().await;
     Ok(())
+}
+
+/// Mirror the item list published by another host's watcher.
+///
+/// Only the identity is read here; `refresh_items` fills in the properties on
+/// the same cadence as when we own the watcher.
+async fn adopt_foreign_items(tray: &Arc<Tray>, connection: &Connection) {
+    let proxy = match zbus::Proxy::new(
+        connection,
+        "org.kde.StatusNotifierWatcher",
+        "/StatusNotifierWatcher",
+        "org.kde.StatusNotifierWatcher",
+    )
+    .await
+    {
+        Ok(proxy) => proxy,
+        Err(err) => {
+            debug!("foreign tray watcher unavailable: {err}");
+            return;
+        }
+    };
+    let registered = match proxy
+        .get_property::<Vec<String>>("RegisteredStatusNotifierItems")
+        .await
+    {
+        Ok(registered) => registered,
+        Err(err) => {
+            debug!("could not read the foreign tray item list: {err}");
+            return;
+        }
+    };
+    debug!("foreign tray items: {registered:?}");
+
+    let current = tray.snapshot();
+    let mut items = Vec::with_capacity(registered.len());
+    for service in registered {
+        let (bus, path) = split_service(&service);
+        // Keep properties already read for items that are still registered.
+        if let Some(existing) = current.iter().find(|item| item.service == bus) {
+            items.push(existing.clone());
+        } else {
+            items.push(TrayItem {
+                service: bus.clone(),
+                path,
+                id: bus.clone(),
+                title: bus,
+                status: "Active".into(),
+                ..Default::default()
+            });
+        }
+    }
+    tray.set_items(items);
 }
 
 use zbus::Connection;
@@ -579,12 +692,12 @@ mod tests {
         assert_eq!(json["items"][0]["icon"], "app-icon");
     }
 
-    /// Build a DBusMenu layout node in the wire shape `(ia{sv}av)`.
-    fn node(
+    /// Build a node's fields in the wire shape `(ia{sv}av)`.
+    fn node_fields(
         id: i32,
         props: &[(&str, zbus::zvariant::Value<'static>)],
         children: Vec<OwnedValue>,
-    ) -> OwnedValue {
+    ) -> LayoutNode {
         let properties: std::collections::HashMap<String, OwnedValue> = props
             .iter()
             .map(|(key, value)| {
@@ -594,15 +707,36 @@ mod tests {
                 )
             })
             .collect();
-        let children: Vec<OwnedValue> = children;
-        // DBusMenu nodes reach us as a serialized struct; build the same shape
-        // here so the decoder is exercised against real wire types.
+        (id, properties, children)
+    }
+
+    /// Wrap a node in a variant, which is how `GetLayout` carries children.
+    fn node_variant(fields: LayoutNode) -> OwnedValue {
         let mut builder = zbus::zvariant::StructureBuilder::new();
-        builder.push_value(zbus::zvariant::Value::from(id));
-        builder.push_value(zbus::zvariant::Value::from(properties));
-        builder.push_value(zbus::zvariant::Value::from(children));
-        let structure = builder.build().unwrap();
-        OwnedValue::try_from(zbus::zvariant::Value::from(structure)).unwrap()
+        for value in [
+            zbus::zvariant::Value::from(fields.0),
+            zbus::zvariant::Value::from(fields.1),
+            zbus::zvariant::Value::from(fields.2),
+        ] {
+            builder.push_value(value);
+        }
+        OwnedValue::try_from(zbus::zvariant::Value::from(builder.build().unwrap())).unwrap()
+    }
+
+    /// A child node, which travels inside the parent's `av` as a variant.
+    fn node(
+        id: i32,
+        props: &[(&str, zbus::zvariant::Value<'static>)],
+        children: Vec<OwnedValue>,
+    ) -> OwnedValue {
+        node_variant(node_fields(id, props, children))
+    }
+
+    /// Decode a root node, the way `GetLayout`'s reply is handled.
+    fn decode_root(root: &LayoutNode) -> Vec<MenuEntry> {
+        let mut entries = Vec::new();
+        decode_node(root.0, &root.1, &root.2, &mut entries, 0, "0");
+        entries
     }
 
     #[test]
@@ -621,10 +755,9 @@ mod tests {
             &[("type", zbus::zvariant::Value::from("separator"))],
             vec![],
         );
-        let root = node(0, &[], vec![child, disabled, separator]);
+        let root = node_fields(0, &[], vec![child, disabled, separator]);
 
-        let mut entries = Vec::new();
-        decode_layout(&root, &mut entries, 0, "0");
+        let entries = decode_root(&root);
 
         // The container itself is not shown; its three children are.
         assert_eq!(entries.len(), 3);
@@ -641,10 +774,9 @@ mod tests {
     fn nested_items_get_depth_and_children_flag() {
         let leaf = node(21, &[("label", zbus::zvariant::Value::from("Nested"))], vec![]);
         let parent = node(20, &[("label", zbus::zvariant::Value::from("More"))], vec![leaf]);
-        let root = node(0, &[], vec![parent]);
+        let root = node_fields(0, &[], vec![parent]);
 
-        let mut entries = Vec::new();
-        decode_layout(&root, &mut entries, 0, "0");
+        let entries = decode_root(&root);
 
         assert_eq!(entries.len(), 2);
         assert!(entries[0].has_children);
@@ -687,7 +819,7 @@ mod tests {
     /// block, so the two interfaces need distinct types.
     struct FakeMenu {
         calls: Arc<Mutex<Vec<String>>>,
-        layout: OwnedValue,
+        layout: LayoutNode,
     }
 
     #[zbus::interface(name = "com.canonical.dbusmenu")]
@@ -699,13 +831,23 @@ mod tests {
             true
         }
 
+        /// Must match the real signature `(u(ia{sv}av))`. Returning a variant
+        /// here is what let the earlier version pass while the real call failed
+        /// with a signature mismatch.
         fn get_layout(
             &self,
             _parent: i32,
             _depth: i32,
             _properties: Vec<String>,
-        ) -> (u32, OwnedValue) {
-            (1, self.layout.clone())
+        ) -> (u32, LayoutNode) {
+            (
+                1,
+                (
+                    self.layout.0,
+                    self.layout.1.clone(),
+                    self.layout.2.clone(),
+                ),
+            )
         }
     }
 
@@ -713,7 +855,7 @@ mod tests {
     fn activation_and_menu_work_over_dbus() {
         let name = format!("org.stratum.FakeTray{}", std::process::id());
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let layout = node(
+        let layout = node_fields(
             0,
             &[],
             vec![node(

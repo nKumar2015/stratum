@@ -80,7 +80,7 @@ pub struct App {
     /// Last applied menu geometry, so the layer is only reconfigured on change.
     /// Placement is part of the key: two menus with the same row count still
     /// open beside different icons.
-    tray_menu_geometry: Option<((u32, u32), crate::tray_menu::Placement)>,
+    tray_menu_geometry: Option<((u32, u32), crate::tray_menu::Placement, Option<String>)>,
     /// Toast rects from the last paint, for click-to-dismiss.
     toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
@@ -583,12 +583,29 @@ impl App {
             (
                 (width.round() as u32, height.round() as u32),
                 placement,
+                menu_target.clone(),
             )
         });
         if geometry != self.tray_menu_geometry {
-            self.tray_menu_geometry = geometry;
-            if let Some(((width, height), placement)) = geometry {
-                for surface in &self.tray_menu_surfaces {
+            if let Some(((width, height), _placement, _)) = &geometry {
+                let (width, height) = (*width, *height);
+                for surface in &mut self.tray_menu_surfaces {
+                    // Placement is per output: the monitor the menu opens on
+                    // decides where its edge is, and applying one output's
+                    // placement to every surface put the menu off screen on the
+                    // other monitor.
+                    let output_width = surface.output_logical_size.0;
+                    let placement = if output_width > 0.0 {
+                        crate::tray_menu::Placement::beside_rail(
+                            self.config.sidebar.position,
+                            self.config.sidebar.width as f32,
+                            output_width,
+                            self.config.metrics.tray_menu.width,
+                            self.tray_menu.placement().y,
+                        )
+                    } else {
+                        self.tray_menu.placement()
+                    };
                     surface.layer.set_size(width, height);
                     surface.layer.set_margin(
                         placement.y.round() as i32,
@@ -597,8 +614,15 @@ impl App {
                         placement.x.round() as i32,
                     );
                     surface.layer.commit();
+                    // Changing size or margins starts a new configure cycle.
+                    // Attaching a buffer before that configure arrives is a
+                    // fatal `layerSurface was not configured` protocol error, so
+                    // wait for it rather than painting this frame.
+                    surface.configured = false;
+                    surface.dirty = true;
                 }
             }
+            self.tray_menu_geometry = geometry;
         }
         for entry in &mut self.tray_menu_surfaces {
             let active = menu_target
@@ -612,6 +636,12 @@ impl App {
                 continue;
             }
             if !entry.configured {
+                continue;
+            }
+            // Only repaint on a change. Without this the surface redrew on every
+            // loop iteration, which made the text shimmer as glyphs re-rasterized
+            // at slightly different subpixel positions.
+            if !entry.dirty {
                 continue;
             }
             let output_name = entry.output_name.clone();
@@ -787,6 +817,20 @@ impl App {
         named
             .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
             .unwrap_or_default()
+    }
+
+    /// Logical width of the focused output, for popup placement.
+    ///
+    /// Resolved by name through the bar surfaces: taking the first output from
+    /// `OutputState` picks an arbitrary monitor, which is wrong whenever the
+    /// monitors differ in size.
+    fn focused_output_width(&self) -> f32 {
+        let focused = self.focused_output();
+        self.surfaces
+            .iter()
+            .find(|entry| entry.output_name == focused)
+            .map(|entry| entry.output_logical_size.0)
+            .unwrap_or(0.0)
     }
 
     /// Redraw every surface after a state change the UI thread caused.
@@ -1083,6 +1127,10 @@ impl App {
         // reports 1.6) an integer buffer scale of 2 is correct for sharpness;
         // the compositor downsamples the buffer to the logical size.
         let scale = info.scale_factor.max(1);
+        let output_logical_size = info
+            .logical_size
+            .map(|(width, height)| (width as f32, height as f32))
+            .unwrap_or((0.0, 0.0));
         info!("output '{}' (model '{}', scale {})", output_name, info.model, scale);
 
         {
@@ -1126,7 +1174,8 @@ impl App {
             layer.commit();
 
             self.surfaces.push(
-                SurfaceEntry::new(layer, scale, output_name.clone()).with_output(output.clone()),
+                SurfaceEntry::new(layer, scale, output_name.clone()).with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
             );
 
             // OSD: an overlay-layer surface anchored bottom-centre with no
@@ -1147,7 +1196,8 @@ impl App {
             osd_layer.set_size(320, 94);
             osd_layer.commit();
             self.osd_surfaces.push(
-                SurfaceEntry::new(osd_layer, scale, output_name.clone()).with_output(output.clone()),
+                SurfaceEntry::new(osd_layer, scale, output_name.clone()).with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
             );
 
             // Toast stack: overlay layer, top-right, full height, no exclusive
@@ -1169,7 +1219,8 @@ impl App {
             toast_layer.set_size(344, 0);
             toast_layer.commit();
             self.toast_surfaces.push(
-                SurfaceEntry::new(toast_layer, scale, output_name.clone()).with_output(output.clone()),
+                SurfaceEntry::new(toast_layer, scale, output_name.clone()).with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
             );
 
             // Power menu: a fullscreen overlay that is only mapped for the
@@ -1192,7 +1243,8 @@ impl App {
             power_layer.commit();
             self.power_surfaces.push(
                 SurfaceEntry::new(power_layer, scale, output_name.clone())
-                    .with_output(output.clone()),
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
             );
 
             // Tray context menu: a small overlay pinned just inside the rail.
@@ -1215,9 +1267,17 @@ impl App {
                 self.config.metrics.tray_menu.margin_left,
             );
             menu_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            // A size must be set before the first commit: anchored top-left
+            // without one, the compositor chooses a surface as large as the
+            // output, and once mapped that would swallow clicks across the
+            // whole screen. It is replaced with the menu's real size on open.
+            let menu_metrics = &self.config.metrics.tray_menu;
+            menu_layer.set_size(menu_metrics.width as u32, menu_metrics.row_height as u32);
+            menu_layer.commit();
             self.tray_menu_surfaces.push(
                 SurfaceEntry::new(menu_layer, scale, output_name.clone())
-                    .with_output(output.clone()),
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
             );
 
             debug!("created layer surface on output '{}' (scale {scale}x)", output_name);
@@ -1479,20 +1539,30 @@ impl App {
                 // Pin the menu to the output whose bar was clicked, then fetch
                 // its contents off-thread. The overlay appears when the menu
                 // publishes.
-                let output = self
-                    .pointer
-                    .as_ref()
-                    .and_then(|(surface, _, _)| {
-                        self.surfaces
-                            .iter()
-                            .find(|entry| entry.layer.wl_surface() == surface)
-                            .map(|entry| entry.output_name.clone())
-                    })
+                let clicked_surface = self.pointer.as_ref().map(|(surface, _, _)| surface.clone());
+                let bar = clicked_surface.as_ref().and_then(|surface| {
+                    self.surfaces
+                        .iter()
+                        .find(|entry| entry.layer.wl_surface() == surface)
+                });
+                let output = bar
+                    .map(|entry| entry.output_name.clone())
                     .unwrap_or_else(|| self.focused_output());
-                let placement = crate::tray_menu::Placement {
-                    x: self.config.metrics.tray_menu.margin_left as f32,
+                // Place the menu beside the rail, on the side the rail is on.
+                // The output's logical width comes from its info, not from the
+                // bar (which is only `sidebar.width` across); using the bar's
+                // width put a right-hand menu at the left edge of the screen.
+                let width = bar
+                    .map(|entry| entry.output_logical_size.0)
+                    .filter(|width| *width > 0.0)
+                    .unwrap_or_else(|| self.focused_output_width());
+                let placement = crate::tray_menu::Placement::beside_rail(
+                    self.config.sidebar.position,
+                    self.config.sidebar.width as f32,
+                    width,
+                    self.config.metrics.tray_menu.width,
                     y,
-                };
+                );
                 self.tray_menu.open(&output, placement);
                 self.tray_menu_geometry = None;
                 self.actions.push(crate::actions::SystemAction::TrayMenuOpen {
@@ -1608,6 +1678,27 @@ impl OutputHandler for App {
     ) {
         // Second chance for an output that was created without complete info.
         self.create_output_surfaces(qh, &output);
+        // `logical_size` often arrives after the surface was created, so keep
+        // every surface on this output current. Popup placement depends on it.
+        let size = self
+            .output_state
+            .info(&output)
+            .and_then(|info| info.logical_size)
+            .map(|(width, height)| (width as f32, height as f32));
+        if let Some(size) = size {
+            for entry in self
+                .surfaces
+                .iter_mut()
+                .chain(self.osd_surfaces.iter_mut())
+                .chain(self.toast_surfaces.iter_mut())
+                .chain(self.power_surfaces.iter_mut())
+                .chain(self.tray_menu_surfaces.iter_mut())
+            {
+                if entry.output.as_ref() == Some(&output) {
+                    entry.output_logical_size = size;
+                }
+            }
+        }
     }
 
     fn output_destroyed(
@@ -1819,6 +1910,7 @@ impl PointerHandler for App {
         }
 
         if let Some((surface, x, y, button)) = clicked_at {
+            tracing::trace!("click {button:?} at ({x:.1},{y:.1})");
             let input = crate::ui::InputState {
                 pointer: Some((x, y)),
                 pressed: true,

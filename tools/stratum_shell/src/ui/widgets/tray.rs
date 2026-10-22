@@ -4,17 +4,25 @@
 //! themed icon name or as raw ARGB pixmaps; the icon theme and pixmap decoders
 //! live in `crate::icons` and `crate::tray`, so this widget only places them.
 
+use std::collections::HashMap;
+
 use crate::render::display_list::{DisplayList, Rect};
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 pub struct Tray {
-    /// Hit rects and the item each one belongs to, from the last paint.
-    cells: Vec<(Rect, crate::tray::TrayItem)>,
+    /// Hit rects and the item each one belongs to, keyed by output.
+    ///
+    /// The widget tree is shared across monitors but the rails differ in height,
+    /// so a single list would hold whichever output painted last and make the
+    /// other monitor's icons unclickable.
+    cells: HashMap<String, Vec<(Rect, crate::tray::TrayItem)>>,
 }
 
 impl Tray {
     pub fn new() -> Self {
-        Self { cells: Vec::new() }
+        Self {
+            cells: HashMap::new(),
+        }
     }
 }
 
@@ -41,8 +49,9 @@ impl Widget for Tray {
         _input: &InputState,
     ) {
         let items = ctx.state.tray.get();
-        self.cells.clear();
+        let mut cells = Vec::with_capacity(items.len());
         if items.is_empty() {
+            self.cells.insert(ctx.output_name.to_string(), cells);
             return;
         }
 
@@ -79,16 +88,21 @@ impl Widget for Tray {
                 }
             };
             self.paint_item(ctx, list, cell, item);
-            self.cells.push((cell, item.clone()));
+            cells.push((cell, item.clone()));
             cursor += tray.cell + tray.gap;
         }
+        self.cells.insert(ctx.output_name.to_string(), cells);
     }
 
     fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Option<Action> {
         let (rect, item) = self
             .cells
-            .iter()
-            .find(|(rect, _)| rect.contains(ctx.point))?;
+            .get(ctx.output_name)
+            .and_then(|cells| {
+                cells
+                    .iter()
+                    .find(|(rect, _)| rect.contains(ctx.point))
+            })?;
         match ctx.button {
             crate::ui::MouseButton::Left => Some(Action::ActivateTray(item.service.clone())),
             // Middle-click is SNI's SecondaryActivate, which some apps use to

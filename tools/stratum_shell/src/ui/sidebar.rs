@@ -117,7 +117,6 @@ impl Sidebar {
             .iter_mut()
             .find_map(|widget| widget.on_click(&ctx))
     }
-
     /// Advance widget animations. Returns true while anything is moving.
     pub fn tick(&mut self, dt: f32) -> bool {
         ui::tick_all(&mut self.widgets, dt)
@@ -226,7 +225,7 @@ impl Sidebar {
 /// Build one configured widget tree.
 fn build_widget(entry: &WidgetConfig) -> Box<dyn Widget> {
     match entry.kind {
-        WidgetKind::Launcher => Box::new(Launcher),
+        WidgetKind::Launcher => Box::new(Launcher::default()),
         WidgetKind::Workspaces => Box::new(Workspaces::new()),
         WidgetKind::AppTitle => Box::new(AppTitle::new()),
         WidgetKind::Tray => Box::new(Tray::new()),

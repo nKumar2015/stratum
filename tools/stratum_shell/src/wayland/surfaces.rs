@@ -31,6 +31,9 @@ pub struct SurfaceEntry {
     pub dirty: bool,
     pub frame_pending: bool,
     pub output_name: String,
+    /// The output's logical size, used to place popups anchored to its edges.
+    /// `(0, 0)` until the compositor reports it.
+    pub output_logical_size: (f32, f32),
     /// The output this surface belongs to, so hotplug can be matched up.
     pub output: Option<wayland_client::protocol::wl_output::WlOutput>,
     /// True while a buffer is attached. Layer surfaces stay mapped even when
@@ -57,6 +60,7 @@ impl SurfaceEntry {
             dirty: true,
             frame_pending: false,
             output_name,
+            output_logical_size: (0.0, 0.0),
             output: None,
             mapped: false,
             input_region: None,
@@ -79,6 +83,12 @@ impl SurfaceEntry {
         });
         self.layer.commit();
         self.keyboard_exclusive = exclusive;
+    }
+
+    /// Record the output's logical size, used to place edge-anchored popups.
+    pub fn with_output_logical_size(mut self, size: (f32, f32)) -> Self {
+        self.output_logical_size = size;
+        self
     }
 
     /// Associate this surface with the output it was created for.
@@ -105,6 +115,10 @@ impl SurfaceEntry {
         self.layer.commit();
         self.mapped = false;
         self.dirty = false;
+        // The surface must be configured again before a buffer may be attached.
+        // Leaving this true made the next show attach a buffer to an
+        // unconfigured surface, which is a fatal protocol error.
+        self.configured = false;
     }
 
     /// Apply a compositor configure and reconfigure the swapchain.

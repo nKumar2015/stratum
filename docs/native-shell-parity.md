@@ -15,8 +15,8 @@ Status: `todo` · `wip` · `verified`
 |---|---|---|---|
 | Sidebar container | layer-shell panel, left edge, per monitor | Full-height, transparent margins, corner insets, `InvertedCorner` chrome top and bottom | todo |
 | Workspaces | panel section | 10-workspace window around the active workspace, active/occupied/muted colours, click and scroll-wheel to switch, animated scroll to the active row | todo |
-| App title | panel section | Active window title via Hyprland, app icon from the window class, marquee when the title overflows | todo |
-| Tray | panel section | StatusNotifierItem icons, left-click activate, right-click opens the item's DBusMenu, hover-out auto-close | wip |
+| App title | panel section | Active window title via Hyprland, app icon from the window class, marquee when the title overflows | wip — title shown, elided; no app icon and no marquee yet |
+| Tray | panel section | StatusNotifierItem icons, left-click activate, right-click opens the item's DBusMenu, hover-out auto-close | wip — icons render on both monitors, both as watcher owner and as a consumer of Quickshell's watcher; activation/menu not yet exercised against a real app; no hover-out auto-close |
 | Quick icons (audio / BT / wifi) | panel section | Rounded container, per-icon state colour, hover opens the corresponding hover menu on the focused monitor | todo |
 | Battery | panel section | Percentage, charging/low/critical states and icons | todo |
 | Clock | panel section | Time, updated each minute, aligned to the minute boundary | todo |
