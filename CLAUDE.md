@@ -57,8 +57,7 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: screenshots, dashboard, the title marquee, and notification
-replacement by identity (same app and summary without `replaces_id`).
+Not implemented: screenshots, dashboard, the title marquee.
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's

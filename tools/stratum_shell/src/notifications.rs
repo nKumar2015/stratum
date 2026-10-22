@@ -381,17 +381,43 @@ impl Served {
                 .to_string()
             });
 
+        // KDE and some libraries pass the id to replace as a hint instead.
+        let replaces_id = Some(replaces_id)
+            .filter(|id| *id != 0)
+            .or_else(|| {
+                ["replaces-id", "x-kde-replaces-id"]
+                    .iter()
+                    .find_map(|key| hints.get(*key).and_then(|v| u32::try_from(v).ok()))
+            })
+            .unwrap_or(0);
+
         let mut store = match self.inner.store.lock() {
             Ok(store) => store,
             Err(_) => return replaces_id,
         };
 
-        let id = if replaces_id != 0 {
-            replaces_id
-        } else {
-            let id = store.next_id;
-            store.next_id = store.next_id.wrapping_add(1).max(1);
-            id
+        // Replace in place only a notification that exists: a stale
+        // replaces_id must not become an id that a later one collides with.
+        let replacing = (replaces_id != 0 && store.by_id.contains_key(&replaces_id)).then_some(replaces_id);
+        // Otherwise, as the QML shell did, the same app sending the same
+        // summary again supersedes the earlier notification. It gets a new id
+        // (so it toasts again) and the old one is closed.
+        let superseded = match replacing {
+            Some(_) => None,
+            None if !summary.is_empty() => store
+                .notifications
+                .iter()
+                .find(|n| n.summary == summary && n.app_name == app_name)
+                .map(|n| n.id),
+            None => None,
+        };
+        let id = match replacing {
+            Some(id) => id,
+            None => {
+                let id = store.next_id;
+                store.next_id = store.next_id.wrapping_add(1).max(1);
+                id
+            }
         };
 
         let notification = Notification {
@@ -419,7 +445,12 @@ impl Served {
         }
         drop(store);
 
-        self.inner.publish();
+        match superseded {
+            // Closing publishes; reason 4 is "undefined", which fits being
+            // superseded better than any user or expiry reason.
+            Some(old) => self.inner.close(old, 4),
+            None => self.inner.publish(),
+        }
         id
     }
 
@@ -495,7 +526,10 @@ mod tests {
     }
 
     /// Deliver a notification through the served interface, as a client would.
+    /// Each gets its own summary, so none supersedes another.
     fn notify(server: &Arc<NotificationServer>, actions: &[&str], hints: &[(&str, zbus::zvariant::Value<'static>)]) -> u32 {
+        static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let served = Served {
             inner: Arc::clone(server),
         };
@@ -503,7 +537,7 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), OwnedValue::try_from(v.try_clone().unwrap()).unwrap()))
             .collect();
-        served.notify("app".into(), 0, String::new(), "s".into(), "b".into(), strings(actions), hints, -1)
+        served.notify("app".into(), 0, String::new(), format!("s{n}"), "b".into(), strings(actions), hints, -1)
     }
 
     fn server() -> Arc<NotificationServer> {
@@ -593,6 +627,49 @@ mod tests {
         let big = decode_image_data(&image_value(256, 128, 3, vec![0; 256 * 128 * 3])).unwrap();
         assert_eq!((big.width, big.height), (IMAGE_MAX, IMAGE_MAX / 2), "aspect kept");
         assert!(decode_image_data(&image_value(4, 4, 4, vec![0; 3])).is_none(), "short data");
+    }
+
+    /// Deliver with a summary and replaces_id of our choosing.
+    fn notify_as(server: &Arc<NotificationServer>, app: &str, summary: &str, replaces: u32, hints: &[(&str, zbus::zvariant::Value<'static>)]) -> u32 {
+        let served = Served {
+            inner: Arc::clone(server),
+        };
+        let hints = hints
+            .iter()
+            .map(|(k, v)| (k.to_string(), OwnedValue::try_from(v.try_clone().unwrap()).unwrap()))
+            .collect();
+        served.notify(app.into(), replaces, String::new(), summary.into(), "b".into(), Vec::new(), hints, -1)
+    }
+
+    fn ids(server: &Arc<NotificationServer>) -> Vec<u32> {
+        server.store.lock().unwrap().notifications.iter().map(|n| n.id).collect()
+    }
+
+    #[test]
+    fn the_same_app_and_summary_supersedes_with_a_new_id() {
+        let server = server();
+        let first = notify_as(&server, "Battery", "Battery low", 0, &[]);
+        let other = notify_as(&server, "Mail", "Battery low", 0, &[]);
+        let again = notify_as(&server, "Battery", "Battery low", 0, &[]);
+        assert_ne!(again, first, "a new id, so it toasts again");
+        assert_eq!(ids(&server), vec![other, again], "the earlier one is gone; other apps are untouched");
+        // An empty summary never matches.
+        let a = notify_as(&server, "X", "", 0, &[]);
+        let b = notify_as(&server, "X", "", 0, &[]);
+        assert!(ids(&server).contains(&a) && ids(&server).contains(&b));
+    }
+
+    #[test]
+    fn replaces_id_updates_in_place_and_a_stale_one_is_ignored() {
+        let server = server();
+        let id = notify_as(&server, "App", "Downloading", 0, &[]);
+        assert_eq!(notify_as(&server, "App", "50%", id, &[]), id);
+        assert_eq!(ids(&server), vec![id]);
+        // The hint form works too.
+        assert_eq!(notify_as(&server, "App", "90%", 0, &[("x-kde-replaces-id", id.into())]), id);
+        // A replaces_id for nothing gets a fresh id rather than becoming 500.
+        let fresh = notify_as(&server, "App", "Done", 500, &[]);
+        assert_ne!(fresh, 500);
     }
 
     #[test]
