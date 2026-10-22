@@ -18,6 +18,7 @@ mod config;
 mod desktop;
 mod hyprland;
 mod ipc;
+mod notification_store;
 mod notifications;
 mod lock;
 mod osd;

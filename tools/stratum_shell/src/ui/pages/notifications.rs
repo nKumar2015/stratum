@@ -56,7 +56,10 @@ ctx.metrics.typography.weight_regular,
 
         // Newest first, as many as fit. Cards are the toasts' cards, showing
         // the last reply instead of a reply field, as the QML centre did.
-        let mut y = clear.y + clear.height + ctx.metrics.page.row_spacing;
+        // Cards are stacked with the toast stack's gap; `page.row_spacing` is
+        // a list row's pitch, not a gap.
+        let gap = ctx.metrics.toasts.gap;
+        let mut y = clear.y + clear.height + gap * 2.0;
         let pointer = input.pointer.map(|(x, y)| Point::new(x, y));
         for notification in notifications.iter().rev() {
             let layout = notification_card::layout(
@@ -94,7 +97,7 @@ ctx.metrics.typography.weight_regular,
                     _ => {}
                 }
             }
-            y += layout.card.height + ctx.metrics.page.row_spacing;
+            y += layout.card.height + gap;
         }
     }
 }

@@ -190,6 +190,28 @@ impl NotificationServer {
         Ok(())
     }
 
+    /// Put back notifications saved by an earlier run. Called before
+    /// `serve`, so no client can race it; new ids continue above `next_id`
+    /// and every restored id.
+    pub fn restore(&self, notifications: Vec<Notification>, next_id: u32) {
+        if let Ok(mut store) = self.store.lock() {
+            let max_id = notifications.iter().map(|n| n.id).max().unwrap_or(0);
+            store.next_id = next_id.max(max_id.saturating_add(1)).max(1);
+            store.by_id = notifications
+                .iter()
+                .enumerate()
+                .map(|(index, n)| (n.id, index))
+                .collect();
+            store.notifications = notifications;
+        }
+        self.publish();
+    }
+
+    /// The id the next notification will get, for saving.
+    pub fn next_id(&self) -> u32 {
+        self.store.lock().map(|store| store.next_id).unwrap_or(1)
+    }
+
     fn publish(&self) {
         let list = self
             .store
@@ -571,6 +593,24 @@ mod tests {
         let big = decode_image_data(&image_value(256, 128, 3, vec![0; 256 * 128 * 3])).unwrap();
         assert_eq!((big.width, big.height), (IMAGE_MAX, IMAGE_MAX / 2), "aspect kept");
         assert!(decode_image_data(&image_value(4, 4, 4, vec![0; 3])).is_none(), "short data");
+    }
+
+    #[test]
+    fn restored_notifications_keep_their_ids_and_new_ones_follow() {
+        let server = server();
+        let restored = vec![
+            Notification { id: 4, summary: "old".into(), ..Default::default() },
+            Notification { id: 9, summary: "older".into(), ..Default::default() },
+        ];
+        server.restore(restored, 2);
+        assert!(server.knows(9));
+        let id = notify(&server, &[], &[]);
+        assert_eq!(id, 10, "no collision with a restored id");
+        assert_eq!(server.next_id(), 11);
+        // Restored notifications can be closed like any other.
+        server.close(4, 2);
+        assert!(!server.knows(4));
+        assert!(server.knows(9) && server.knows(10));
     }
 
     #[test]

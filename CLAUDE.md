@@ -57,8 +57,14 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: screenshots, dashboard, notification snapshot persistence, the
-title marquee.
+Not implemented: screenshots, dashboard, the title marquee, and notification
+replacement by identity (same app and summary without `replaces_id`).
+
+Notifications persist (`notification_store.rs`) to
+`$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's
+`~/.local/state/quickshell/notifications-snapshot.json`, so the two shells never
+overwrite each other; the Quickshell file is imported once when the native one
+does not exist. Restored notifications are marked as already toasted.
 
 The **equalizer** is a settings page (`ui/pages/equalizer.rs`). `EqModel` is
 the pure, tested state (QML's editing rules and curve model); the blocking

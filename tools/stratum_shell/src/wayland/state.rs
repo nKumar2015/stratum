@@ -90,6 +90,10 @@ pub struct App {
     control_center: crate::ui::control_center::ControlCenter,
     actions: Arc<crate::actions::ActionQueue>,
     notifications: Option<Arc<crate::notifications::NotificationServer>>,
+    /// Saves the notification list and do-not-disturb for the next run, and
+    /// the last snapshot sent, so unchanged state is not rewritten.
+    notification_saver: Option<crate::notification_store::Saver>,
+    saved_notifications: Option<crate::notification_store::Snapshot>,
     tray: Option<Arc<crate::tray::Tray>>,
     osd: crate::osd::Osd,
     /// OSD overlay surfaces, one per output.
@@ -238,6 +242,8 @@ impl App {
             control_center: crate::ui::control_center::ControlCenter::new(Arc::clone(&config_for_cc)),
             actions: crate::actions::ActionQueue::new(),
             notifications: None,
+            notification_saver: None,
+            saved_notifications: None,
             tray: None,
             osd: crate::osd::Osd::new(),
             osd_surfaces: Vec::new(),
@@ -410,6 +416,18 @@ impl App {
             self.toasts.set_muted(self.state.dnd.get());
             let list = self.state.notifications.get();
             self.toasts.sync(&list);
+            // Save for the next run whenever the list or DND changed.
+            if let (Some(saver), Some(server)) = (&self.notification_saver, &self.notifications) {
+                let snapshot = crate::notification_store::Snapshot {
+                    do_not_disturb: self.state.dnd.get(),
+                    next_id: server.next_id(),
+                    notifications: list,
+                };
+                if self.saved_notifications.as_ref() != Some(&snapshot) {
+                    saver.save(snapshot.clone());
+                    self.saved_notifications = Some(snapshot);
+                }
+            }
         }
         // A toast that times out only hides the card. The notification stays in
         // the centre until it is dismissed or cleared — expiry is not dismissal,
@@ -1715,6 +1733,19 @@ impl App {
                     }
                 });
             let server = crate::notifications::NotificationServer::new(sink);
+            // Put back what the last run left, before any client can connect.
+            // Restored notifications are in the centre but already seen, so
+            // they do not pop up as toasts again.
+            if let Some(snapshot) = crate::notification_store::load() {
+                info!("restoring {} notifications", snapshot.notifications.len());
+                for n in &snapshot.notifications {
+                    self.toasts.dismiss(n.id);
+                }
+                self.state.dnd.set(snapshot.do_not_disturb);
+                server.restore(snapshot.notifications, snapshot.next_id);
+            }
+            self.notification_saver =
+                crate::notification_store::default_path().map(crate::notification_store::Saver::start);
             self.notifications = Some(Arc::clone(&server));
             std::thread::Builder::new()
                 .name("stratum-notifications".into())
