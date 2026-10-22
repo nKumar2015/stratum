@@ -54,8 +54,9 @@ volume/brightness OSD, notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
 and the IPC socket.
 
-Not implemented: lock screen, polkit dialog, theme switcher overlay, audio EQ
-panel, notification actions/inline reply, screenshots, dashboard. See
+Not implemented: lock screen, polkit dialog, hover menus, theme switcher
+overlay, audio EQ panel, notification actions/inline reply, screenshots,
+dashboard, app icon beside the window title. See
 `docs/native-shell-parity.md`.
 
 **Tray activation** works: left click sends `Activate`, middle click
@@ -82,16 +83,14 @@ and `powermenu toggle`. The remaining targets (`lockscreen`, `screenshot`,
 one means adding an arm in `App::execute_ipc` and extending
 `ipc::is_supported`.
 
-### Decisions still open with the user
+### Decisions made with the user (2026-10-21)
 
-Ask before building these; they change how much work remains.
-
-- **Hover menus.** QML opens compact hover menus on icon hover. The user asked
-  for the control centre to be a real window instead. Unclear whether hover
-  menus are still wanted alongside it, or whether hover should do nothing.
-- **Cutover criteria.** Which surfaces must exist before Quickshell is removed.
-  Lock screen and polkit are safety-critical; screenshots and dashboard are
-  conveniences.
+- **Hover menus are kept.** The control centre stays a real window, *and* the
+  compact hover menus (audio, Bluetooth, Wi-Fi, battery) are built alongside it,
+  with the QML hover-intent delay and close grace period.
+- **Cutover requires every surface.** Quickshell is removed only when every row
+  in `docs/native-shell-parity.md` exists in the native shell, so the switch is
+  seamless. No surface is optional, including screenshots and the dashboard.
 
 ## Build and run
 
