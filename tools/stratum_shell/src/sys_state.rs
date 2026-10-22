@@ -73,6 +73,10 @@ pub struct SystemState {
     /// Visible access points, strongest first. Refreshed on demand and by the
     /// poller while the radio is enabled.
     pub wifi_networks: Cell<serde_json::Value>,
+    /// The active Wi-Fi connection and the saved networks
+    /// (`wifi::details`). Refreshed by Network page actions only: it costs
+    /// several `nmcli` runs, too many for the poller.
+    pub wifi_details: Cell<serde_json::Value>,
     pub bluetooth: Cell<serde_json::Value>,
     pub battery: Cell<serde_json::Value>,
     pub music: Cell<serde_json::Value>,
@@ -114,6 +118,7 @@ impl SystemState {
             net: Cell::new(serde_json::Value::Null),
             wifi: Cell::new(serde_json::Value::Null),
             wifi_networks: Cell::new(serde_json::Value::Null),
+            wifi_details: Cell::new(serde_json::Value::Null),
             bluetooth: Cell::new(serde_json::Value::Null),
             battery: Cell::new(serde_json::Value::Null),
             music: Cell::new(serde_json::Value::Null),
@@ -164,6 +169,7 @@ impl SystemState {
             | self.net.take_dirty()
             | self.wifi.take_dirty()
             | self.wifi_networks.take_dirty()
+            | self.wifi_details.take_dirty()
             | self.bluetooth.take_dirty()
             | self.battery.take_dirty()
             | self.music.take_dirty()

@@ -728,6 +728,10 @@ pub struct DevicePageMetrics {
     pub panel_width: f32,
     pub panel_padding: f32,
     pub panel_button: f32,
+    /// The panel's password field: text size, padding, caret width.
+    pub field_text: f32,
+    pub field_padding: f32,
+    pub caret_width: f32,
     /// The scrolling name in the panel (QML `MarqueeLabel`): its size, the
     /// gap before it repeats, and its speed in px/s.
     pub marquee: f32,
@@ -763,6 +767,9 @@ impl Default for DevicePageMetrics {
             panel_width: 250.0,
             panel_padding: 10.0,
             panel_button: 30.0,
+            field_text: 12.0,
+            field_padding: 8.0,
+            caret_width: 1.5,
             marquee: 14.0,
             marquee_gap: 24.0,
             marquee_speed: 42.0,

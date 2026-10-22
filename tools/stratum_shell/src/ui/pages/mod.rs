@@ -130,7 +130,8 @@ impl<T: Clone + PartialEq> Optimistic<T> {
         }
     }
 
-    /// The pending intent, if any. Used to avoid re-sending the same action.
+    /// The pending intent, if any.
+    #[cfg(test)]
     pub fn pending(&self) -> Option<&T> {
         self.value.as_ref()
     }
@@ -181,9 +182,12 @@ impl Pages {
         }
     }
 
-    /// Start a frame: clears actions and derives the click edge.
+    /// Start a frame: derives the click edge.
+    ///
+    /// Pending actions are not cleared here: `take_actions` drains them after
+    /// each paint, and clearing dropped everything queued between paints (a
+    /// key press submitting a text field, a page being shown).
     pub fn begin_frame(&mut self, input: &InputState, dt: f32) {
-        self.pending.clear();
         self.dt = dt;
         self.clicked = input.pressed && !self.pressed_last;
         self.pressed_last = input.pressed;
@@ -212,7 +216,11 @@ impl Pages {
 
     /// Whether `page` has a text field that wants the keyboard.
     pub fn wants_keys(&self, page: Page) -> bool {
-        page == Page::Equalizer && self.equalizer.wants_keys()
+        match page {
+            Page::Equalizer => self.equalizer.wants_keys(),
+            Page::Wifi => self.wifi.wants_keys(),
+            _ => false,
+        }
     }
 
     /// Deliver a key to `page`'s text field.
@@ -223,8 +231,10 @@ impl Pages {
         text: Option<&str>,
         ctrl: bool,
     ) {
-        if page == Page::Equalizer {
-            self.equalizer.key(keysym, text, ctrl, &mut self.pending);
+        match page {
+            Page::Equalizer => self.equalizer.key(keysym, text, ctrl, &mut self.pending),
+            Page::Wifi => self.wifi.key(keysym, text, ctrl),
+            _ => {}
         }
     }
 
@@ -232,6 +242,7 @@ impl Pages {
     pub fn animating(&self, page: Page) -> bool {
         match page {
             Page::Bluetooth => self.bluetooth.animating(),
+            Page::Wifi => self.wifi.animating(),
             _ => false,
         }
     }

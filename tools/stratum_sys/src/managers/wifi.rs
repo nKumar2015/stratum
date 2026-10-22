@@ -177,6 +177,52 @@ pub fn active_info(device: &str) -> Value {
     json!({ "ok": true, "ip4_address": address, "ip4_gateway": gateway })
 }
 
+/// The connected Wi-Fi device from `device_status()`: `(device, connection,
+/// state)`. Only a state that starts with "connected" counts; the QML menu
+/// matched "connected" anywhere, which "disconnected" also contains.
+fn pick_active(devices: &Value) -> Option<(String, String, String)> {
+    devices["devices"].as_array()?.iter().find_map(|row| {
+        let field = |k: &str| row[k].as_str().unwrap_or("").trim().to_string();
+        let state = field("state");
+        (field("type").eq_ignore_ascii_case("wifi") && state.to_ascii_lowercase().starts_with("connected"))
+            .then(|| (field("device"), field("connection"), state))
+    })
+}
+
+/// Names of saved Wi-Fi connections from `known_connections()`.
+fn known_wifi(connections: &Value) -> Vec<String> {
+    connections["connections"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter(|r| matches!(r["type"].as_str(), Some("802-11-wireless" | "wifi")))
+                .filter_map(|r| r["name"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What the Network page shows beyond the access-point list: the active
+/// connection (device, SSID, state, IPv4 address and gateway) and the saved
+/// Wi-Fi networks, which connect without asking for a password.
+pub fn details() -> Value {
+    let active = pick_active(&device_status()).map(|(device, ssid, state)| {
+        let info = active_info(&device);
+        json!({
+            "device": device,
+            "ssid": ssid,
+            "state": state,
+            "ip": info["ip4_address"].as_str().unwrap_or(""),
+            "gateway": info["ip4_gateway"].as_str().unwrap_or(""),
+        })
+    });
+    json!({
+        "ok": true,
+        "active": active,
+        "known": known_wifi(&known_connections()),
+    })
+}
+
 pub fn connect(ssid: &str, password: Option<&str>) -> Value {
     let mut args = vec!["dev", "wifi", "connect", ssid];
     if let Some(password) = password.filter(|p| !p.trim().is_empty()) {
@@ -219,5 +265,26 @@ mod tests {
         // `nmcli` escapes a literal colon as `\:`.
         assert_eq!(split_fields("a:b\\:c:d"), vec!["a", "b:c", "d"]);
         assert_eq!(split_fields("only"), vec!["only"]);
+    }
+
+    #[test]
+    fn the_active_device_is_a_connected_wifi_one() {
+        let devices = json!({ "devices": [
+            { "device": "wlan1", "type": "wifi", "state": "disconnected", "connection": "--" },
+            { "device": "eth0", "type": "ethernet", "state": "connected", "connection": "Wired" },
+            { "device": "wlan0", "type": "wifi", "state": "connected", "connection": "Home" },
+        ]});
+        assert_eq!(pick_active(&devices), Some(("wlan0".into(), "Home".into(), "connected".into())));
+        let none = json!({ "devices": [{ "device": "wlan1", "type": "wifi", "state": "disconnected", "connection": "--" }]});
+        assert_eq!(pick_active(&none), None, "\"disconnected\" contains \"connected\"");
+    }
+
+    #[test]
+    fn known_networks_are_saved_wifi_connections() {
+        let connections = json!({ "connections": [
+            { "name": "Home", "type": "802-11-wireless" },
+            { "name": "Wired", "type": "802-3-ethernet" },
+        ]});
+        assert_eq!(known_wifi(&connections), vec!["Home".to_string()]);
     }
 }

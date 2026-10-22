@@ -46,6 +46,8 @@ pub enum SystemAction {
     WifiConnect { ssid: String, password: Option<String> },
     /// Disconnect the active connection on a device.
     WifiDisconnect(String),
+    /// Delete a saved connection by name.
+    WifiForget(String),
     /// Re-read the Wi-Fi access-point list. `rescan` asks NetworkManager to
     /// probe the airwaves first, which is slow; the fast path only re-reads the
     /// cache.
@@ -204,6 +206,7 @@ fn refresh_network(state: &SystemState, rescan: bool) {
     let wifi = managers::wifi::state();
     let enabled = wifi["enabled"].as_bool().unwrap_or(false);
     state.wifi.set(wifi);
+    state.wifi_details.set(managers::wifi::details());
     if enabled {
         state.wifi_networks.set(managers::wifi::list(rescan));
     } else {
@@ -303,6 +306,11 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         }
         SystemAction::WifiDisconnect(device) => {
             let result = managers::wifi::disconnect(device);
+            refresh_network(state, false);
+            result
+        }
+        SystemAction::WifiForget(name) => {
+            let result = managers::wifi::forget(name);
             refresh_network(state, false);
             result
         }
