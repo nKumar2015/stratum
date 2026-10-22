@@ -59,9 +59,13 @@ impl Widget for AppTitle {
         let bar = &ctx.metrics.bar;
         let (icon_size, icon_gap) = (bar.title_icon, bar.title_icon_gap);
         // Twice the logical size, as the tray does: sharp on scaled outputs.
+        // On a rail the icon turns with the title, as QML rotated the whole
+        // row.
+        let vertical = ctx.is_vertical();
         let icon = window
             .as_ref()
-            .and_then(|w| ctx.icons.load_app_icon(&w.class, icon_size as u32, 2));
+            .and_then(|w| ctx.icons.load_app_icon(&w.class, icon_size as u32, 2))
+            .map(|icon| if vertical { crate::icons::rotate_ccw(&icon) } else { icon });
         let icon_space = if icon.is_some() { icon_size + icon_gap } else { 0.0 };
         let push_icon = |list: &mut DisplayList, x: f32, y: f32| {
             if let Some(icon) = &icon {

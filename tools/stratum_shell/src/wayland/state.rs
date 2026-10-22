@@ -164,7 +164,7 @@ pub struct App {
     hover_menus: crate::ui::hover_menu::HoverMenus,
     hover_surfaces: Vec<SurfaceEntry>,
     /// Size and placement last applied to the hover surface, and the output.
-    hover_geometry: Option<(u32, (i32, i32), String)>,
+    hover_geometry: Option<(u32, i32, String)>,
     /// A press landed on the hover menu since its last paint.
     hover_clicked: bool,
     /// When the pointer left both the open tray menu and its icon.
@@ -855,8 +855,12 @@ impl App {
             let geometry = (height as u32, placement, output_name);
             let entry = &mut self.hover_surfaces[i];
             if Some(&geometry) != applied.as_ref() {
+                let gap = self.config.metrics.hover_menu.offset.round() as i32;
+                let (anchor, (top, right, bottom, left)) =
+                    super::surfaces::beside_rail(self.config.sidebar.position, placement, gap);
                 entry.layer.set_size(width as u32, geometry.0);
-                entry.layer.set_margin(placement.1, 0, 0, placement.0);
+                entry.layer.set_anchor(anchor);
+                entry.layer.set_margin(top, right, bottom, left);
                 entry.layer.commit();
                 entry.configured = false;
                 entry.awaiting_configure = true;
@@ -1060,25 +1064,14 @@ impl App {
                     // decides where its edge is, and applying one output's
                     // placement to every surface put the menu off screen on the
                     // other monitor.
-                    let output_width = surface.output_logical_size.0;
-                    let placement = if output_width > 0.0 {
-                        crate::tray_menu::Placement::beside_rail(
-                            self.config.sidebar.position,
-                            self.config.sidebar.width as f32,
-                            output_width,
-                            self.config.metrics.tray_menu.width,
-                            self.tray_menu.placement().y,
-                        )
-                    } else {
-                        self.tray_menu.placement()
-                    };
-                    surface.layer.set_size(width, height);
-                    surface.layer.set_margin(
-                        placement.y.round() as i32,
-                        self.config.metrics.tray_menu.margin_right,
-                        self.config.metrics.tray_menu.margin_bottom,
-                        placement.x.round() as i32,
+                    let (anchor, (top, right, bottom, left)) = super::surfaces::beside_rail(
+                        self.config.sidebar.position,
+                        self.tray_menu.placement().y.round() as i32,
+                        0,
                     );
+                    surface.layer.set_size(width, height);
+                    surface.layer.set_anchor(anchor);
+                    surface.layer.set_margin(top, right, bottom, left);
                     surface.layer.commit();
                     // Changing size or margins starts a new configure cycle.
                     // Attaching a buffer before that configure arrives is a
@@ -1954,20 +1947,6 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Logical width of the focused output, for popup placement.
-    ///
-    /// Resolved by name through the bar surfaces: taking the first output from
-    /// `OutputState` picks an arbitrary monitor, which is wrong whenever the
-    /// monitors differ in size.
-    fn focused_output_width(&self) -> f32 {
-        let focused = self.focused_output();
-        self.surfaces
-            .iter()
-            .find(|entry| entry.output_name == focused)
-            .map(|entry| entry.output_logical_size.0)
-            .unwrap_or(0.0)
-    }
-
     /// Redraw every surface after a state change the UI thread caused.
     fn mark_all_dirty(&mut self) {
         for entry in &mut self.surfaces {
@@ -2097,21 +2076,19 @@ impl App {
         }
     }
 
-    /// Where the hover menu goes on an output of `output_size`: beside the
-    /// rail, centred on the icon, kept on screen.
-    fn hover_placement(&self, menu: &crate::ui::hover_menu::OpenMenu, size: (f32, f32), output_size: (f32, f32)) -> (i32, i32) {
+    /// Where the hover menu goes along the rail on an output of
+    /// `output_size`: centred on the icon, kept on screen. The compositor
+    /// places it beside the rail (`surfaces::beside_rail`).
+    fn hover_placement(&self, menu: &crate::ui::hover_menu::OpenMenu, size: (f32, f32), output_size: (f32, f32)) -> i32 {
         let m = &self.config.metrics.hover_menu;
-        let bar = &self.config.sidebar;
         let (w, h) = size;
         let (ow, oh) = output_size;
         let clamp = |v: f32, len: f32, total: f32| v.min(total - len - m.offset).max(m.offset);
-        let (x, y) = match bar.position {
-            SidebarPosition::Left => (bar.width as f32 + m.offset, clamp(menu.anchor_y - h * 0.5, h, oh)),
-            SidebarPosition::Right => (ow - bar.width as f32 - m.offset - w, clamp(menu.anchor_y - h * 0.5, h, oh)),
-            SidebarPosition::Top => (clamp(menu.anchor_x - w * 0.5, w, ow), bar.height as f32 + m.offset),
-            SidebarPosition::Bottom => (clamp(menu.anchor_x - w * 0.5, w, ow), oh - bar.height as f32 - m.offset - h),
+        let along = match self.config.sidebar.position {
+            SidebarPosition::Left | SidebarPosition::Right => clamp(menu.anchor_y - h * 0.5, h, oh),
+            SidebarPosition::Top | SidebarPosition::Bottom => clamp(menu.anchor_x - w * 0.5, w, ow),
         };
-        (x.round() as i32, y.round() as i32)
+        along.round() as i32
     }
 
     /// Carry out what a hover menu asked for.
@@ -2670,7 +2647,9 @@ impl App {
                 Some(output),
             );
             hover_layer.set_anchor(Anchor::TOP | Anchor::LEFT);
-            hover_layer.set_exclusive_zone(-1);
+            // 0, not -1: placed past the rail's exclusive zone, and any other
+            // panel's on that edge (`surfaces::beside_rail`).
+            hover_layer.set_exclusive_zone(0);
             hover_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
             let hover_metrics = &self.config.metrics.hover_menu;
             hover_layer.set_size(hover_metrics.width as u32, hover_metrics.row_height as u32);
@@ -2681,9 +2660,10 @@ impl App {
                     .with_output_logical_size(output_logical_size),
             );
 
-            // Tray context menu: a small overlay pinned just inside the rail.
-            // It is sized to its contents, so it starts hidden and is mapped
-            // only while a menu is open.
+            // Tray context menu: a small overlay beside the rail. It is sized
+            // to its contents, so it starts hidden and is mapped only while a
+            // menu is open; anchor and margins are set on open
+            // (`surfaces::beside_rail`).
             let menu_wl = self.compositor_state.create_surface(qh);
             let menu_layer = self.layer_shell.create_layer_surface(
                 qh,
@@ -2693,13 +2673,7 @@ impl App {
                 Some(output),
             );
             menu_layer.set_anchor(Anchor::TOP | Anchor::LEFT);
-            menu_layer.set_exclusive_zone(-1);
-            menu_layer.set_margin(
-                self.config.metrics.tray_menu.margin_top,
-                self.config.metrics.tray_menu.margin_right,
-                self.config.metrics.tray_menu.margin_bottom,
-                self.config.metrics.tray_menu.margin_left,
-            );
+            menu_layer.set_exclusive_zone(0);
             menu_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
             // A size must be set before the first commit: anchored top-left
             // without one, the compositor chooses a surface as large as the
@@ -2977,22 +2951,7 @@ impl App {
                 let output = bar
                     .map(|entry| entry.output_name.clone())
                     .unwrap_or_else(|| self.focused_output());
-                // Place the menu beside the rail, on the side the rail is on.
-                // The output's logical width comes from its info, not from the
-                // bar (which is only `sidebar.width` across); using the bar's
-                // width put a right-hand menu at the left edge of the screen.
-                let width = bar
-                    .map(|entry| entry.output_logical_size.0)
-                    .filter(|width| *width > 0.0)
-                    .unwrap_or_else(|| self.focused_output_width());
-                let placement = crate::tray_menu::Placement::beside_rail(
-                    self.config.sidebar.position,
-                    self.config.sidebar.width as f32,
-                    width,
-                    self.config.metrics.tray_menu.width,
-                    y,
-                );
-                self.tray_menu.open(&output, placement);
+                self.tray_menu.open(&output, crate::tray_menu::Placement { y });
                 self.tray_menu_geometry = None;
                 self.actions.push(crate::actions::SystemAction::TrayMenuOpen {
                     service,

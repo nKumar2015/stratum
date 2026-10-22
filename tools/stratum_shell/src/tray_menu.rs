@@ -12,38 +12,12 @@ use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::tray::TrayMenu;
 use crate::ui::{self, PaintCtx};
 
-/// Where the menu should appear, in the coordinates of its own surface.
-///
-/// The menu's layer surface is anchored to the top-left of the output and moved
-/// with margins, so these are always distances from that corner.
+/// Where the menu should appear: level with the icon that opened it. The
+/// compositor puts it beside the rail (`wayland::surfaces::beside_rail`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Placement {
-    /// Offset from the left edge of the output.
-    pub x: f32,
     /// Offset from the top edge of the output.
     pub y: f32,
-}
-
-impl Placement {
-    /// Place the menu beside the rail on the side it occupies.
-    ///
-    /// A left rail opens its menu to the right of the rail; a right rail opens
-    /// to the left, so the panel is not pushed off screen. `surface_width` is
-    /// the output's logical width and `panel_width` the menu's.
-    pub fn beside_rail(
-        position: crate::config::SidebarPosition,
-        rail_thickness: f32,
-        surface_width: f32,
-        panel_width: f32,
-        item_y: f32,
-    ) -> Self {
-        let x = match position {
-            crate::config::SidebarPosition::Left => rail_thickness,
-            crate::config::SidebarPosition::Right => (surface_width - rail_thickness - panel_width).max(0.0),
-            _ => rail_thickness,
-        };
-        Self { x, y: item_y }
-    }
 }
 
 /// The open menu and where it is anchored.
@@ -318,27 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn placement_follows_the_rail_side() {
-        use crate::config::SidebarPosition;
-
-        // A left rail opens to its right.
-        let left = Placement::beside_rail(SidebarPosition::Left, 40.0, 1920.0, 200.0, 120.0);
-        assert_eq!(left.x, 40.0);
-        assert_eq!(left.y, 120.0);
-
-        // A right rail opens to its left, so the panel stays on screen.
-        let right = Placement::beside_rail(SidebarPosition::Right, 40.0, 1920.0, 200.0, 120.0);
-        assert_eq!(right.x, 1920.0 - 40.0 - 200.0);
-        assert!(right.x + 200.0 <= 1920.0 - 40.0, "panel clears the rail");
-    }
-
-    #[test]
     fn opening_pins_the_output_and_closing_forgets_it() {
         let mut overlay = TrayMenuOverlay::new();
         assert_eq!(overlay.target(), None);
-        overlay.open("eDP-2", Placement { x: 40.0, y: 100.0 });
+        overlay.open("eDP-2", Placement { y: 100.0 });
         assert_eq!(overlay.target(), Some("eDP-2"));
-        assert_eq!(overlay.placement(), Placement { x: 40.0, y: 100.0 });
+        assert_eq!(overlay.placement(), Placement { y: 100.0 });
         overlay.close();
         assert_eq!(overlay.target(), None);
     }

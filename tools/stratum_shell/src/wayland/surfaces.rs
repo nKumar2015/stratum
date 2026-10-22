@@ -338,3 +338,41 @@ impl SurfaceEntry {
         Ok(())
     }
 }
+
+/// Anchor and margins (top, right, bottom, left) for a popup beside the rail.
+///
+/// The popup is anchored to the rail's own screen edge with an exclusive zone
+/// of 0, so the compositor places it past every exclusive zone on that edge:
+/// ours, and any other panel's. Measuring from the screen edge with the rail's
+/// width put the popup on top of the rail whenever another panel came first,
+/// as Quickshell's does while both shells run. `gap` separates it from the
+/// rail; `along` is its offset along the rail.
+pub fn beside_rail(
+    position: crate::config::SidebarPosition,
+    along: i32,
+    gap: i32,
+) -> (smithay_client_toolkit::shell::wlr_layer::Anchor, (i32, i32, i32, i32)) {
+    use crate::config::SidebarPosition;
+    use smithay_client_toolkit::shell::wlr_layer::Anchor;
+    match position {
+        SidebarPosition::Left => (Anchor::TOP | Anchor::LEFT, (along, 0, 0, gap)),
+        SidebarPosition::Right => (Anchor::TOP | Anchor::RIGHT, (along, gap, 0, 0)),
+        SidebarPosition::Top => (Anchor::TOP | Anchor::LEFT, (gap, 0, 0, along)),
+        SidebarPosition::Bottom => (Anchor::BOTTOM | Anchor::LEFT, (0, 0, gap, along)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SidebarPosition;
+    use smithay_client_toolkit::shell::wlr_layer::Anchor;
+
+    #[test]
+    fn popups_hang_off_the_rails_edge() {
+        assert_eq!(beside_rail(SidebarPosition::Left, 300, 8), (Anchor::TOP | Anchor::LEFT, (300, 0, 0, 8)));
+        assert_eq!(beside_rail(SidebarPosition::Right, 300, 8), (Anchor::TOP | Anchor::RIGHT, (300, 8, 0, 0)));
+        assert_eq!(beside_rail(SidebarPosition::Top, 500, 8), (Anchor::TOP | Anchor::LEFT, (8, 0, 0, 500)));
+        assert_eq!(beside_rail(SidebarPosition::Bottom, 500, 8), (Anchor::BOTTOM | Anchor::LEFT, (0, 0, 8, 500)));
+    }
+}

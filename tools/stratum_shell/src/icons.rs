@@ -26,7 +26,10 @@ pub struct IconImage {
 
 #[derive(Clone)]
 struct ThemeEntry {
-    root: PathBuf,
+    /// Every base directory holding this theme, in search order. A theme is
+    /// the union of all of them (hicolor alone is spread over every package
+    /// that installs an icon), so the first one found is not the theme.
+    roots: Vec<PathBuf>,
     /// Size -> subdirectories, as declared by `index.theme`.
     directories: Vec<String>,
 }
@@ -47,26 +50,7 @@ impl IconTheme {
         let roots: Vec<PathBuf> = data_dirs().into_iter().map(|dir| dir.join("icons")).chain(
             std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".icons")),
         ).collect();
-
-        let mut themes = HashMap::new();
-        for root in &roots {
-            let Ok(entries) = std::fs::read_dir(root) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().to_string();
-                if themes.contains_key(&name) {
-                    continue;
-                }
-                if let Some(theme) = Self::parse_theme(path) {
-                    themes.insert(name, theme);
-                }
-            }
-        }
+        let themes = Self::discover(&roots);
 
         // Prefer explicitly requested themes, then hicolor, then all others.
         let mut search: Vec<String> = preferred.iter().map(|s| s.to_string()).collect();
@@ -95,6 +79,41 @@ impl IconTheme {
             .find_map(|name| self.load_icon(name, size, scale))
     }
 
+    /// Every theme under the icon `roots`, merging a theme's directories
+    /// across roots.
+    fn discover(roots: &[PathBuf]) -> HashMap<String, ThemeEntry> {
+        let mut themes: HashMap<String, ThemeEntry> = HashMap::new();
+        for root in roots {
+            let Ok(entries) = std::fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                let Some(found) = Self::parse_theme(path) else {
+                    continue;
+                };
+                match themes.get_mut(&name) {
+                    Some(theme) => {
+                        theme.roots.extend(found.roots);
+                        for dir in found.directories {
+                            if !theme.directories.contains(&dir) {
+                                theme.directories.push(dir);
+                            }
+                        }
+                    }
+                    None => {
+                        themes.insert(name, found);
+                    }
+                }
+            }
+        }
+        themes
+    }
+
     fn parse_theme(root: PathBuf) -> Option<ThemeEntry> {
         // `index.theme` lives at the theme root; sub-themes may not have one.
         let index = root.join("index.theme");
@@ -120,7 +139,7 @@ impl IconTheme {
         if directories.is_empty() {
             return None;
         }
-        Some(ThemeEntry { root, directories })
+        Some(ThemeEntry { roots: vec![root], directories })
     }
 
     /// Look up and rasterize `name` at `size` logical pixels on a `scale`x
@@ -149,22 +168,17 @@ impl IconTheme {
                 continue;
             };
             // Prefer the closest declared size bucket, then any other.
-            for dir in sorted_directories(&theme.directories, size) {
-                for ext in ["svg", "png"] {
-                    let candidate = theme.root.join(&dir).join(format!("{name}.{ext}"));
-                    if candidate.is_file() {
-                        if let Some(image) = render_file(&candidate, size) {
-                            return Some(image);
+            // Some themes keep icons directly in the root, tried last.
+            let dirs = sorted_directories(&theme.directories, size).into_iter().chain([String::new()]);
+            for dir in dirs {
+                for root in &theme.roots {
+                    for ext in ["svg", "png"] {
+                        let candidate = root.join(&dir).join(format!("{name}.{ext}"));
+                        if candidate.is_file() {
+                            if let Some(image) = render_file(&candidate, size) {
+                                return Some(image);
+                            }
                         }
-                    }
-                }
-            }
-            // Some themes keep icons directly in the root.
-            for ext in ["svg", "png"] {
-                let candidate = theme.root.join(format!("{name}.{ext}"));
-                if candidate.is_file() {
-                    if let Some(image) = render_file(&candidate, size) {
-                        return Some(image);
                     }
                 }
             }
@@ -221,6 +235,22 @@ fn sorted_directories(dirs: &[String], want: u32) -> Vec<String> {
         .collect();
     scored.sort_by_key(|(score, _)| *score);
     scored.into_iter().map(|(_, dir)| dir).collect()
+}
+
+/// `icon` turned 90° counter-clockwise, to sit in a run that reads upward.
+pub fn rotate_ccw(icon: &IconImage) -> IconImage {
+    let (w, h) = (icon.width as usize, icon.height as usize);
+    let mut pixels = vec![0u8; w * h * 4];
+    // The rotated image is h wide and w tall; its (x, y) is the source's
+    // (w - 1 - y, x).
+    for y in 0..w {
+        for x in 0..h {
+            let from = (x * w + (w - 1 - y)) * 4;
+            let to = (y * h + x) * 4;
+            pixels[to..to + 4].copy_from_slice(&icon.pixels[from..from + 4]);
+        }
+    }
+    IconImage { width: icon.height, height: icon.width, pixels: Arc::from(pixels) }
 }
 
 fn render_file(path: &Path, size: u32) -> Option<IconImage> {
@@ -313,6 +343,40 @@ mod tests {
         assert_eq!(at(0, 0)[3], 0, "outside the rect is clear");
         assert!(at(3, 8)[0] > 200 && at(3, 8)[3] == 255, "red end of the gradient");
         assert!(at(12, 8)[2] > 200, "blue end of the gradient");
+    }
+
+    #[test]
+    fn rotating_counter_clockwise_moves_the_top_right_to_the_top_left() {
+        // 2 wide, 1 tall: red then blue.
+        let icon = IconImage { width: 2, height: 1, pixels: Arc::from(vec![255, 0, 0, 255, 0, 0, 255, 255]) };
+        let turned = rotate_ccw(&icon);
+        assert_eq!((turned.width, turned.height), (1, 2));
+        assert_eq!(&turned.pixels[..], &[0, 0, 255, 255, 255, 0, 0, 255], "blue on top, red below");
+    }
+
+    #[test]
+    fn a_theme_spans_every_root_that_holds_it() {
+        // A package's own hicolor (first in XDG_DATA_DIRS) must not hide the
+        // profile's hicolor, which is where the browser's icon was.
+        let base = std::env::temp_dir().join(format!("stratum-icons-{}", std::process::id()));
+        let first = base.join("pkg/icons");
+        let second = base.join("profile/icons");
+        for (root, dirs) in [(&first, "16x16/apps"), (&second, "16x16/apps,48x48/apps")] {
+            let theme = root.join("hicolor");
+            for dir in dirs.split(',') {
+                std::fs::create_dir_all(theme.join(dir)).unwrap();
+            }
+            std::fs::write(theme.join("index.theme"), format!("[Icon Theme]\nDirectories={dirs}\n")).unwrap();
+        }
+        let png = second.join("hicolor/48x48/apps/browser.png");
+        image::RgbaImage::from_pixel(48, 48, image::Rgba([255, 0, 0, 255])).save(&png).unwrap();
+
+        let themes = IconTheme::discover(&[first.clone(), second.clone()]);
+        let mut theme = IconTheme { themes, search: vec!["hicolor".into()], cache: HashMap::new(), desktop: None };
+        assert_eq!(theme.themes["hicolor"].roots, vec![first.join("hicolor"), second.join("hicolor")]);
+        assert!(theme.themes["hicolor"].directories.contains(&"48x48/apps".to_string()));
+        assert!(theme.load_icon("browser", 48, 1).is_some());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

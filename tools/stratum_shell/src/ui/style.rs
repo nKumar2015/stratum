@@ -1083,12 +1083,6 @@ pub struct TrayMenuMetrics {
     pub text: f32,
     /// Maximum rows drawn before the list is truncated.
     pub max_rows: usize,
-    /// Distance from the screen edge. The menu is anchored top-left, so the
-    /// left and top margins place it; the others are kept for symmetry.
-    pub margin_top: i32,
-    pub margin_right: i32,
-    pub margin_bottom: i32,
-    pub margin_left: i32,
     /// Milliseconds after the pointer leaves both the menu and its icon
     /// before the menu closes (QML: 150).
     pub close_ms: u64,
@@ -1104,12 +1098,6 @@ impl Default for TrayMenuMetrics {
             indent: 12.0,
             text: 13.0,
             max_rows: 24,
-            // Clears a 40 px vertical rail; a user with a top bar will set
-            // margin_top instead.
-            margin_top: 0,
-            margin_right: 0,
-            margin_bottom: 0,
-            margin_left: 44,
             close_ms: 150,
         }
     }
