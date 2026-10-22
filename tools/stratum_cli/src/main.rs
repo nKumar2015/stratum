@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, theme, wifi};
 use common::{emit_help, emit_json, fail, is_help_flag, run_command_capture};
 
-const ROOT_COMMANDS: [&str; 16] = [
+const ROOT_COMMANDS: [&str; 17] = [
     "audio",
     "battery",
     "bluetooth",
@@ -24,6 +24,7 @@ const ROOT_COMMANDS: [&str; 16] = [
     "screenshot",
     "screenshot-menu",
     "screenshot-post",
+    "settings",
     "theme",
     "wifi",
 ];
@@ -73,9 +74,24 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),
         "screenshot" => Some(&["start"]),
+        "settings" => Some(&["open [page]", "close", "toggle [page]"]),
         "theme" => Some(&["open", "close", "toggle", "set"]),
         _ => None,
     }
+}
+
+/// Targets only the native shell serves. Quickshell has no equivalent, so a
+/// failed call is reported as is instead of being retried through `qs ipc`.
+fn native_only(target: &str) -> bool {
+    target == "settings"
+}
+
+/// Whether `function` is one of `functions`, ignoring the `[args]` hints that
+/// some entries carry for help output.
+fn has_function(functions: &[&str], function: &str) -> bool {
+    functions
+        .iter()
+        .any(|entry| entry.split_whitespace().next() == Some(function))
 }
 
 fn print_ipc_target_help(target: &str) {
@@ -140,7 +156,7 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
         return Err(format!("unknown target: {}", target));
     };
 
-    if !functions.contains(&function) {
+    if !has_function(functions, function) {
         return Err(format!(
             "unknown {} function: {} (expected one of: {})",
             target,
@@ -158,7 +174,9 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
             let pid = response["pid"].as_i64().unwrap_or(std::process::id() as i64);
             Ok(pid)
         }
-        Ok(response) if response["code"].as_str() == Some("unsupported") => {
+        Ok(response)
+            if response["code"].as_str() == Some("unsupported") && !native_only(target) =>
+        {
             run_ipc_call_quickshell(target, function, args)
         }
         Ok(response) => {
@@ -167,6 +185,7 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
                 .unwrap_or("shell rejected the request");
             Err(format!("shell ipc failed: {}", detail))
         }
+        Err(err) if native_only(target) => Err(format!("native shell unavailable ({err})")),
         Err(err) => {
             // No native shell listening (missing socket, or a stale file left
             // by a previous run). Fall back to Quickshell; if that is not

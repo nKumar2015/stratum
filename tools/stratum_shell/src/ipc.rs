@@ -45,6 +45,8 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),
         "screenshot" => Some(&["start"]),
+        // Native only: the QML shell had no settings window to open.
+        "settings" => Some(&["open", "close", "toggle"]),
         "theme" => Some(&["open", "close", "toggle", "set"]),
         _ => None,
     }
@@ -71,6 +73,7 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         ("dashboard", _) => true,
         // The capture overlay and the viewer it opens.
         ("screenshot", "start") => true,
+        ("settings", _) => true,
         _ => false,
     }
 }
@@ -184,18 +187,33 @@ pub fn parse_request(line: &str) -> Result<IpcCall, IpcError> {
         });
     }
 
-    // `theme set` takes exactly one non-empty name; every other function takes
-    // none. Validating here keeps the UI-side match arms simple and gives the
-    // CLI a useful error instead of a silently ignored argument.
-    let required = usize::from(function == "set");
-    if args.len() != required {
-        return Err(IpcError::BadArgs(format!(
-            "{target} {function} expects {required} argument(s), got {}",
-            args.len()
-        )));
-    }
-    if required == 1 && args[0].trim().is_empty() {
-        return Err(IpcError::BadArgs("theme name must not be empty".into()));
+    // `theme set` takes exactly one non-empty name, and `settings open|toggle`
+    // an optional page; every other function takes none. Validating here keeps
+    // the UI-side match arms simple and gives the CLI a useful error instead of
+    // a silently ignored argument.
+    if target == "settings" && function != "close" {
+        if args.len() > 1 {
+            return Err(IpcError::BadArgs(format!(
+                "settings {function} expects at most 1 argument, got {}",
+                args.len()
+            )));
+        }
+        if let Some(name) = args.first() {
+            if crate::ui::control_center::Page::from_name(name).is_none() {
+                return Err(IpcError::BadArgs(format!("unknown settings page: {name}")));
+            }
+        }
+    } else {
+        let required = usize::from(function == "set");
+        if args.len() != required {
+            return Err(IpcError::BadArgs(format!(
+                "{target} {function} expects {required} argument(s), got {}",
+                args.len()
+            )));
+        }
+        if required == 1 && args[0].trim().is_empty() {
+            return Err(IpcError::BadArgs("theme name must not be empty".into()));
+        }
     }
 
     Ok(IpcCall {
@@ -433,6 +451,19 @@ mod tests {
             }
         }
         assert!(!is_supported("screenshot", "stop"));
+    }
+
+    #[test]
+    fn settings_takes_an_optional_page() {
+        let call = |function: &str, args: Value| {
+            parse(json!({ "target": "settings", "function": function, "args": args }))
+        };
+        assert!(call("open", json!([])).is_ok());
+        assert_eq!(call("toggle", json!(["Wifi"])).unwrap().args, ["Wifi"]);
+        assert!(call("open", json!(["network"])).is_ok(), "the rail's title works too");
+        assert_eq!(call("open", json!(["nope"])).unwrap_err().code(), "bad_args");
+        assert_eq!(call("open", json!(["audio", "x"])).unwrap_err().code(), "bad_args");
+        assert_eq!(call("close", json!(["audio"])).unwrap_err().code(), "bad_args");
     }
 
     #[test]

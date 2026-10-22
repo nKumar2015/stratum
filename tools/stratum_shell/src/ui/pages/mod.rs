@@ -66,6 +66,18 @@ impl Page {
         }
     }
 
+    /// The page a `settings open <page>` argument names. Accepts the title in
+    /// any case, plus `wifi` for the Network page.
+    pub fn from_name(name: &str) -> Option<Page> {
+        let name = name.trim().to_ascii_lowercase();
+        if name == "wifi" {
+            return Some(Page::Wifi);
+        }
+        Page::ALL
+            .into_iter()
+            .find(|page| page.title().eq_ignore_ascii_case(&name))
+    }
+
     /// Nerd Font glyph for the navigation rail.
     pub fn glyph(self) -> &'static str {
         match self {

@@ -1913,6 +1913,22 @@ impl App {
                 self.dashboard_requested = None;
                 self.mark_dashboard_dirty();
             }
+            ("settings", function @ ("open" | "close" | "toggle")) => {
+                use crate::ui::control_center::Page;
+                // The parser has already rejected unknown page names. Without
+                // one, the window reopens on the page it last showed.
+                let named = call.args.first().and_then(|name| Page::from_name(name));
+                let page = named.unwrap_or(self.control_center.page);
+                match function {
+                    "open" => self.control_center.show(page),
+                    "close" => self.control_center.close(),
+                    "toggle" if named.is_none() && self.control_center.open => {
+                        self.control_center.close()
+                    }
+                    "toggle" => self.control_center.toggle(page),
+                    _ => {}
+                }
+            }
             ("screenshot", "start") => self.start_screenshot(),
             ("lockscreen", "lock") => self.begin_lock()?,
             ("powermenu", "toggle") => {
