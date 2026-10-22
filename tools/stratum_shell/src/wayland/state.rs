@@ -398,6 +398,7 @@ impl App {
             || self.osd.visible()
             || self.toasts.animating()
             || self.control_center.animating()
+            || self.dashboard.animating()
         {
             return std::time::Duration::from_millis(16);
         }
@@ -882,7 +883,7 @@ impl App {
                 self.actions.push(crate::actions::SystemAction::DashboardRefresh { year, month });
                 self.dashboard_requested = Some(std::time::Instant::now());
             }
-            if state_changed {
+            if state_changed || self.dashboard.animating() {
                 self.mark_dashboard_dirty();
             }
         }

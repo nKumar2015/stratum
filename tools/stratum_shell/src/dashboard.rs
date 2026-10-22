@@ -23,6 +23,7 @@ use chrono::Datelike;
 use serde_json::Value;
 
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
+use crate::ui::pages::devices::Marquee;
 use crate::ui::text_field;
 use crate::ui::{self, PaintCtx};
 
@@ -114,6 +115,8 @@ pub struct Dashboard {
     buttons: Vec<(Rect, Button)>,
     /// "No active player", shown after a control was pressed without one.
     error: Option<String>,
+    /// The track title, scrolling when it overflows the panel.
+    title: Marquee,
     metrics: crate::ui::style::DashboardMetrics,
 }
 
@@ -138,8 +141,14 @@ impl Dashboard {
             card: None,
             buttons: Vec::new(),
             error: None,
+            title: Marquee::ticker(),
             metrics: crate::ui::style::DashboardMetrics::default(),
         }
+    }
+
+    /// Whether it needs frames: an open dashboard with a scrolling title.
+    pub fn animating(&self) -> bool {
+        self.open && self.title.moving()
     }
 
     pub fn set_metrics(&mut self, metrics: &crate::ui::style::DashboardMetrics) {
@@ -171,6 +180,7 @@ impl Dashboard {
         self.target = None;
         self.card = None;
         self.buttons.clear();
+        self.title = Marquee::ticker();
         let (year, month, _) = today();
         (self.year, self.month) = (year, month);
     }
@@ -427,8 +437,10 @@ impl Dashboard {
         }
         y += m.art + m.inner;
         let text = |key: &str, fallback: &str| music[key].as_str().filter(|s| !s.is_empty()).unwrap_or(fallback).to_string();
+        let row = Rect { x, y, width: w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
+        self.title.paint(ctx, list, row, &text("title", "Nothing playing"), m.text, ctx.theme.text_main);
+        y += m.line;
         let lines = [
-            (text("title", "Nothing playing"), m.text, ctx.metrics.typography.weight_bold, ctx.theme.text_main),
             (text("artist", "N/A"), m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted),
             (text("album", "N/A"), m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted),
             (

@@ -108,7 +108,8 @@ pub fn strip(
     list.pop_clip();
 }
 
-/// The scrolling name in a detail panel (QML `MarqueeLabel`): still when it
+/// The scrolling name in a detail panel (QML `MarqueeLabel`), and the
+/// dashboard's track title (`Marquee::ticker`): still when it
 /// fits; otherwise it scrolls left at `speed` px/s with a separator and
 /// `gap` before it repeats, seamlessly.
 #[derive(Default)]
@@ -116,6 +117,9 @@ pub struct Marquee {
     text: String,
     offset: f32,
     moving: bool,
+    /// The dashboard's title ticker: centred while it fits and repeating
+    /// with only the gap, no separator (`DashboardMusicPanel.qml`).
+    ticker: bool,
 }
 
 /// The separator QML appended to an overflowing label.
@@ -130,6 +134,10 @@ pub fn advance(offset: f32, dt: f32, speed: f32, span: f32) -> f32 {
 }
 
 impl Marquee {
+    pub fn ticker() -> Self {
+        Self { ticker: true, ..Self::default() }
+    }
+
     /// Whether it needs frames.
     pub fn moving(&self) -> bool {
         self.moving
@@ -161,11 +169,13 @@ impl Marquee {
         if width <= rect.width {
             self.moving = false;
             self.offset = 0.0;
-            ui::paint_text_vcentered(ctx, list, text, rect.x, rect, size, weight, color);
+            let x = if self.ticker { rect.x + ((rect.width - width) * 0.5).round() } else { rect.x };
+            ui::paint_text_vcentered(ctx, list, text, x, rect, size, weight, color);
             return;
         }
         self.moving = true;
-        let looped = format!("{text}{MARQUEE_SEPARATOR}");
+        let separator = if self.ticker { "" } else { MARQUEE_SEPARATOR };
+        let looped = format!("{text}{separator}");
         let span = ctx.text.measure(&looped, &style).0 + m.marquee_gap;
         self.offset = advance(self.offset, ctx.dt, m.marquee_speed, span);
         list.push_clip(rect);
