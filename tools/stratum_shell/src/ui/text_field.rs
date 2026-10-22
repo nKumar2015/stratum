@@ -72,6 +72,11 @@ impl TextField {
         self.input.chars()
     }
 
+    /// The current text, for fields whose contents are not secret (search).
+    pub fn text(&self) -> &str {
+        self.input.expose()
+    }
+
     /// Move the text out for a submit from somewhere other than Return (a
     /// button). `None` when empty, for the same reason Return ignores it.
     pub fn take(&mut self) -> Option<Secret> {

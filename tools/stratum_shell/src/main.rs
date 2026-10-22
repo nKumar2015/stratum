@@ -22,6 +22,7 @@ mod lock;
 mod osd;
 mod pam;
 mod polkit_dialog;
+mod theme_switcher;
 mod power_menu;
 mod toasts;
 mod tray;

@@ -59,9 +59,9 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         // The notification centre exists as a page of the settings window, so
         // every function maps directly onto real behaviour.
         ("notifications", _) => true,
-        // Themes are config-driven and switch live, so `set` is real. `open`
-        // needs the theme-switcher overlay, which is not ported yet.
-        ("theme", "set") => true,
+        // Themes are config-driven and switch live; the switcher overlay
+        // serves open/close/toggle.
+        ("theme", _) => true,
         // The power menu exists as its own overlay.
         ("powermenu", "toggle") => true,
         // ext-session-lock surfaces with a PAM check. A compositor without the
@@ -425,7 +425,7 @@ mod tests {
         assert!(!is_supported("dashboard", "toggle"));
         assert!(is_supported("lockscreen", "lock"));
         assert!(!is_supported("screenshot", "start"));
-        assert!(!is_supported("theme", "open"));
+        assert!(is_supported("theme", "open"));
         assert!(is_supported("theme", "set"));
         assert!(is_supported("notifications", "toggleDnd"));
         assert!(is_supported("powermenu", "toggle"));

@@ -263,6 +263,29 @@ reply_text = 12.0
 send_width = 52.0
 caret_width = 1.5
 
+[metrics.theme_switcher]
+width = 360.0
+padding = 16.0
+spacing = 12.0          # gap between the card's rows
+radius = 12.0
+border = 1.0
+title = 20.0
+subtitle = 13.0         # "Current: …"
+search_height = 34.0
+search_radius = 8.0
+search_padding = 10.0
+search_text = 13.0
+caret_width = 1.5
+row_height = 42.0
+row_gap = 4.0
+row_radius = 8.0
+row_padding = 14.0
+row_text = 14.0
+empty_height = 36.0     # "No matching themes"
+empty_text = 12.0
+max_rows = 8            # rows shown before the list scrolls
+scrim_alpha = 0.56      # dimming behind the card
+
 [metrics.window]
 width = 520             # settings window, initial size
 height = 640

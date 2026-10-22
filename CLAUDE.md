@@ -55,8 +55,9 @@ live theme switching, config hot reload, keyboard input, the power menu overlay,
 the IPC socket, the lock screen, and the polkit dialog (both verified only
 against fixtures in a nested compositor; see below).
 
-Not implemented: hover menus, theme switcher
-overlay, audio EQ panel, screenshots, dashboard, app icons (beside the window
+The theme switcher overlay is implemented too (`theme_switcher.rs`).
+
+Not implemented: hover menus, audio EQ panel, screenshots, dashboard, app icons (beside the window
 title and on notification cards), notification snapshot persistence. See
 `docs/native-shell-parity.md`.
 
@@ -78,9 +79,9 @@ The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
 with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
 names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
 native shell reports as `unsupported`, so keybinds work during the parallel
-migration. Implemented targets: `notifications` (all functions), `theme set`,
+migration. Implemented targets: `notifications` and `theme` (all functions),
 `powermenu toggle`, and `lockscreen lock`. The remaining targets (`screenshot`,
-`dashboard`, `theme open/close/toggle`) still fall back to Quickshell; porting
+`dashboard`) still fall back to Quickshell; porting
 one means adding an arm in `App::execute_ipc` and extending
 `ipc::is_supported`.
 

@@ -34,7 +34,7 @@ Status: `todo` · `wip` · `verified`
 | Wi-Fi hover menu | popup overlay | Compact SSID/signal, quick connect | todo |
 | Battery hover menu | popup overlay | Percentage, state, projected time, power-profile selection (low-power/balanced/performance) | todo |
 | Dashboard menu | popup overlay | Calendar grid with month navigation and a ±3-month sliding window, music panel, performance panel; `watch`/`unwatch` lifecycle so the daemon only streams the visible month | todo |
-| Theme switcher | fullscreen overlay, exclusive keyboard | Search filter, up/down/enter/escape navigation, applies theme immediately | todo |
+| Theme switcher | fullscreen overlay, exclusive keyboard | Search filter, up/down/enter/escape navigation, applies theme immediately | wip — `theme open/close/toggle` over IPC; search, wrapping arrows, Return, Escape, click outside to close, hover to select, click to apply. All exercised in headless sway (keyboard via wtype, pointer via a virtual pointer); not yet on Hyprland. The list scrolls past `max_rows`, which the QML list did not |
 
 ## Overlays & notifications
 

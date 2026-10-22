@@ -25,6 +25,7 @@ pub struct Metrics {
     pub lock: LockMetrics,
     pub polkit: PolkitMetrics,
     pub notification_card: NotificationCardMetrics,
+    pub theme_switcher: ThemeSwitcherMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -43,6 +44,7 @@ impl Default for Metrics {
             lock: LockMetrics::default(),
             polkit: PolkitMetrics::default(),
             notification_card: NotificationCardMetrics::default(),
+            theme_switcher: ThemeSwitcherMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -490,6 +492,66 @@ impl Default for NotificationCardMetrics {
             reply_text: 12.0,
             send_width: 52.0,
             caret_width: 1.5,
+        }
+    }
+}
+
+/// The theme switcher overlay. Defaults follow `modules/ThemeSwitcher.qml`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThemeSwitcherMetrics {
+    pub width: f32,
+    pub padding: f32,
+    /// Gap between the card's rows.
+    pub spacing: f32,
+    pub radius: f32,
+    pub border: f32,
+    pub title: f32,
+    /// "Current: …".
+    pub subtitle: f32,
+    pub search_height: f32,
+    pub search_radius: f32,
+    pub search_padding: f32,
+    pub search_text: f32,
+    pub caret_width: f32,
+    pub row_height: f32,
+    pub row_gap: f32,
+    pub row_radius: f32,
+    pub row_padding: f32,
+    pub row_text: f32,
+    /// The "No matching themes" box.
+    pub empty_height: f32,
+    pub empty_text: f32,
+    /// Rows shown before the list scrolls.
+    pub max_rows: usize,
+    /// Dimming behind the card (QML `#90000000`).
+    pub scrim_alpha: f32,
+}
+
+impl Default for ThemeSwitcherMetrics {
+    fn default() -> Self {
+        Self {
+            width: 360.0,
+            padding: 16.0,
+            spacing: 12.0,
+            radius: 12.0,
+            border: 1.0,
+            title: 20.0,
+            subtitle: 13.0,
+            search_height: 34.0,
+            search_radius: 8.0,
+            search_padding: 10.0,
+            search_text: 13.0,
+            caret_width: 1.5,
+            row_height: 42.0,
+            row_gap: 4.0,
+            row_radius: 8.0,
+            row_padding: 14.0,
+            row_text: 14.0,
+            empty_height: 36.0,
+            empty_text: 12.0,
+            max_rows: 8,
+            scrim_alpha: 0.56,
         }
     }
 }

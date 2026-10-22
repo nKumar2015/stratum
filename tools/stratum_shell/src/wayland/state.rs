@@ -126,6 +126,9 @@ pub struct App {
     polkit_agent: Option<Arc<stratum_sys::managers::polkit::PolkitAgent>>,
     polkit_runtime: Option<tokio::runtime::Handle>,
     polkit_events: Option<calloop::channel::Sender<PolkitEvent>>,
+    /// The theme switcher overlay and its per-output surfaces.
+    theme_switcher: crate::theme_switcher::ThemeSwitcher,
+    theme_surfaces: Vec<SurfaceEntry>,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -244,6 +247,8 @@ impl App {
             polkit_agent: None,
             polkit_runtime: None,
             polkit_events: None,
+            theme_switcher: crate::theme_switcher::ThemeSwitcher::new(),
+            theme_surfaces: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -682,6 +687,45 @@ impl App {
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.polkit_dialog.paint(&mut ctx, &mut list, rect);
+                entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
+                entry.dirty = false;
+            }
+            if entry.mapped {
+                entry.set_keyboard_exclusive(true);
+            }
+        }
+
+        // Theme switcher, on the output it opened on.
+        self.theme_switcher.set_metrics(&self.config.metrics.theme_switcher);
+        let theme_target = self.theme_switcher.target().map(str::to_string);
+        let theme_names = self.theme_names();
+        let current_theme = self.config.theme.clone();
+        for entry in &mut self.theme_surfaces {
+            if theme_target.as_deref() != Some(entry.output_name.as_str()) {
+                entry.unmap();
+                continue;
+            }
+            if !entry.ready() {
+                continue;
+            }
+            if entry.dirty {
+                let output_name = entry.output_name.clone();
+                let mut ctx = crate::ui::PaintCtx {
+                    theme: &theme,
+                    appearance: &self.config.appearance,
+                    metrics: &self.config.metrics,
+                    text: &mut self.text,
+                    icons: &mut self.icons,
+                    state: &self.state,
+                    themes: &self.config.themes,
+                    output_name: &output_name,
+                    axis: self.config.sidebar.axis(),
+                    dt,
+                };
+                let rect = entry.logical_rect();
+                let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
+                self.theme_switcher
+                    .paint(&mut ctx, &mut list, rect, &theme_names, &current_theme);
                 entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
                 entry.dirty = false;
             }
@@ -1255,6 +1299,21 @@ impl App {
                     return Err(IpcError::BadArgs(format!("unknown theme: {name}")));
                 }
             }
+            ("theme", function @ ("open" | "close" | "toggle")) => {
+                // Opens where the user is looking, like the other overlays.
+                let output = self.focused_output();
+                let themes = self.theme_names();
+                let current = self.config.theme.clone();
+                match function {
+                    "open" if !self.theme_switcher.is_open() => {
+                        self.theme_switcher.open_on(&output, &themes, &current)
+                    }
+                    "close" => self.theme_switcher.close(),
+                    "toggle" => self.theme_switcher.toggle(&output, &themes, &current),
+                    _ => {}
+                }
+                self.mark_themes_dirty();
+            }
             ("lockscreen", "lock") => self.begin_lock()?,
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
@@ -1320,6 +1379,32 @@ impl App {
 
     /// Switch the active theme live. Returns false for an unknown name, which
     /// must not blank the shell.
+    /// Theme names in display order (the config's map is sorted).
+    fn theme_names(&self) -> Vec<String> {
+        self.config.themes.keys().cloned().collect()
+    }
+
+    fn mark_themes_dirty(&mut self) {
+        for entry in &mut self.theme_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// Carry out what the theme switcher asked for.
+    fn apply_switcher_action(&mut self, action: crate::theme_switcher::SwitcherAction) {
+        use crate::theme_switcher::SwitcherAction;
+        match action {
+            SwitcherAction::None => return,
+            SwitcherAction::Redraw => {}
+            SwitcherAction::Apply(name) => {
+                if self.switch_theme(&name) {
+                    self.mark_all_dirty();
+                }
+            }
+        }
+        self.mark_themes_dirty();
+    }
+
     fn switch_theme(&mut self, name: &str) -> bool {
         if !self.config.themes.contains_key(name) {
             return false;
@@ -1738,6 +1823,25 @@ impl App {
             polkit_layer.commit();
             self.polkit_surfaces.push(
                 SurfaceEntry::new(polkit_layer, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
+            // Theme switcher: the same kind of fullscreen overlay again.
+            let theme_wl = self.compositor_state.create_surface(qh);
+            let theme_layer = self.layer_shell.create_layer_surface(
+                qh,
+                theme_wl,
+                Layer::Overlay,
+                Some("stratum-themes"),
+                Some(output),
+            );
+            theme_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+            theme_layer.set_exclusive_zone(-1);
+            theme_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            theme_layer.commit();
+            self.theme_surfaces.push(
+                SurfaceEntry::new(theme_layer, scale, output_name.clone())
                     .with_output(output.clone())
                     .with_output_logical_size(output_logical_size),
             );
@@ -2191,6 +2295,7 @@ impl OutputHandler for App {
                 .chain(self.toast_surfaces.iter_mut())
                 .chain(self.power_surfaces.iter_mut())
                 .chain(self.polkit_surfaces.iter_mut())
+                .chain(self.theme_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
                 if entry.output.as_ref() == Some(&output) {
@@ -2220,6 +2325,7 @@ impl LayerShellHandler for App {
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.power_surfaces.retain(|entry| &entry.layer != layer);
         self.polkit_surfaces.retain(|entry| &entry.layer != layer);
+        self.theme_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
         warn!("layer surface closed by compositor");
@@ -2240,6 +2346,7 @@ impl LayerShellHandler for App {
             .power_surfaces
             .iter_mut()
             .chain(self.polkit_surfaces.iter_mut())
+            .chain(self.theme_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // Fullscreen: the compositor's configure is authoritative.
@@ -2451,6 +2558,12 @@ impl PointerHandler for App {
                 self.apply_polkit_action(action);
                 return;
             }
+            if self.theme_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                let themes = self.theme_names();
+                let action = self.theme_switcher.on_click(point, &themes);
+                self.apply_switcher_action(action);
+                return;
+            }
             // The power menu owns the pointer while open; a tile click runs it.
             let on_power = self
                 .power_surfaces
@@ -2579,6 +2692,16 @@ impl PointerHandler for App {
             for entry in &mut self.toast_surfaces {
                 entry.dirty = true;
             }
+        }
+        // Hovering a theme row selects it, as in the QML switcher.
+        let over_themes = self.pointer.as_ref().and_then(|(surface, x, y)| {
+            self.theme_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == surface)
+                .then(|| crate::render::display_list::Point::new(*x, *y))
+        });
+        if over_themes.is_some_and(|p| self.theme_switcher.on_hover(p)) {
+            self.mark_themes_dirty();
         }
 
         if changed {
@@ -2717,6 +2840,18 @@ impl KeyboardHandler for App {
                 .toasts
                 .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
             self.apply_toast_action(action);
+            return;
+        }
+
+        if self.theme_switcher.is_open() {
+            let themes = self.theme_names();
+            let action = self.theme_switcher.key(
+                event.keysym,
+                event.utf8.as_deref(),
+                self.modifiers.ctrl,
+                &themes,
+            );
+            self.apply_switcher_action(action);
             return;
         }
 
