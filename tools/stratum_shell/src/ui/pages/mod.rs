@@ -17,6 +17,7 @@ pub mod audio;
 pub mod battery;
 pub mod bluetooth;
 pub mod display;
+pub mod equalizer;
 pub mod notifications;
 pub mod overview;
 pub mod power;
@@ -27,6 +28,7 @@ pub mod wifi;
 pub enum Page {
     Overview,
     Audio,
+    Equalizer,
     Bluetooth,
     Wifi,
     Battery,
@@ -37,9 +39,10 @@ pub enum Page {
 
 impl Page {
     /// Pages shown in the navigation rail, in order.
-    pub const ALL: [Page; 8] = [
+    pub const ALL: [Page; 9] = [
         Page::Overview,
         Page::Audio,
+        Page::Equalizer,
         Page::Bluetooth,
         Page::Wifi,
         Page::Battery,
@@ -52,6 +55,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Audio => "Audio",
+            Page::Equalizer => "Equalizer",
             Page::Bluetooth => "Bluetooth",
             Page::Wifi => "Network",
             Page::Battery => "Battery",
@@ -66,6 +70,7 @@ impl Page {
         match self {
             Page::Overview => "\u{f009}",
             Page::Audio => "\u{f0581}",
+            Page::Equalizer => "\u{f00ec}",
             Page::Bluetooth => "\u{f00b1}",
             Page::Wifi => "\u{f05a9}",
             Page::Battery => "\u{f007a}",
@@ -147,6 +152,7 @@ pub struct Pages {
     dt: f32,
     pub overview: overview::OverviewPage,
     pub audio: audio::AudioPage,
+    pub equalizer: equalizer::EqualizerPage,
     pub bluetooth: bluetooth::BluetoothPage,
     pub wifi: wifi::WifiPage,
     pub battery: battery::BatteryPage,
@@ -164,6 +170,7 @@ impl Pages {
             dt: 0.0,
             overview: overview::OverviewPage::new(),
             audio: audio::AudioPage::new(),
+            equalizer: equalizer::EqualizerPage::new(),
             bluetooth: bluetooth::BluetoothPage::new(),
             wifi: wifi::WifiPage::new(),
             battery: battery::BatteryPage::new(),
@@ -202,6 +209,24 @@ impl Pages {
         std::mem::take(&mut self.pending)
     }
 
+    /// Whether `page` has a text field that wants the keyboard.
+    pub fn wants_keys(&self, page: Page) -> bool {
+        page == Page::Equalizer && self.equalizer.wants_keys()
+    }
+
+    /// Deliver a key to `page`'s text field.
+    pub fn key(
+        &mut self,
+        page: Page,
+        keysym: smithay_client_toolkit::seat::keyboard::Keysym,
+        text: Option<&str>,
+        ctrl: bool,
+    ) {
+        if page == Page::Equalizer {
+            self.equalizer.key(keysym, text, ctrl, &mut self.pending);
+        }
+    }
+
     /// Whether the visible page needs continuous frames (a scan spinner, say).
     pub fn animating(&self, page: Page) -> bool {
         match page {
@@ -223,6 +248,7 @@ impl Pages {
         match page {
             Page::Overview => self.overview.paint(ctx, list, area),
             Page::Audio => self.audio.paint(ctx, list, area, input, clicked, pending),
+            Page::Equalizer => self.equalizer.paint(ctx, list, area, input, clicked, pending),
             Page::Bluetooth => {
                 self.bluetooth
                     .paint(ctx, list, area, input, clicked, pending)

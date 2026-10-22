@@ -71,6 +71,10 @@ pub struct SystemState {
     pub music: Cell<serde_json::Value>,
     pub dashboard: Cell<serde_json::Value>,
     pub polkit: Cell<serde_json::Value>,
+    /// The equalizer for the current output: its presets, the active one, the
+    /// backend's limits, and the result of the last EQ action
+    /// (`{ ..eq_list_presets, "status", "ok" }`). Written by the action worker.
+    pub eq: Cell<serde_json::Value>,
     /// Compositor state (workspaces, active window), refreshed by the event
     /// watcher rather than polled.
     pub hypr: Cell<crate::hyprland::HyprState>,
@@ -105,6 +109,7 @@ impl SystemState {
             music: Cell::new(serde_json::Value::Null),
             dashboard: Cell::new(serde_json::Value::Null),
             polkit: Cell::new(serde_json::Value::Null),
+            eq: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
             tray: Cell::new(Vec::new()),
             tray_menu: Cell::new(None),
@@ -153,6 +158,7 @@ impl SystemState {
             | self.music.take_dirty()
             | self.dashboard.take_dirty()
             | self.polkit.take_dirty()
+            | self.eq.take_dirty()
             | self.hypr.take_dirty()
             | self.tray.take_dirty()
             | self.tray_menu.take_dirty()

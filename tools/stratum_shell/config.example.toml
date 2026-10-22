@@ -316,6 +316,27 @@ value_width = 38.0      # volume percentage
 stat_split = 0.38       # where values start in label/value rows
 max_devices = 6         # Bluetooth devices before "+N more"
 
+[metrics.equalizer]     # the Equalizer page
+text = 13.0
+caption = 11.0
+line = 18.0
+gap = 8.0
+radius = 6.0
+border = 1.0
+graph_height = 150.0    # response curve
+graph_padding = 8.0
+point = 8.0             # band points on the curve
+point_reach = 14.0      # how far from a point a press still grabs it
+curve_steps = 96
+curve_width = 2.0
+button_height = 28.0
+small_button = 64.0     # On/Off, Remove
+type_button = 86.0      # filter type
+slider_row = 24.0
+label_width = 52.0
+value_width = 64.0
+preset_row = 26.0
+
 [metrics.window]
 width = 520             # settings window, initial size
 height = 640

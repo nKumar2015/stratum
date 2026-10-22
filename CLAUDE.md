@@ -57,8 +57,20 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: audio EQ panel, screenshots, dashboard, notification snapshot
-persistence, the title marquee.
+Not implemented: screenshots, dashboard, notification snapshot persistence, the
+title marquee.
+
+The **equalizer** is a settings page (`ui/pages/equalizer.rs`). `EqModel` is
+the pure, tested state (QML's editing rules and curve model); the blocking
+`stratum_sys` EQ calls run on the action worker (`SystemAction::Eq*`), which
+publishes the presets and the outcome into `SystemState::eq`. Note that every
+shell start already rewrites `~/.config/stratum/audio-eq-presets.json`: the
+audio manager re-applies each output's last preset, which saves it again.
+
+Settings pages find clicks as a pressed edge between paints, so the window
+latches a press (`settings_press`) until it has painted once with it; a press
+and release arriving together were otherwise never seen. Text fields in a page
+get keys only while the settings window has keyboard focus.
 
 **Hover menus** (`ui/hover_menu.rs`) open after resting on a status icon and
 close once neither the icon nor the menu has been hovered for a grace period;
@@ -137,7 +149,7 @@ environment, so use shell builtins only.
 The **polkit dialog** (`polkit_dialog.rs`) fronts the agent in
 `stratum_sys::managers::polkit`, enabled by `[behavior] polkit` (off while
 stratumd holds the session's agent — polkit allows one). The password field is
-shared with the lock screen (`ui/password_field.rs`). The agent's methods run
+shared with the lock screen (`ui/text_field.rs`, masked). The agent's methods run
 on **zbus's own executor, not Tokio**: anything Tokio-specific inside them (a
 `tokio::time` timer) panics on every request. Password checks are spawned onto
 the polkit runtime from the shell instead.

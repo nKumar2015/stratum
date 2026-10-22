@@ -27,6 +27,7 @@ pub struct Metrics {
     pub notification_card: NotificationCardMetrics,
     pub theme_switcher: ThemeSwitcherMetrics,
     pub hover_menu: HoverMenuMetrics,
+    pub equalizer: EqualizerMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -47,6 +48,7 @@ impl Default for Metrics {
             notification_card: NotificationCardMetrics::default(),
             theme_switcher: ThemeSwitcherMetrics::default(),
             hover_menu: HoverMenuMetrics::default(),
+            equalizer: EqualizerMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -569,6 +571,63 @@ impl Default for ThemeSwitcherMetrics {
             empty_text: 12.0,
             max_rows: 8,
             scrim_alpha: 0.56,
+        }
+    }
+}
+
+/// The Equalizer page of the settings window.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EqualizerMetrics {
+    /// Text and caption sizes, and the height of a line of either.
+    pub text: f32,
+    pub caption: f32,
+    pub line: f32,
+    pub gap: f32,
+    pub radius: f32,
+    pub border: f32,
+    /// The response graph.
+    pub graph_height: f32,
+    pub graph_padding: f32,
+    /// Points on the curve, and how far from one a press still grabs it.
+    pub point: f32,
+    pub point_reach: f32,
+    /// Samples along the curve, and its stroke width.
+    pub curve_steps: usize,
+    pub curve_width: f32,
+    pub button_height: f32,
+    /// The band's On/Off and Remove buttons, and its filter-type button.
+    pub small_button: f32,
+    pub type_button: f32,
+    /// A labelled slider row: its height, label column, and value column.
+    pub slider_row: f32,
+    pub label_width: f32,
+    pub value_width: f32,
+    pub preset_row: f32,
+}
+
+impl Default for EqualizerMetrics {
+    fn default() -> Self {
+        Self {
+            text: 13.0,
+            caption: 11.0,
+            line: 18.0,
+            gap: 8.0,
+            radius: 6.0,
+            border: 1.0,
+            graph_height: 150.0,
+            graph_padding: 8.0,
+            point: 8.0,
+            point_reach: 14.0,
+            curve_steps: 96,
+            curve_width: 2.0,
+            button_height: 28.0,
+            small_button: 64.0,
+            type_button: 86.0,
+            slider_row: 24.0,
+            label_width: 52.0,
+            value_width: 64.0,
+            preset_row: 26.0,
         }
     }
 }

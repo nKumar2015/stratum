@@ -136,6 +136,10 @@ pub struct App {
     hover_geometry: Option<(u32, (i32, i32), String)>,
     /// A press landed on the hover menu since its last paint.
     hover_clicked: bool,
+    /// A press landed on the settings window since its last paint. Its pages
+    /// find clicks as a pressed edge between paints, so a press and release
+    /// arriving together (a quick tap) would otherwise never be seen.
+    settings_press: bool,
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
@@ -149,6 +153,9 @@ pub struct App {
     pointer_pressed: bool,
     /// Keyboard modifiers, updated by the compositor.
     modifiers: Modifiers,
+    /// The surface holding keyboard focus, for routing keys to the settings
+    /// window's text fields only when it is the one being typed into.
+    keyboard_focus: Option<wl_surface::WlSurface>,
     /// Where the config came from, and its modification time at load.
     config_path: Option<std::path::PathBuf>,
     config_mtime: Option<std::time::SystemTime>,
@@ -260,6 +267,7 @@ impl App {
             hover_surfaces: Vec::new(),
             hover_geometry: None,
             hover_clicked: false,
+            settings_press: false,
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
             xdg_shell,
@@ -268,6 +276,7 @@ impl App {
             pointer: None,
             pointer_pressed: false,
             modifiers: Modifiers::default(),
+            keyboard_focus: None,
             config_path: path,
             config_mtime,
             last_reload_check: std::time::Instant::now(),
@@ -463,7 +472,8 @@ impl App {
                             .as_ref()
                             .filter(|(surface, _, _)| surface == window.window.wl_surface())
                             .map(|(_, x, y)| (*x, *y)),
-                        pressed: self.pointer_pressed,
+                        // A press released before this paint still counts once.
+                        pressed: self.pointer_pressed || std::mem::take(&mut self.settings_press),
                     };
                     let mut ctx = crate::ui::PaintCtx {
                         theme: &theme,
@@ -2842,6 +2852,9 @@ impl PointerHandler for App {
                     if let Some(action) = self.control_center.on_click(point, rect, &input) {
                         self.apply_action(action);
                     }
+                    if button == crate::ui::MouseButton::Left {
+                        self.settings_press = true;
+                    }
                     // Every click in the window needs a redraw: controls are
                     // immediate-mode and read the pointer state on the next
                     // frame, so without this the slider and buttons never
@@ -2999,11 +3012,12 @@ impl KeyboardHandler for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _serial: u32,
         _raw: &[u32],
         _keysyms: &[Keysym],
     ) {
+        self.keyboard_focus = Some(surface.clone());
     }
 
     fn leave(
@@ -3011,9 +3025,12 @@ impl KeyboardHandler for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        if self.keyboard_focus.as_ref() == Some(surface) {
+            self.keyboard_focus = None;
+        }
     }
 
     fn press_key(
@@ -3097,6 +3114,21 @@ impl KeyboardHandler for App {
             }
             for entry in &mut self.power_surfaces {
                 entry.dirty = true;
+            }
+            return;
+        }
+
+        // A text field in the settings window (the EQ's preset name) takes
+        // typing while the window has focus, Escape included.
+        let settings_focused = match (&self.settings, &self.keyboard_focus) {
+            (Some(window), Some(focus)) => window.window.wl_surface() == focus,
+            _ => false,
+        };
+        if settings_focused && self.control_center.wants_keys() {
+            self.control_center
+                .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
+            if let Some(settings) = &mut self.settings {
+                settings.dirty = true;
             }
             return;
         }

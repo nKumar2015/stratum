@@ -108,6 +108,22 @@ impl ControlCenter {
         (self.progress - target).abs() > 0.001 || (self.open && self.pages.animating(self.page))
     }
 
+    /// Whether the visible page has a text field that wants the keyboard.
+    pub fn wants_keys(&self) -> bool {
+        self.open && self.pages.wants_keys(self.page)
+    }
+
+    /// Deliver a key to the visible page's text field. Any actions it causes
+    /// are taken with the page's other actions on the next paint.
+    pub fn key(
+        &mut self,
+        keysym: smithay_client_toolkit::seat::keyboard::Keysym,
+        text: Option<&str>,
+        ctrl: bool,
+    ) {
+        self.pages.key(self.page, keysym, text, ctrl);
+    }
+
     /// Wheel scrolling for pages that have lists.
     pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
         if self.page == Page::Wifi {

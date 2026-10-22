@@ -57,6 +57,27 @@ pub enum SystemAction {
     DismissAll,
     /// Run one of a notification's actions by key.
     InvokeNotification(u32, String),
+    /// Load the equalizer presets for an output.
+    EqRefresh { device: String },
+    /// Apply a stored preset to an output.
+    EqApplyPreset { device: String, name: String },
+    /// Apply bands that are not (yet) a preset. `bands` is the parametric
+    /// array `stratum_sys` parses: `{frequency_hz, gain_db, q, filter_type,
+    /// enabled}` objects.
+    EqApply {
+        device: String,
+        bands: serde_json::Value,
+        preamp_db: f64,
+    },
+    /// Save bands as a named custom preset.
+    EqSave {
+        device: String,
+        name: String,
+        bands: serde_json::Value,
+        preamp_db: f64,
+    },
+    /// Delete a custom preset.
+    EqDelete { device: String, name: String },
     /// Switch the active theme by name.
     SetTheme(String),
     /// Left-click a tray item.
@@ -155,6 +176,28 @@ fn refresh_network(state: &SystemState, rescan: bool) {
             .wifi_networks
             .set(serde_json::json!({ "ok": true, "networks": [] }));
     }
+    state.notify();
+}
+
+/// Publish the output's presets, with the outcome of the action that just ran
+/// (`result` and the message to show when it succeeded).
+fn publish_eq(state: &SystemState, device: &str, outcome: Option<(&serde_json::Value, &str)>) {
+    let mut snapshot = managers::audio::eq_list_presets(device);
+    let (ok, status) = match outcome {
+        None => (true, String::new()),
+        Some((result, done)) => {
+            let ok = result["ok"].as_bool() == Some(true);
+            let status = if ok {
+                done.to_string()
+            } else {
+                result["error"].as_str().unwrap_or("EQ action failed").to_string()
+            };
+            (ok, status)
+        }
+    };
+    snapshot["ok"] = serde_json::json!(ok);
+    snapshot["status"] = serde_json::json!(status);
+    state.eq.set(snapshot);
     state.notify();
 }
 
@@ -283,6 +326,34 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             state.tray_menu.set(None);
             state.notify();
             serde_json::json!({ "ok": true })
+        }
+        SystemAction::EqRefresh { device } => {
+            publish_eq(state, device, None);
+            serde_json::json!({ "ok": true })
+        }
+        SystemAction::EqApplyPreset { device, name } => {
+            let result = managers::audio::eq_apply_preset(device, name);
+            publish_eq(state, device, Some((&result, &format!("Applied \u{201c}{name}\u{201d}"))));
+            result
+        }
+        SystemAction::EqApply {
+            device,
+            bands,
+            preamp_db,
+        } => {
+            let result = managers::audio::eq_apply_parametric(device, bands, *preamp_db);
+            publish_eq(state, device, Some((&result, "Applied")));
+            result
+        }
+        SystemAction::EqSave { device, name, bands, preamp_db } => {
+            let result = managers::audio::eq_save_preset_parametric(device, name, bands, *preamp_db);
+            publish_eq(state, device, Some((&result, &format!("Saved \u{201c}{name}\u{201d}"))));
+            result
+        }
+        SystemAction::EqDelete { device, name } => {
+            let result = managers::audio::eq_delete_preset(device, name);
+            publish_eq(state, device, Some((&result, &format!("Deleted \u{201c}{name}\u{201d}"))));
+            result
         }
         SystemAction::Spawn(argv) => {
             let Some((program, args)) = argv.split_first() else {
