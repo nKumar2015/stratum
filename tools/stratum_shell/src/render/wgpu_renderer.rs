@@ -30,6 +30,9 @@ use super::Gpu;
 use crate::text::{RasterGlyph, TextEngine};
 
 const ATLAS_SIZE: u32 = 1024;
+
+/// Tessellated paths kept before unused ones are dropped.
+const PATH_CACHE_LIMIT: usize = 256;
 const SHADER: &str = include_str!("shader.wgsl");
 
 /// A contiguous run of vertices sharing one scissor rectangle.
@@ -421,12 +424,14 @@ impl SurfaceRenderer {
     pub fn submit(&mut self, gpu: &Gpu, list: &DisplayList, text: &mut TextEngine) -> Result<(), String> {
         let mut batch = Batch::new();
         self.atlas.begin_frame();
+        let mut used_paths = std::collections::HashSet::new();
 
         for command in &list.commands {
             match command {
                 DrawCommand::Rect(rect) => self.append_rect(&mut batch, rect),
                 DrawCommand::Path(path) => {
                     let key = path_hash(path);
+                    used_paths.insert(key);
                     if let Some(cached) = self.path_cache.get(&key) {
                         batch.extend_from_slice(cached);
                     } else {
@@ -476,6 +481,12 @@ impl SurfaceRenderer {
                     raster,
                 ));
             }
+        }
+        // Paths whose geometry changes every frame (a dragged curve) would
+        // otherwise add a cache entry per frame forever. Past a bound, keep
+        // only what this frame drew.
+        if self.path_cache.len() > PATH_CACHE_LIMIT {
+            self.path_cache.retain(|key, _| used_paths.contains(key));
         }
         for (glyph, run_x, run_y, run_size, color, transform, clip, raster) in glyph_uploads {
             if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
