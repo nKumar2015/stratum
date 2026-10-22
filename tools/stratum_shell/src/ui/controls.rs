@@ -160,60 +160,6 @@ pub fn button(
     hit && clicked
 }
 
-/// A selectable list row (devices, networks).
-#[allow(clippy::too_many_arguments)]
-pub fn selectable_row(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    rect: Rect,
-    title: &str,
-    subtitle: &str,
-    selected: bool,
-    input: &InputState,
-    clicked: bool,
-) -> bool {
-    if selected {
-        list.push_rect(Rect {
-            color: ctx.theme.bg_hover,
-            ..rect
-        });
-    }
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        title,
-        rect.x + 10.0,
-        Rect {
-            height: rect.height * 0.55,
-            ..rect
-        },
-        ctx.metrics.typography.body,
-        ctx.metrics.typography.weight_medium,
-        ctx.theme.text_main,
-    );
-    if !subtitle.is_empty() {
-        ui::paint_text_vcentered(
-            ctx,
-            list,
-            subtitle,
-            rect.x + 10.0,
-            Rect {
-                y: rect.y + rect.height * 0.5,
-                height: rect.height * 0.5,
-                ..rect
-            },
-            ctx.metrics.typography.caption,
-            ctx.metrics.typography.weight_regular,
-            ctx.theme.text_muted,
-        );
-    }
-    let hit = input
-        .pointer
-        .map(|(x, y)| rect.contains(crate::render::display_list::Point::new(x, y)))
-        .unwrap_or(false);
-    hit && clicked
-}
-
 /// Convert a pointer position inside `rect` to a 0..=1 fraction along x.
 pub fn fraction_in(rect: Rect, x: f32) -> f32 {
     ((x - rect.x) / rect.width.max(1.0)).clamp(0.0, 1.0)

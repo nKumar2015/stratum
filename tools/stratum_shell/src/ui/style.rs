@@ -1291,6 +1291,16 @@ pub struct PageMetrics {
     /// Action tiles (the Power page): narrowest tile, and its height.
     pub action_min_width: f32,
     pub action_height: f32,
+    /// Info cards (a label over a value).
+    pub info_height: f32,
+    /// The Battery page's charge card: height, the large percentage, and
+    /// the thickness of its meter.
+    pub hero_height: f32,
+    pub hero_value: f32,
+    pub hero_meter: f32,
+    /// Display page theme cards: narrowest card, and its height.
+    pub theme_min_width: f32,
+    pub theme_height: f32,
     /// How long an action tile waits for its confirming second click.
     pub confirm_ms: u64,
     /// Outline width of a card, and of a highlighted one.
@@ -1337,6 +1347,12 @@ impl Default for PageMetrics {
             tile_height: 76.0,
             action_min_width: 140.0,
             action_height: 92.0,
+            info_height: 64.0,
+            hero_height: 132.0,
+            hero_value: 40.0,
+            hero_meter: 10.0,
+            theme_min_width: 150.0,
+            theme_height: 96.0,
             confirm_ms: 4000,
             outline: 1.0,
             outline_active: 1.5,

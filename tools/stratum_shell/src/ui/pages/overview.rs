@@ -144,10 +144,11 @@ impl OverviewPage {
         ];
 
         let cols = layout::columns(body.width, m.tile_min_width, m.grid_gap, toggles.len());
-        let cols = even_columns(cols, toggles.len());
+        let cols = layout::even_columns(cols, toggles.len());
         let cells = layout::cells(body.x, y, body.width, toggles.len(), cols, m.tile_height, m.grid_gap);
         for (index, (toggle, cell)) in toggles.iter().zip(&cells).enumerate() {
-            if paint_toggle(ctx, list, *cell, toggle, input) && clicked {
+            let hot = layout::tile(ctx, list, *cell, toggle.glyph, toggle.label, &toggle.state, toggle.on, input);
+            if hot && clicked {
                 let next = !toggle.on;
                 match index {
                     0 => {
@@ -193,12 +194,7 @@ impl OverviewPage {
         let pct = battery["battery"]["pct"].as_u64().map(|p| p.min(100));
         let battery_state = battery["battery"]["state"].as_str().unwrap_or("");
         let charging = matches!(battery_state, "charging" | "fully-charged");
-        let battery_color = match pct {
-            _ if charging => theme.success,
-            Some(p) if p <= 15 => theme.error,
-            Some(p) if p <= 30 => theme.warning,
-            _ => theme.success,
-        };
+        let battery_color = super::battery::level_color(&theme, pct, charging);
         let connection = wifi_connection(&net);
         let signal = net["signal_pct"]
             .as_str()
@@ -265,7 +261,7 @@ impl OverviewPage {
         ];
 
         let cols = layout::columns(body.width, m.card_min_width, m.grid_gap, cards.len());
-        let cols = even_columns(cols, cards.len());
+        let cols = layout::even_columns(cols, cards.len());
         let cells = layout::cells(body.x, y, body.width, cards.len(), cols, m.stat_card_height, m.grid_gap);
         let mut navigate = None;
         for (card, cell) in cards.iter().zip(&cells) {
@@ -282,58 +278,6 @@ impl Default for OverviewPage {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Fewer columns when the count does not divide evenly, so a row of four
-/// never leaves a lone card under three.
-fn even_columns(cols: usize, count: usize) -> usize {
-    (1..=cols).rev().find(|c| count.is_multiple_of(*c)).unwrap_or(1)
-}
-
-/// Draw a quick toggle. Returns whether the pointer is over it.
-fn paint_toggle(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect, toggle: &Toggle, input: &InputState) -> bool {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
-    let theme = ctx.theme.clone();
-    let hot = layout::hovered(input, cell);
-    layout::card(ctx, list, cell, layout::clickable(input, cell, toggle.on));
-
-    let pad = m.card_padding;
-    let (fg, bg) = if toggle.on {
-        (theme.on_primary, theme.primary)
-    } else {
-        (theme.text_muted, theme.surface_highest)
-    };
-    layout::badge(ctx, list, cell.x + pad, cell.y + (cell.height - m.badge) * 0.5, toggle.glyph, fg, bg);
-
-    let text_x = cell.x + pad + m.badge + pad * 0.75;
-    let text_w = cell.x + cell.width - pad - text_x;
-    let line = typo.body * 1.4;
-    let caption = typo.caption * 1.4;
-    let top = cell.y + (cell.height - line - caption) * 0.5;
-    let label = ui::elide(ctx, toggle.label, typo.body, typo.weight_bold, text_w);
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        &label,
-        text_x,
-        layout::rect(text_x, top, text_w, line),
-        typo.body,
-        typo.weight_bold,
-        theme.text_main,
-    );
-    let state = ui::elide(ctx, &toggle.state, typo.caption, typo.weight_regular, text_w);
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        &state,
-        text_x,
-        layout::rect(text_x, top + line, text_w, caption),
-        typo.caption,
-        typo.weight_regular,
-        if toggle.on { theme.primary } else { theme.text_muted },
-    );
-    hot
 }
 
 /// Draw a status card. Returns whether the pointer is over it.
@@ -413,7 +357,6 @@ fn paint_music(
     pending: &mut Vec<SystemAction>,
 ) -> f32 {
     let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
     let audio_m = ctx.metrics.audio_page.clone();
     let theme = ctx.theme.clone();
     let music = ctx.state.music.get();
@@ -458,31 +401,8 @@ fn paint_music(
     } else {
         ("Nothing playing".to_string(), "Media controls appear here".to_string())
     };
-    let line = typo.body * 1.4;
-    let caption = typo.caption * 1.4;
-    let top = cell.y + (cell.height - line - caption) * 0.5;
-    let title = ui::elide(ctx, &title, typo.body, typo.weight_bold, text_w);
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        &title,
-        text_x,
-        layout::rect(text_x, top, text_w, line),
-        typo.body,
-        typo.weight_bold,
-        theme.text_main,
-    );
-    let artist = ui::elide(ctx, &artist, typo.caption, typo.weight_regular, text_w);
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        &artist,
-        text_x,
-        layout::rect(text_x, top + line, text_w, caption),
-        typo.caption,
-        typo.weight_regular,
-        theme.text_muted,
-    );
+    let text = layout::rect(text_x, cell.y, text_w, cell.height);
+    layout::two_lines(ctx, list, text, &title, &artist, theme.text_muted);
     cell.y + cell.height
 }
 
@@ -536,7 +456,8 @@ fn connected_devices(bt: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn battery_detail(snapshot: &Value) -> String {
+/// What the battery is doing, as a short sentence ("3h 12m remaining").
+pub(crate) fn battery_detail(snapshot: &Value) -> String {
     let battery = &snapshot["battery"];
     if !battery["present"].as_bool().unwrap_or(false) {
         return "No battery".into();
@@ -545,6 +466,8 @@ fn battery_detail(snapshot: &Value) -> String {
     let projected = battery["projected_text"].as_str().filter(|t| !t.is_empty() && *t != "Unknown");
     match (state, projected) {
         ("fully-charged", _) => "Fully charged".into(),
+        // Held at a charge limit while on AC.
+        ("pending-charge", _) => "Plugged in, not charging".into(),
         ("charging", Some(t)) => format!("Charging, full in {t}"),
         ("charging", None) => "Charging".into(),
         ("discharging", Some(t)) => format!("{t} remaining"),
@@ -553,7 +476,7 @@ fn battery_detail(snapshot: &Value) -> String {
     }
 }
 
-fn battery_glyph(pct: u64, charging: bool) -> &'static str {
+pub(crate) fn battery_glyph(pct: u64, charging: bool) -> &'static str {
     if charging {
         return "\u{f0084}";
     }
@@ -579,14 +502,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn columns_divide_the_cards_evenly() {
-        assert_eq!(even_columns(4, 4), 4);
-        assert_eq!(even_columns(3, 4), 2, "never three and a straggler");
-        assert_eq!(even_columns(2, 4), 2);
-        assert_eq!(even_columns(1, 4), 1);
-    }
-
-    #[test]
     fn volume_reads_either_shape() {
         assert_eq!(volume_percent(&json!({ "volume": "4%" })), Some(4));
         assert_eq!(volume_percent(&json!({ "volume": 37.4 })), Some(37));
@@ -601,7 +516,8 @@ mod tests {
         assert_eq!(battery_detail(&snapshot("discharging", "3h 12m")), "3h 12m remaining");
         assert_eq!(battery_detail(&snapshot("charging", "40m")), "Charging, full in 40m");
         assert_eq!(battery_detail(&snapshot("fully-charged", "")), "Fully charged");
-        assert_eq!(battery_detail(&snapshot("pending-charge", "")), "Pending-charge");
+        assert_eq!(battery_detail(&snapshot("pending-charge", "")), "Plugged in, not charging");
+        assert_eq!(battery_detail(&snapshot("unknown-state", "")), "Unknown-state");
         assert_eq!(battery_detail(&json!({ "battery": { "present": false } })), "No battery");
     }
 }

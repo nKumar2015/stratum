@@ -311,12 +311,16 @@ impl Pages {
                     .paint(ctx, list, area, input, clicked, pending)
             }
             Page::Wifi => self.wifi.paint(ctx, list, area, input, clicked, pending),
-            Page::Battery => self.battery.paint(ctx, list, area, input, clicked, pending),
+            Page::Battery => {
+                return self.battery.paint(ctx, list, area, input, clicked, pending);
+            }
             Page::Notifications => {
                 self.notifications
                     .paint(ctx, list, area, input, clicked, pending)
             }
-            Page::Display => self.display.paint(ctx, list, area, input, clicked, pending),
+            Page::Display => {
+                return self.display.paint(ctx, list, area, input, clicked, pending);
+            }
         }
         fitted
     }
@@ -354,68 +358,6 @@ pub(crate) fn heading(
         height: (area.height - height).max(0.0),
         ..area
     }
-}
-
-/// One label/value row, used by several pages.
-pub(crate) fn stat_row(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    area: Rect,
-    index: usize,
-    label: &str,
-    value: &str,
-) {
-    let page = &ctx.metrics.page;
-    let rect = layout::rect(
-        area.x,
-        area.y + index as f32 * page.stat_spacing,
-        area.width,
-        page.stat_height,
-    );
-    crate::ui::paint_text_vcentered(
-        ctx,
-        list,
-        label,
-        rect.x,
-        rect,
-        ctx.metrics.typography.body,
-        ctx.metrics.typography.weight_regular,
-        ctx.theme.text_muted,
-    );
-    crate::ui::paint_text_vcentered(
-        ctx,
-        list,
-        value,
-        rect.x + rect.width * 0.45,
-        rect,
-        ctx.metrics.typography.body,
-        ctx.metrics.typography.weight_medium,
-        ctx.theme.text_main,
-    );
-}
-
-/// A small section label.
-pub(crate) fn section_label(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    area: Rect,
-    y: f32,
-    label: &str,
-) {
-    crate::ui::paint_text_vcentered(
-        ctx,
-        list,
-        label,
-        area.x,
-        Rect {
-            y,
-            height: ctx.metrics.page.section_label_height,
-            ..area
-        },
-        ctx.metrics.typography.label,
-        ctx.metrics.typography.weight_bold,
-        ctx.theme.text_muted,
-    );
 }
 
 #[cfg(test)]
