@@ -185,6 +185,7 @@ margin_top = 0          # the menu is anchored top-left; these place it
 margin_right = 0
 margin_bottom = 0
 margin_left = 44        # clears a 40 px rail
+close_ms = 150          # closes this long after leaving both menu and icon
 
 [metrics.power_menu]
 tile_width = 140.0      # one option tile

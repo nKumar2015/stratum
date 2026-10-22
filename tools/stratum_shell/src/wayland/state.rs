@@ -140,6 +140,8 @@ pub struct App {
     hover_geometry: Option<(u32, (i32, i32), String)>,
     /// A press landed on the hover menu since its last paint.
     hover_clicked: bool,
+    /// When the pointer left both the open tray menu and its icon.
+    tray_menu_left_at: Option<std::time::Instant>,
     /// A press landed on the settings window since its last paint. Its pages
     /// find clicks as a pressed edge between paints, so a press and release
     /// arriving together (a quick tap) would otherwise never be seen.
@@ -273,6 +275,7 @@ impl App {
             hover_surfaces: Vec::new(),
             hover_geometry: None,
             hover_clicked: false,
+            tray_menu_left_at: None,
             settings_press: false,
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
@@ -354,7 +357,7 @@ impl App {
         }
         // A hover-menu timer is running; it needs to fire close to on time,
         // not on the next one-second tick.
-        if self.hover_menus.intent.pending() {
+        if self.hover_menus.intent.pending() || self.tray_menu_left_at.is_some() {
             return std::time::Duration::from_millis(50);
         }
         // The clock changes once a minute; a one-second wakeup is enough to
@@ -743,6 +746,9 @@ impl App {
         // surface, and a size change waits for the configure before drawing.
         if self.hover_menus.intent.pending() {
             self.update_hover();
+        }
+        if self.tray_menu_left_at.is_some() {
+            self.update_tray_menu_hover();
         }
         if state_changed {
             self.mark_hover_dirty();
@@ -1554,6 +1560,38 @@ impl App {
             .update(std::time::Instant::now(), icon, over_menu, open_after, close_after)
         {
             self.mark_hover_dirty();
+        }
+    }
+
+    /// Close the tray menu once the pointer has been off both it and the icon
+    /// it opened from for `tray_menu.close_ms`, as the QML tray did. Called on
+    /// pointer events and every frame while the countdown runs.
+    fn update_tray_menu_hover(&mut self) {
+        let Some(output) = self.tray_menu.target().map(str::to_string) else {
+            self.tray_menu_left_at = None;
+            return;
+        };
+        let cell = self.config.metrics.tray.cell;
+        let item_y = self.tray_menu.placement().y;
+        let over = self.pointer.as_ref().is_some_and(|(surface, _, y)| {
+            let on_menu = self.tray_menu_surfaces.iter().any(|t| t.layer.wl_surface() == surface);
+            let on_icon = self
+                .surfaces
+                .iter()
+                .any(|b| b.layer.wl_surface() == surface && b.output_name == output)
+                && (item_y..=item_y + cell).contains(y);
+            on_menu || on_icon
+        });
+        if over {
+            self.tray_menu_left_at = None;
+            return;
+        }
+        let left = *self.tray_menu_left_at.get_or_insert_with(std::time::Instant::now);
+        if left.elapsed() >= std::time::Duration::from_millis(self.config.metrics.tray_menu.close_ms) {
+            self.actions.push(crate::actions::SystemAction::TrayMenuClose);
+            self.tray_menu.close();
+            self.tray_menu_geometry = None;
+            self.tray_menu_left_at = None;
         }
     }
 
@@ -2960,6 +2998,7 @@ impl PointerHandler for App {
         // repaints as the pointer moves over it (row highlights, a dragged
         // slider).
         self.update_hover();
+        self.update_tray_menu_hover();
         let over_hover = self.pointer.as_ref().is_some_and(|(surface, _, _)| {
             self.hover_surfaces.iter().any(|t| t.layer.wl_surface() == surface)
         });

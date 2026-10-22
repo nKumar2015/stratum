@@ -721,6 +721,9 @@ pub struct TrayMenuMetrics {
     pub margin_right: i32,
     pub margin_bottom: i32,
     pub margin_left: i32,
+    /// Milliseconds after the pointer leaves both the menu and its icon
+    /// before the menu closes (QML: 150).
+    pub close_ms: u64,
 }
 
 impl Default for TrayMenuMetrics {
@@ -739,6 +742,7 @@ impl Default for TrayMenuMetrics {
             margin_right: 0,
             margin_bottom: 0,
             margin_left: 44,
+            close_ms: 150,
         }
     }
 }

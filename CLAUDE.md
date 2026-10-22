@@ -98,7 +98,8 @@ user icon theme at all. See
 `SecondaryActivate`, and right click fetches the item's `com.canonical.dbusmenu`
 layout (calling `AboutToShow` first, or many menus come back empty) and shows it
 in an overlay surface beside the icon. Nested menus are drawn inline rather than
-as flyouts, and hover-out auto-close is not implemented yet. The D-Bus calls run
+as flyouts. The menu closes `tray_menu.close_ms` after the pointer leaves both
+it and its icon, as QML did. The D-Bus calls run
 on the action worker through `SystemState::tray_handle`.
 
 The **power menu** is a fullscreen overlay surface per output. Only the output
