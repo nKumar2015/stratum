@@ -162,7 +162,11 @@
         ];
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        # wgpu and xkbcommon are loaded with dlopen at runtime, so being on the
+        # link line is not enough; without this the shell exits with "no
+        # suitable Vulkan adapter". Prepended so the user's own path survives.
         shellHook = ''
+          export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon])}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           echo "Rust dev shell ready (cargo/rustc/clippy/rustfmt + dbus tooling)."
         '';
       };
