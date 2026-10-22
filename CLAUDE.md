@@ -52,9 +52,10 @@ status icons, battery, clock), control centre as an xdg-shell window with eight
 pages (overview, audio, bluetooth, wifi, battery, notifications, display, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
-and the IPC socket.
+the IPC socket, and the lock screen (verified only in a nested compositor; see
+below).
 
-Not implemented: lock screen, polkit dialog, hover menus, theme switcher
+Not implemented: polkit dialog, hover menus, theme switcher
 overlay, audio EQ panel, notification actions/inline reply, screenshots,
 dashboard, app icon beside the window title. See
 `docs/native-shell-parity.md`.
@@ -78,10 +79,43 @@ with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
 names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
 native shell reports as `unsupported`, so keybinds work during the parallel
 migration. Implemented targets: `notifications` (all functions), `theme set`,
-and `powermenu toggle`. The remaining targets (`lockscreen`, `screenshot`,
+`powermenu toggle`, and `lockscreen lock`. The remaining targets (`screenshot`,
 `dashboard`, `theme open/close/toggle`) still fall back to Quickshell; porting
 one means adding an arm in `App::execute_ipc` and extending
 `ipc::is_supported`.
+
+The **lock screen** (`lock.rs`, `pam.rs`, `wayland/lock_surface.rs`) uses
+`ext-session-lock-v1` and checks the password with PAM on a worker thread.
+Safety rules it depends on — keep them:
+
+- **Never lock without a way back.** `pam::resolve_service` only picks a
+  service that exists in `/etc/pam.d` (PAM silently falls back to `other`,
+  which denies everyone on NixOS), and `pam::check_service` dlopens every
+  absolute `auth`/`account` module first. If either fails, the shell refuses
+  and answers `unsupported`, so the CLI falls back to Quickshell.
+- **The glibc trap.** This repo's `flake.lock` nixpkgs is older than the
+  system's, so a devshell build links glibc 2.42 while the system's PAM modules
+  need 2.43. Such a build *must* refuse to lock against the real
+  `/etc/pam.d` — and it does. A shell that should lock for real has to be built
+  against the system's nixpkgs (`inputs.nixpkgs.follows`).
+- `SessionLock` is released only through `unlock()` after PAM success, or by
+  dropping it after the compositor's `finished`. Dropping it while locked is a
+  protocol error, which keeps the session locked (fail secure).
+- While locked, **no other surface is painted**. The compositor stops releasing
+  hidden surfaces' buffers, and presenting to one blocks in the swapchain
+  acquire, freezing the loop and the lock screen with it. This happened.
+
+**Testing the lock without locking the real session.** Never lock the user's
+Hyprland session to test — you cannot type their password. Run headless sway
+in its own runtime dir (it must be short: socket paths are limited to 108
+bytes, so use `/run/user/$UID/<name>`, not the scratchpad), point the shell at
+it, and in debug builds set `STRATUM_PAM_CONFDIR` to a directory holding a
+`stratum-shell` service that uses `pam_exec` with a script accepting a fixed
+test password. The modules in that service must come from the libpam the binary
+links (`ldd target/debug/stratum-shell`). Drive input with `wtype`: sway drops
+the first key of each new virtual keyboard, so start with `wtype -s 300 ...`,
+and give `-k Return` its own delay. pam_exec runs its script with an empty
+environment, so use shell builtins only.
 
 ### Decisions made with the user (2026-10-21)
 

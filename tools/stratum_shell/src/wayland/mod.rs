@@ -4,6 +4,7 @@
 //! the globals we bind, the layer surfaces we create, and the mapping from
 //! surface to renderer.
 
+mod lock_surface;
 mod surfaces;
 mod state;
 

@@ -27,6 +27,17 @@ notifications = false
 # notifications: only one host can own it.
 tray = false
 
+# The lock screen (`stratum-cli lockscreen lock`).
+[lock]
+wallpaper = "~/Pictures/Wallpapers/current_wp.png" # PNG, blurred; missing = plain
+avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
+# PAM service for the password check. If /etc/pam.d has no such file, the
+# shell tries stratum-shell, quickshell, then login. It refuses to lock when
+# none exists, or when the service's modules cannot load in this binary (a
+# build linked against an older glibc than the system's), because such a lock
+# could never be undone. Refusals fall back to Quickshell while both run.
+pam_service = "stratum-shell"
+
 [sidebar]
 position = "left"       # "left" or "right"
 width = 40              # logical px
@@ -180,6 +191,24 @@ tile_radius = 8.0
 icon = 48.0
 label = 10.0
 scrim_alpha = 0.63      # dimming behind the menu
+
+[metrics.lock]
+clock = 50.0            # time above the avatar
+avatar = 120.0          # avatar diameter
+avatar_border = 3.0
+label = 20.0            # "Enter Password"
+field_width = 300.0
+field_height = 50.0
+field_radius = 8.0
+field_border = 2.0
+field_padding = 14.0
+field_text = 18.0       # password dots
+caret_width = 2.0
+status = 14.0           # error / "Checking…" line
+spacing = 24.0          # gap between rows of the column
+scrim_alpha = 0.5       # dimming over the wallpaper
+backdrop_width = 320.0  # wallpaper is downscaled to this many px, then blurred
+backdrop_blur = 3.0     # blur radius at that width; 0 disables
 
 [metrics.window]
 width = 520             # settings window, initial size

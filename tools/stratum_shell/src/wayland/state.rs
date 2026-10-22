@@ -27,11 +27,16 @@ use smithay_client_toolkit::shell::wlr_layer::{
     LayerSurfaceConfigure,
 };
 use smithay_client_toolkit::shell::WaylandSurface;
+use smithay_client_toolkit::session_lock::{
+    SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface,
+    SessionLockSurfaceConfigure,
+};
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry};
 use tracing::{debug, info, warn};
 use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
 use wayland_client::{Connection, QueueHandle};
 
+use super::lock_surface::LockSurface;
 use super::surfaces::SurfaceEntry;
 use super::display_ptr;
 use crate::config::{Config, SidebarPosition};
@@ -46,6 +51,20 @@ use std::sync::Arc;
 
 /// Fallback rail width, used before the configuration is read.
 const DEFAULT_SIDEBAR_WIDTH: u32 = 40;
+
+/// Results the lock screen's worker threads deliver to the event loop.
+enum LockEvent {
+    /// A PAM check finished.
+    Auth(Result<(), crate::pam::AuthError>),
+    /// Artwork finished decoding for this spec.
+    Artwork(crate::lock::ArtworkSpec, crate::lock::Artwork),
+}
+
+/// The PAM service and user the lock checks against, resolved when locking.
+struct LockAuth {
+    service: String,
+    user: String,
+}
 
 pub struct App {
     registry_state: RegistryState,
@@ -81,6 +100,19 @@ pub struct App {
     /// Placement is part of the key: two menus with the same row count still
     /// open beside different icons.
     tray_menu_geometry: Option<((u32, u32), crate::tray_menu::Placement, Option<String>)>,
+    /// The lock screen. `session_lock` is only ever released through
+    /// `SessionLock::unlock` after a successful PAM check, or after the
+    /// compositor ends the lock itself: dropping it while locked is a protocol
+    /// error, and the compositor then keeps the session locked.
+    lock: crate::lock::LockScreen,
+    session_lock_state: SessionLockState,
+    session_lock: Option<SessionLock>,
+    lock_surfaces: Vec<LockSurface>,
+    lock_auth: Option<LockAuth>,
+    /// Decoded lock artwork, and the spec of the newest decode requested.
+    lock_art: crate::lock::Artwork,
+    lock_art_spec: Option<crate::lock::ArtworkSpec>,
+    lock_events: Option<calloop::channel::Sender<LockEvent>>,
     /// Toast rects from the last paint, for click-to-dismiss.
     toast_hits: Vec<(crate::render::display_list::Rect, u32)>,
     /// Last frame time, for animation.
@@ -156,6 +188,9 @@ impl App {
             .map_err(|err| format!("xdg-shell unavailable: {err}"))?;
         // Optional: lets us hand focus to the settings window when opened.
         let activation = ActivationState::bind(&globals, &qh).ok();
+        // Optional too: without ext-session-lock, `lockscreen lock` answers
+        // unsupported and the CLI leaves locking to another client.
+        let session_lock_state = SessionLockState::new(&globals, &qh);
         let registry_state = RegistryState::new(&globals);
 
         let mut app = App {
@@ -185,6 +220,14 @@ impl App {
             tray_menu: crate::tray_menu::TrayMenuOverlay::new(),
             tray_menu_surfaces: Vec::new(),
             tray_menu_geometry: None,
+            lock: crate::lock::LockScreen::new(),
+            session_lock_state,
+            session_lock: None,
+            lock_surfaces: Vec::new(),
+            lock_auth: None,
+            lock_art: crate::lock::Artwork::default(),
+            lock_art_spec: None,
+            lock_events: None,
             toast_hits: Vec::new(),
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
@@ -228,10 +271,12 @@ impl App {
         app.wake = Some(ping);
 
         app.start_ipc(&loop_handle);
+        app.start_lock_events(&loop_handle);
         app.create_surfaces(&qh);
         app.start_monitors();
-
-
+        // Decode the lock artwork now, off-thread, so the wallpaper is already
+        // there the first time the screen locks.
+        app.load_lock_art();
 
         // Hand the queue to calloop, which dispatches whenever the socket is
         // readable. The App itself lives in the loop's shared data.
@@ -284,6 +329,16 @@ impl App {
             .as_secs_f32()
             .min(0.1);
         self.last_frame = now;
+
+        // First, so a failure on any other surface cannot keep it from drawing.
+        self.render_lock(dt);
+        // While locked, nothing else is shown, and the compositor stops
+        // releasing the buffers of hidden surfaces: presenting to one blocks
+        // in the swapchain acquire and freezes the whole loop, lock screen
+        // included. Everything is repainted on unlock.
+        if self.lock.phase() == crate::lock::Phase::Locked {
+            return Ok(());
+        }
 
         // Widget animations (the workspace strip's scroll, the clock's minute
         // hand) run on the frame clock. While anything is moving every surface
@@ -710,6 +765,201 @@ impl App {
         Ok(())
     }
 
+    /// Paint the lock surfaces that need it. Errors are logged per surface
+    /// rather than returned, so one output's failure leaves the others drawn.
+    fn render_lock(&mut self, dt: f32) {
+        if !self.lock.active() {
+            return;
+        }
+        let now = chrono::Local::now();
+        if self.lock.clock_changed(now.timestamp() / 60) {
+            for entry in &mut self.lock_surfaces {
+                entry.dirty = true;
+            }
+        }
+        self.lock.set_metrics(&self.config.metrics.lock);
+        let time = now.format("%I:%M %p").to_string();
+        let theme = self.config.active_theme();
+        for entry in &mut self.lock_surfaces {
+            if !entry.configured || !entry.dirty {
+                continue;
+            }
+            let output_name = entry.output_name.clone();
+            let mut ctx = crate::ui::PaintCtx {
+                theme: &theme,
+                appearance: &self.config.appearance,
+                metrics: &self.config.metrics,
+                text: &mut self.text,
+                icons: &mut self.icons,
+                state: &self.state,
+                themes: &self.config.themes,
+                output_name: &output_name,
+                axis: self.config.sidebar.axis(),
+                dt,
+            };
+            let mut list = crate::render::display_list::DisplayList::new(theme.bg_dark.with_alpha(1.0));
+            self.lock
+                .paint(&mut ctx, &mut list, entry.logical_rect(), &self.lock_art, &time);
+            if let Err(err) = entry.render_list(&self.gpu, self.display, &list, &mut self.text) {
+                tracing::error!("lock surface on {output_name} failed to render: {err}");
+            }
+        }
+    }
+
+    /// Route lock-screen worker results (PAM answers, decoded artwork) into
+    /// the event loop.
+    fn start_lock_events(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
+        let (tx, channel) = calloop::channel::channel();
+        self.lock_events = Some(tx);
+        if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(event) = event {
+                app.handle_lock_event(event);
+            }
+        }) {
+            warn!("failed to insert lock event source: {err}");
+        }
+    }
+
+    fn handle_lock_event(&mut self, event: LockEvent) {
+        match event {
+            LockEvent::Auth(result) => {
+                if self.lock.phase() != crate::lock::Phase::Locked {
+                    return;
+                }
+                if let Err(err) = &result {
+                    info!("unlock attempt failed: {}", err.message);
+                }
+                if self.lock.auth_result(result) {
+                    info!("password accepted; unlocking");
+                    self.end_lock(true);
+                } else {
+                    self.mark_lock_dirty();
+                }
+            }
+            LockEvent::Artwork(spec, art) => {
+                // A newer decode may have been requested since this one began.
+                if self.lock_art_spec.as_ref() == Some(&spec) {
+                    self.lock_art = art;
+                    self.mark_lock_dirty();
+                }
+            }
+        }
+    }
+
+    fn mark_lock_dirty(&mut self) {
+        for entry in &mut self.lock_surfaces {
+            entry.dirty = true;
+        }
+    }
+
+    /// Decode the lock artwork on a worker thread, unless the current decode
+    /// already matches the configured files and their modification times.
+    fn load_lock_art(&mut self) {
+        let scale = self
+            .output_state
+            .outputs()
+            .filter_map(|output| self.output_state.info(&output))
+            .map(|info| info.scale_factor)
+            .max()
+            .unwrap_or(1);
+        let spec = crate::lock::ArtworkSpec::new(&self.config.lock, &self.config.metrics.lock, scale);
+        if self.lock_art_spec.as_ref() == Some(&spec) {
+            return;
+        }
+        let Some(sender) = self.lock_events.clone() else {
+            return;
+        };
+        self.lock_art_spec = Some(spec.clone());
+        std::thread::spawn(move || {
+            let art = spec.load();
+            let _ = sender.send(LockEvent::Artwork(spec, art));
+        });
+    }
+
+    /// Ask the compositor to lock the session.
+    ///
+    /// Refuses whenever the lock could not be undone: no PAM service exists,
+    /// or its modules cannot load in this process. A lock nobody can unlock is
+    /// worse than none. Refusals answer `unsupported` (with the reason in the
+    /// log), the same as a compositor without the session-lock protocol, so
+    /// the CLI hands the request to Quickshell and the keybind still locks
+    /// while both shells run.
+    fn begin_lock(&mut self) -> Result<(), IpcError> {
+        if self.lock.active() {
+            return Ok(());
+        }
+        let refuse = |reason: String| {
+            tracing::error!("refusing to lock: {reason}");
+            IpcError::Unsupported
+        };
+        let confdir = crate::pam::test_confdir();
+        let service = crate::pam::resolve_service(&self.config.lock.pam_service, confdir.as_deref())
+            .ok_or_else(|| refuse("no usable PAM service in /etc/pam.d".into()))?;
+        crate::pam::check_service(&service, confdir.as_deref())
+            .map_err(|reason| refuse(format!("PAM service '{service}' cannot run in this build: {reason}")))?;
+        let user = crate::pam::current_user()
+            .ok_or_else(|| refuse("cannot determine the user".into()))?;
+        let session_lock = self
+            .session_lock_state
+            .lock(&self.queue_handle)
+            .map_err(|_| refuse("the compositor does not offer ext-session-lock-v1".into()))?;
+        info!("locking session (PAM service '{service}', user '{user}')");
+
+        self.lock.request();
+        self.lock_auth = Some(LockAuth { service, user });
+        self.session_lock = Some(session_lock);
+        // Nothing else should hold the keyboard or a popup over the lock.
+        self.power_menu.close();
+        if self.tray_menu.target().is_some() {
+            self.actions.push(crate::actions::SystemAction::TrayMenuClose);
+            self.tray_menu.close();
+            self.tray_menu_geometry = None;
+        }
+        let qh = self.queue_handle.clone();
+        self.create_lock_surfaces(&qh);
+        self.load_lock_art();
+        Ok(())
+    }
+
+    /// Give every output a lock surface. Also called when an output appears
+    /// while locked: an output without one would show nothing, but the
+    /// compositor may still route input to it.
+    fn create_lock_surfaces(&mut self, qh: &QueueHandle<Self>) {
+        let Some(session_lock) = self.session_lock.clone() else {
+            return;
+        };
+        for output in self.output_state.outputs() {
+            if self.lock_surfaces.iter().any(|entry| entry.output == output) {
+                continue;
+            }
+            let Some(info) = self.output_state.info(&output) else {
+                continue;
+            };
+            let name = info.name.clone().unwrap_or_else(|| info.model.clone());
+            let wl = self.compositor_state.create_surface(qh);
+            let surface = session_lock.create_lock_surface(wl, &output, qh);
+            debug!("lock surface created on '{name}'");
+            self.lock_surfaces
+                .push(LockSurface::new(surface, output, name, info.scale_factor));
+        }
+    }
+
+    /// Tear the lock down. `unlock` is true only after a successful PAM check;
+    /// when the compositor ended the lock itself, the object is just destroyed.
+    fn end_lock(&mut self, unlock: bool) {
+        if let Some(session_lock) = self.session_lock.take() {
+            if unlock {
+                session_lock.unlock();
+            }
+        }
+        // Surfaces after the unlock request, so the compositor never sees a
+        // locked session without a lock surface.
+        self.lock_surfaces.clear();
+        self.lock_auth = None;
+        self.lock.finish();
+        self.mark_all_dirty();
+    }
+
     /// Start the IPC listener and route requests through calloop.
     ///
     /// The listener runs on its own thread because a client may connect at any
@@ -787,6 +1037,7 @@ impl App {
                     return Err(IpcError::BadArgs(format!("unknown theme: {name}")));
                 }
             }
+            ("lockscreen", "lock") => self.begin_lock()?,
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
                 // first: the QML shell routed popups the same way.
@@ -1678,6 +1929,9 @@ impl OutputHandler for App {
     ) {
         // Second chance for an output that was created without complete info.
         self.create_output_surfaces(qh, &output);
+        if self.lock.active() {
+            self.create_lock_surfaces(qh);
+        }
         // `logical_size` often arrives after the surface was created, so keep
         // every surface on this output current. Popup placement depends on it.
         let size = self
@@ -1854,6 +2108,13 @@ impl PointerHandler for App {
         _pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
+        // The lock screen has nothing to click, and nothing behind it may be
+        // clicked.
+        if self.lock.active() {
+            self.pointer = None;
+            self.pointer_pressed = false;
+            return;
+        }
         let mut clicked_at: Option<(wl_surface::WlSurface, f32, f32, crate::ui::MouseButton)> = None;
         let mut scroll_at: Option<(wl_surface::WlSurface, f32, f32, f32)> = None;
         let mut changed = false;
@@ -2140,6 +2401,36 @@ impl KeyboardHandler for App {
         _serial: u32,
         event: KeyboardEvent,
     ) {
+        // While locked every key belongs to the lock screen, whatever else is
+        // open.
+        if self.lock.active() {
+            match self
+                .lock
+                .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl)
+            {
+                crate::lock::KeyOutcome::Ignored => {}
+                crate::lock::KeyOutcome::Changed => self.mark_lock_dirty(),
+                crate::lock::KeyOutcome::Submit(password) => {
+                    self.mark_lock_dirty();
+                    let (Some(auth), Some(sender)) = (&self.lock_auth, self.lock_events.clone())
+                    else {
+                        return;
+                    };
+                    let service = auth.service.clone();
+                    let user = auth.user.clone();
+                    let confdir = crate::pam::test_confdir();
+                    // PAM blocks, and pam_unix sleeps after a failure, so the
+                    // check must not run on the UI thread.
+                    std::thread::spawn(move || {
+                        let result =
+                            crate::pam::authenticate(&service, &user, password, confdir.as_deref());
+                        let _ = sender.send(LockEvent::Auth(result));
+                    });
+                }
+            }
+            return;
+        }
+
         // The power menu owns the keyboard while it is open, so its keys are
         // handled first and nothing else sees them.
         if self.power_menu.is_open() {
@@ -2199,6 +2490,43 @@ impl KeyboardHandler for App {
         _layout: u32,
     ) {
         self.modifiers = modifiers;
+    }
+}
+
+impl SessionLockHandler for App {
+    fn locked(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _lock: SessionLock) {
+        info!("session locked");
+        self.lock.confirm();
+        self.mark_lock_dirty();
+    }
+
+    fn finished(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _lock: SessionLock) {
+        // Either the compositor refused the lock (another client holds one)
+        // or it ended it. In both cases unlocking is not ours to request.
+        if self.lock.phase() == crate::lock::Phase::Locking {
+            warn!("compositor refused the session lock");
+        } else {
+            warn!("compositor ended the session lock");
+        }
+        self.end_lock(false);
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        surface: SessionLockSurface,
+        configure: SessionLockSurfaceConfigure,
+        _serial: u32,
+    ) {
+        let (width, height) = configure.new_size;
+        if let Some(entry) = self
+            .lock_surfaces
+            .iter_mut()
+            .find(|entry| entry.surface.wl_surface() == surface.wl_surface())
+        {
+            entry.resize(&self.gpu, width, height);
+        }
     }
 }
 

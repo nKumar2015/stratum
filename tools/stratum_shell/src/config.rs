@@ -31,6 +31,7 @@ pub struct Config {
     pub appearance: AppearanceConfig,
     pub behavior: BehaviorConfig,
     pub control_center: ControlCenterConfig,
+    pub lock: LockConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
     pub metrics: crate::ui::style::Metrics,
 }
@@ -44,6 +45,7 @@ impl Default for Config {
             appearance: AppearanceConfig::default(),
             behavior: BehaviorConfig::default(),
             control_center: ControlCenterConfig::default(),
+            lock: LockConfig::default(),
             metrics: crate::ui::style::Metrics::default(),
         }
     }
@@ -418,6 +420,33 @@ impl Default for BehaviorConfig {
             reload_on_change: true,
             tray: false,
             notifications: false,
+        }
+    }
+}
+
+/// The lock screen's artwork and authentication.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LockConfig {
+    /// Wallpaper shown blurred behind the lock screen. `~/` is expanded. A
+    /// missing file falls back to the theme's dark background.
+    pub wallpaper: String,
+    /// Round picture above the password field. Empty or missing shows a glyph.
+    pub avatar: String,
+    /// PAM service for the password check. Only used if `/etc/pam.d` has it;
+    /// otherwise `stratum-shell`, `quickshell`, then `login` are tried, and the
+    /// shell refuses to lock when none exists rather than lock with a service
+    /// that can never succeed.
+    pub pam_service: String,
+}
+
+impl Default for LockConfig {
+    fn default() -> Self {
+        // The paths the QML lock screen used.
+        Self {
+            wallpaper: "~/Pictures/Wallpapers/current_wp.png".to_string(),
+            avatar: "~/Pictures/pfp.png".to_string(),
+            pam_service: "stratum-shell".to_string(),
         }
     }
 }

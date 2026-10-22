@@ -22,6 +22,7 @@ pub struct Metrics {
     pub toasts: ToastMetrics,
     pub power_menu: PowerMenuMetrics,
     pub tray_menu: TrayMenuMetrics,
+    pub lock: LockMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -37,6 +38,7 @@ impl Default for Metrics {
             toasts: ToastMetrics::default(),
             power_menu: PowerMenuMetrics::default(),
             tray_menu: TrayMenuMetrics::default(),
+            lock: LockMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -290,6 +292,64 @@ impl Default for PowerMenuMetrics {
             icon: 48.0,
             label: 10.0,
             scrim_alpha: 0.63,
+        }
+    }
+}
+
+/// The lock screen. Defaults follow `modules/LockScreen.qml`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LockMetrics {
+    /// Clock text size.
+    pub clock: f32,
+    /// Avatar diameter.
+    pub avatar: f32,
+    /// Width of the ring around the avatar.
+    pub avatar_border: f32,
+    /// "Enter Password" label size.
+    pub label: f32,
+    /// Password field size.
+    pub field_width: f32,
+    pub field_height: f32,
+    pub field_radius: f32,
+    pub field_border: f32,
+    /// Horizontal padding inside the field.
+    pub field_padding: f32,
+    /// Size of the password dots.
+    pub field_text: f32,
+    /// Width of the caret after the dots.
+    pub caret_width: f32,
+    /// Status / error line size.
+    pub status: f32,
+    /// Vertical gap between the column's rows.
+    pub spacing: f32,
+    /// Dimming over the wallpaper (QML `#8011111b`).
+    pub scrim_alpha: f32,
+    /// Width the wallpaper is downscaled to before blurring, in pixels.
+    pub backdrop_width: f32,
+    /// Blur radius at that width. 0 disables the blur.
+    pub backdrop_blur: f32,
+}
+
+impl Default for LockMetrics {
+    fn default() -> Self {
+        Self {
+            clock: 50.0,
+            avatar: 120.0,
+            avatar_border: 3.0,
+            label: 20.0,
+            field_width: 300.0,
+            field_height: 50.0,
+            field_radius: 8.0,
+            field_border: 2.0,
+            field_padding: 14.0,
+            field_text: 18.0,
+            caret_width: 2.0,
+            status: 14.0,
+            spacing: 24.0,
+            scrim_alpha: 0.5,
+            backdrop_width: 320.0,
+            backdrop_blur: 3.0,
         }
     }
 }

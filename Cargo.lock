@@ -2330,6 +2330,7 @@ dependencies = [
  "cosmic-text",
  "fontdb 0.23.0",
  "image",
+ "libc",
  "lyon",
  "pollster",
  "raw-window-handle",

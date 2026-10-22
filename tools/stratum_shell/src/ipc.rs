@@ -64,6 +64,9 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         ("theme", "set") => true,
         // The power menu exists as its own overlay.
         ("powermenu", "toggle") => true,
+        // ext-session-lock surfaces with a PAM check. A compositor without the
+        // protocol is reported as unsupported at call time instead.
+        ("lockscreen", "lock") => true,
         _ => false,
     }
 }
@@ -420,7 +423,7 @@ mod tests {
     fn unported_surfaces_are_reported_unsupported() {
         // The CLI relies on this distinction to fall back to Quickshell.
         assert!(!is_supported("dashboard", "toggle"));
-        assert!(!is_supported("lockscreen", "lock"));
+        assert!(is_supported("lockscreen", "lock"));
         assert!(!is_supported("screenshot", "start"));
         assert!(!is_supported("theme", "open"));
         assert!(is_supported("theme", "set"));
@@ -484,7 +487,7 @@ mod tests {
 
         // Unported surfaces never reach the UI thread and say so, which is what
         // makes the CLI fall back to Quickshell.
-        let response = ask(r#"{"target":"lockscreen","function":"lock"}"#);
+        let response = ask(r#"{"target":"screenshot","function":"start"}"#);
         assert_eq!(response["ok"], false);
         assert_eq!(response["code"], "unsupported");
 

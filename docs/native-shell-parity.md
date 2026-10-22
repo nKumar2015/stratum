@@ -49,7 +49,7 @@ Status: `todo` · `wip` · `verified`
 
 | Surface | Kind | Behaviour to preserve | Status |
 |---|---|---|---|
-| Lock screen | fullscreen overlay, exclusive keyboard | PAM authentication, password field, failure message and retry, clock, backdrop blur, only unlocks on success | todo |
+| Lock screen | fullscreen overlay, exclusive keyboard | PAM authentication, password field, failure message and retry, clock, backdrop blur, only unlocks on success | wip — ext-session-lock + PAM implemented; lock, wrong-password retry, unlock, and relock exercised end to end in headless sway against a test PAM service. Not yet exercised on the real session: a devshell build cannot load the system's PAM modules (glibc mismatch) and correctly refuses to lock |
 | polkit dialog | popup overlay, exclusive keyboard | Shows action/message/icon, password field, submits via the agent, shows remaining attempts, closes on success/failure | todo |
 | Power menu | popup overlay | Lock, hibernate, reboot, shutdown, Windows boot entry, firmware setup, logout | wip |
 
