@@ -410,6 +410,7 @@ impl SurfaceRenderer {
     /// Draw and present one frame.
     pub fn submit(&mut self, gpu: &Gpu, list: &DisplayList, text: &mut TextEngine) -> Result<(), String> {
         let mut batch = Batch::new();
+        self.atlas.begin_frame();
 
         for command in &list.commands {
             match command {
@@ -889,8 +890,49 @@ pub(crate) struct Atlas {
     view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     data: Vec<u8>,
+    packer: ShelfPacker,
+}
+
+/// Row-by-row placement of rectangles in the atlas.
+///
+/// Nothing keeps atlas coordinates between frames: every glyph and image is
+/// uploaded again each frame. So the packer is rewound at the start of each
+/// frame. Without that the cursor crept forward frame after frame until it
+/// wrapped in the middle of one, and the uploads after the wrap overwrote
+/// glyphs the same frame had already placed, garbling text for a frame.
+#[derive(Debug, Default)]
+struct ShelfPacker {
     cursor: (u32, u32),
     row_height: u32,
+}
+
+impl ShelfPacker {
+    fn begin_frame(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Place a `w`×`h` rectangle. Returns its origin, and whether the atlas
+    /// ran out of room and was restarted from the top to make it fit.
+    fn allocate(&mut self, w: u32, h: u32) -> Option<((u32, u32), bool)> {
+        if w == 0 || h == 0 || w > ATLAS_SIZE || h > ATLAS_SIZE {
+            return None;
+        }
+        if self.cursor.0 + w > ATLAS_SIZE {
+            self.cursor.0 = 0;
+            self.cursor.1 += self.row_height;
+            self.row_height = 0;
+        }
+        let mut wrapped = false;
+        if self.cursor.1 + h > ATLAS_SIZE {
+            self.cursor = (0, 0);
+            self.row_height = 0;
+            wrapped = true;
+        }
+        let pos = self.cursor;
+        self.cursor.0 += w;
+        self.row_height = self.row_height.max(h);
+        Some((pos, wrapped))
+    }
 }
 
 impl Atlas {
@@ -941,8 +983,7 @@ impl Atlas {
             view,
             bind_group,
             data: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
-            cursor: (0, 0),
-            row_height: 0,
+            packer: ShelfPacker::default(),
         }
     }
 
@@ -984,24 +1025,17 @@ impl Atlas {
         Some(self.uv(x, y, glyph.width, glyph.height))
     }
 
+    /// Rewind to the top of the atlas; see `ShelfPacker`.
+    pub(crate) fn begin_frame(&mut self) {
+        self.packer.begin_frame();
+    }
+
     fn allocate(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
-        if w == 0 || h == 0 || w > ATLAS_SIZE || h > ATLAS_SIZE {
-            return None;
-        }
-        if self.cursor.0 + w > ATLAS_SIZE {
-            self.cursor.0 = 0;
-            self.cursor.1 += self.row_height;
-            self.row_height = 0;
-        }
-        if self.cursor.1 + h > ATLAS_SIZE {
-            // Out of room: reset. A real atlas would evict by LRU.
+        let (pos, wrapped) = self.packer.allocate(w, h)?;
+        if wrapped {
+            // Out of room within a single frame. A real atlas would evict by LRU.
             self.data.fill(0);
-            self.cursor = (0, 0);
-            self.row_height = 0;
         }
-        let pos = self.cursor;
-        self.cursor.0 += w;
-        self.row_height = self.row_height.max(h);
         Some(pos)
     }
 
@@ -1068,6 +1102,32 @@ pub fn fill_rect(x: f32, y: f32, width: f32, height: f32, radius: f32, color: Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packer_restarts_each_frame() {
+        let mut packer = ShelfPacker::default();
+        for _ in 0..10_000 {
+            packer.begin_frame();
+            // A frame's worth of glyphs never needs to wrap once the packer
+            // is rewound, however many frames came before it.
+            for _ in 0..40 {
+                let (_, wrapped) = packer.allocate(24, 24).unwrap();
+                assert!(!wrapped);
+            }
+        }
+        assert_eq!(packer.allocate(8, 8), Some(((40 * 24, 0), false)));
+    }
+
+    #[test]
+    fn packer_wraps_rows_then_restarts_when_full() {
+        let mut packer = ShelfPacker::default();
+        assert_eq!(packer.allocate(ATLAS_SIZE, 10), Some(((0, 0), false)));
+        // No room left on the row: the next rectangle starts a new one.
+        assert_eq!(packer.allocate(4, 4), Some(((0, 10), false)));
+        assert_eq!(packer.allocate(4, ATLAS_SIZE), Some(((0, 0), true)));
+        assert_eq!(packer.allocate(0, 4), None);
+        assert_eq!(packer.allocate(ATLAS_SIZE + 1, 4), None);
+    }
     use crate::render::display_list::{Color, Paint, Path, PathCommand, Point};
 
     #[test]
