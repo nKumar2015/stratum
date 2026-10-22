@@ -57,7 +57,9 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-Not implemented: screenshots, dashboard, the title marquee.
+Not implemented: screenshots and the dashboard. (The QML app title never had a
+marquee; `MarqueeLabel` scrolls long names in the dashboard's music panel and
+the device/network detail panels, so it belongs with those.)
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's
