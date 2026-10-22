@@ -518,13 +518,16 @@ impl SurfaceRenderer {
                 .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&batch.vertices));
         }
 
+        // Suboptimal and Outdated both mean "reconfigure and acquire again".
+        // A suboptimal frame must be released before `configure`: wgpu treats
+        // reconfiguring while a frame is held as a fatal validation error,
+        // which aborted the shell the first time sway reported one. After one
+        // reconfigure, a suboptimal frame is used as it is.
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                self.surface.configure(&gpu.device, &self.config);
-                frame
-            }
-            wgpu::CurrentSurfaceTexture::Outdated => {
+            first @ (wgpu::CurrentSurfaceTexture::Suboptimal(_)
+            | wgpu::CurrentSurfaceTexture::Outdated) => {
+                drop(first);
                 self.surface.configure(&gpu.device, &self.config);
                 match self.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame)
