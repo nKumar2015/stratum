@@ -396,6 +396,28 @@ status_ms = 3500        # how long a result stays
 loading_dot = 8.0
 loading_ms = 840        # pulse period
 
+[metrics.audio_page]    # volume, now playing, outputs and inputs
+spacing = 12.0
+gap = 10.0
+slider_height = 24.0    # volume
+readout_width = 56.0    # "123%"
+card_padding = 12.0     # now playing
+art = 96.0
+title = 15.0
+text = 12.0
+caption = 11.0
+line = 20.0
+media_button = 32.0     # previous / play-pause / next
+media_icon = 14.0
+label = 12.0            # "Audio Output", "Audio Input"
+label_height = 20.0
+row_height = 44.0
+row_gap = 6.0
+row_padding = 10.0
+row_title = 13.0
+row_caption = 10.0
+pending_ms = 5000       # a chosen device shows as selected this long
+
 [metrics.screenshot_viewer] # the window a capture opens in
 width = 1200
 height = 820

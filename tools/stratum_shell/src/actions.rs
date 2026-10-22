@@ -89,6 +89,8 @@ pub enum SystemAction {
     DashboardRefresh { year: i32, month: u32 },
     /// A media control for an MPRIS player: `previous`, `play-pause`, `next`.
     Media { player: String, action: String },
+    /// Seek an MPRIS player to an absolute position.
+    MediaSeek { player: String, seconds: i64 },
     /// Switch the active theme by name.
     SetTheme(String),
     /// Left-click a tray item.
@@ -438,6 +440,20 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
                 dashboard["music"] = managers::music::status();
                 state.dashboard.set(dashboard);
             }
+            state.notify();
+            serde_json::json!({ "ok": true })
+        }
+        SystemAction::MediaSeek { player, seconds } => {
+            // `playerctl position` takes seconds, as the QML seek did.
+            let position = (*seconds).max(0).to_string();
+            let status = std::process::Command::new("playerctl")
+                .args(["-p", player.as_str(), "position", position.as_str()])
+                .status()
+                .map_err(|err| format!("failed to run playerctl: {err}"))?;
+            if !status.success() {
+                return Err(format!("playerctl seek failed for {player}"));
+            }
+            state.music.set(managers::music::status());
             state.notify();
             serde_json::json!({ "ok": true })
         }

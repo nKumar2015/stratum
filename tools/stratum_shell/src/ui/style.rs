@@ -32,6 +32,7 @@ pub struct Metrics {
     pub screenshot: ScreenshotMetrics,
     pub screenshot_viewer: ScreenshotViewerMetrics,
     pub device_page: DevicePageMetrics,
+    pub audio_page: AudioPageMetrics,
     pub window: WindowMetrics,
     pub page: PageMetrics,
 }
@@ -57,6 +58,7 @@ impl Default for Metrics {
             screenshot: ScreenshotMetrics::default(),
             screenshot_viewer: ScreenshotViewerMetrics::default(),
             device_page: DevicePageMetrics::default(),
+            audio_page: AudioPageMetrics::default(),
             window: WindowMetrics::default(),
             page: PageMetrics::default(),
         }
@@ -778,6 +780,66 @@ impl Default for DevicePageMetrics {
             status_ms: 3500,
             loading_dot: 8.0,
             loading_ms: 840,
+        }
+    }
+}
+
+/// The Audio page: volume, now playing, and the output and input lists.
+/// Defaults are `modules/AudioMenu.qml`'s Playback tab.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AudioPageMetrics {
+    pub spacing: f32,
+    pub gap: f32,
+    /// The volume row and its readout.
+    pub slider_height: f32,
+    pub readout_width: f32,
+    /// The now-playing card: padding, art, and text sizes.
+    pub card_padding: f32,
+    pub art: f32,
+    pub title: f32,
+    pub text: f32,
+    pub caption: f32,
+    pub line: f32,
+    /// Previous / play-pause / next.
+    pub media_button: f32,
+    pub media_icon: f32,
+    /// Device rows and the section labels above them.
+    pub label: f32,
+    pub label_height: f32,
+    pub row_height: f32,
+    pub row_gap: f32,
+    pub row_padding: f32,
+    pub row_title: f32,
+    pub row_caption: f32,
+    /// How long a chosen device shows as selected before the system agrees
+    /// (QML's optimistic guard).
+    pub pending_ms: u64,
+}
+
+impl Default for AudioPageMetrics {
+    fn default() -> Self {
+        Self {
+            spacing: 12.0,
+            gap: 10.0,
+            slider_height: 24.0,
+            readout_width: 56.0,
+            card_padding: 12.0,
+            art: 96.0,
+            title: 15.0,
+            text: 12.0,
+            caption: 11.0,
+            line: 20.0,
+            media_button: 32.0,
+            media_icon: 14.0,
+            label: 12.0,
+            label_height: 20.0,
+            row_height: 44.0,
+            row_gap: 6.0,
+            row_padding: 10.0,
+            row_title: 13.0,
+            row_caption: 10.0,
+            pending_ms: 5000,
         }
     }
 }

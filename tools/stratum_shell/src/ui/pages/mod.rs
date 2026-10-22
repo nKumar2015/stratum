@@ -104,8 +104,14 @@ impl<T: Clone + PartialEq> Optimistic<T> {
 
     /// Record an intent for the next few frames.
     pub fn set(&mut self, value: T) {
+        self.set_for(value, 2.0);
+    }
+
+    /// Record an intent that holds for `seconds` unless reality agrees
+    /// sooner (a device switch can take a while to be reported).
+    pub fn set_for(&mut self, value: T, seconds: f32) {
         self.value = Some(value);
-        self.remaining = 2.0;
+        self.remaining = seconds;
     }
 
     /// Resolve the value to paint, dropping the overlay once reality agrees.
@@ -243,6 +249,7 @@ impl Pages {
         match page {
             Page::Bluetooth => self.bluetooth.animating(),
             Page::Wifi => self.wifi.animating(),
+            Page::Audio => self.audio.animating(),
             _ => false,
         }
     }
