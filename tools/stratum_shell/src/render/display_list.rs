@@ -125,7 +125,7 @@ impl Transform {
     /// Rotate about `(px, py)`, matching the QML `rotation` + centered pivot
     /// idiom used for the vertical app-title label.
     pub fn rotate_about(radians: f32, px: f32, py: f32) -> Self {
-        Self::translate(px, py).then(Self::rotate(radians)).then(Self::translate(-px, -py))
+        Self::translate(-px, -py).then(Self::rotate(radians)).then(Self::translate(px, py))
     }
 
     /// `self` applied first, then `other`.
@@ -552,6 +552,17 @@ mod transform_tests {
         let (x, y) = t.apply(10.0, 0.0);
         assert!((x - 20.0).abs() < 1e-4, "x was {x}");
         assert!((y - 890.0).abs() < 1e-4, "y was {y}");
+    }
+
+    #[test]
+    fn rotating_about_a_point_keeps_it_fixed() {
+        let t = Transform::rotate_about(std::f32::consts::FRAC_PI_2, 50.0, 20.0);
+        let (x, y) = t.apply(50.0, 20.0);
+        assert!((x - 50.0).abs() < 1e-4 && (y - 20.0).abs() < 1e-4, "pivot moved to {x},{y}");
+        // A quarter turn clockwise: a point to the right of the pivot ends
+        // up below it.
+        let (x, y) = t.apply(60.0, 20.0);
+        assert!((x - 50.0).abs() < 1e-4 && (y - 30.0).abs() < 1e-4, "got {x},{y}");
     }
 
     #[test]

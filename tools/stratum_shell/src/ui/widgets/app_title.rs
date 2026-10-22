@@ -133,18 +133,21 @@ impl Widget for AppTitle {
         }
 
         let mut run = ctx.text.shape(&title, &style, 0.0, 0.0);
-        let line_height = size * 1.2;
         let length = ctx.text.measure(&title, &style).0;
 
         // Icon and text are centred together. The run reads upward, so the
         // icon, which comes first, sits below it. Rotated -90 degrees the run
-        // spans `[baseline - length, baseline]`. Across the rail, bias by
-        // half the line height.
+        // spans `[baseline - length, baseline]`. Across the rail the ascent
+        // lies left of the baseline and the descent right of it; centring
+        // that line box on the rail, as horizontal labels centre theirs, puts
+        // the text on the icon's axis. (Biasing by half of `size * 1.2` left
+        // it a descent to the right.)
         let bottom = rect.y + rect.height * 0.5 + (length + icon_space) * 0.5;
         push_icon(list, rect.x + (rect.width - icon_size) * 0.5, bottom - icon_size);
         let baseline_y = bottom - icon_space;
+        let (ascent, line_box) = ctx.text.metrics(&style);
         run.transform = ui::vertical_text_transform(
-            rect.x + (rect.width - line_height) * 0.5 + line_height,
+            rect.x + rect.width * 0.5 + ascent - line_box * 0.5,
             baseline_y,
         );
         list.push_text(run);

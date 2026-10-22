@@ -73,7 +73,7 @@ impl Page {
             Page::Audio => "\u{f0581}",
             Page::Equalizer => "\u{f00ec}",
             Page::Bluetooth => "\u{f00b1}",
-            Page::Wifi => "\u{f05a9}",
+            Page::Wifi => "\u{f0928}",
             Page::Battery => "\u{f007a}",
             Page::Notifications => "\u{f009a}",
             Page::Display => "\u{f108}",

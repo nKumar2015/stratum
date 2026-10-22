@@ -75,16 +75,18 @@ impl IconKind {
                     .and_then(|s| s.parse::<i64>().ok())
                     .or_else(|| net["signal_pct"].as_i64())
                     .unwrap_or(0);
+                // QML's glyphs (`sidebar/Wifi.qml`): the wifi-strength set,
+                // with the outlined "off" glyph when not connected.
                 let glyph = match state {
                     "ethernet" => "\u{f0200}",
                     "wifi" => match signal {
-                        80.. => "\u{f05a8}",
-                        60..=79 => "\u{f05a5}",
-                        40..=59 => "\u{f05a2}",
-                        20..=39 => "\u{f059f}",
-                        _ => "\u{f05a9}",
+                        80.. => "\u{f0928}",
+                        60..=79 => "\u{f0925}",
+                        40..=59 => "\u{f0922}",
+                        20..=39 => "\u{f091f}",
+                        _ => "\u{f092f}",
                     },
-                    _ => "\u{f05aa}",
+                    _ => "\u{f092e}",
                 };
                 let color = if state == "none" {
                     ctx.theme.text_muted
@@ -101,16 +103,18 @@ impl IconKind {
                     .and_then(|v| v.trim_end_matches('%').parse::<i64>().ok())
                     .unwrap_or(0);
                 let headphones = audio["headphones"].as_str() == Some("yes");
+                // QML's glyphs (`sidebar/Audio.qml`): volume-off, headphones,
+                // then low/medium/high. Its "boosted" glyph was unreachable.
                 let glyph = if muted || volume == 0 {
-                    "\u{f075e}"
+                    "\u{f0581}"
                 } else if headphones {
-                    "\u{f025d}"
+                    "\u{f02cb}"
                 } else if volume < 34 {
-                    "\u{f057e}"
-                } else if volume < 67 {
                     "\u{f057f}"
-                } else {
+                } else if volume < 67 {
                     "\u{f0580}"
+                } else {
+                    "\u{f057e}"
                 };
                 let color = if muted {
                     ctx.theme.error

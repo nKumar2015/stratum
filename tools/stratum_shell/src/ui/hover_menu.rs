@@ -189,7 +189,7 @@ impl HoverMenus {
         let (glyph, title) = match kind {
             HoverKind::Audio => ("\u{f057e}", "Audio"),
             HoverKind::Bluetooth => ("\u{f00af}", "Quick Connect"),
-            HoverKind::Wifi => ("\u{f05a9}", "Network"),
+            HoverKind::Wifi => ("\u{f0928}", "Network"),
             HoverKind::Battery => ("\u{f0084}", "Battery"),
         };
         frame.header(ctx, list, &format!("{glyph}  {title}"));
@@ -416,7 +416,7 @@ fn network(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
         let name = c["connection"].as_str().filter(|s| !s.is_empty()).unwrap_or(if ethernet { "Ethernet" } else { "Unknown" });
         let signal = c["signal"].as_str().and_then(|s| s.parse::<i64>().ok()).or_else(|| c["signal"].as_i64());
         let row = f.take(m.row_height);
-        ui::paint_text_vcentered(ctx, list, if ethernet { "\u{f0200}" } else { "\u{f05a9}" }, row.x, row, m.icon, ctx.metrics.typography.weight_regular, ctx.theme.primary);
+        ui::paint_text_vcentered(ctx, list, if ethernet { "\u{f0200}" } else { "\u{f0928}" }, row.x, row, m.icon, ctx.metrics.typography.weight_regular, ctx.theme.primary);
         ui::paint_text_vcentered(ctx, list, name, row.x + m.icon + m.gap, row, m.text, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
         if let (false, Some(pct)) = (ethernet, signal) {
             let bars = signal_bars(pct);

@@ -166,7 +166,8 @@ impl Widget for Battery {
             };
             (glyph_rect, label_rect)
         };
-        ui::paint_text_centered(ctx, list, glyph(reading), glyph_rect, glyph_size, color);
+        // Lying on its side, as QML's `rotation: 90`.
+        ui::paint_text_centered_rotated(ctx, list, glyph(reading), glyph_rect, glyph_size, color, std::f32::consts::FRAC_PI_2);
         ui::paint_text_centered_weighted(
             ctx,
             list,

@@ -433,6 +433,32 @@ pub fn paint_text_centered(
     ctx.text_text(list, value, x, baseline, style);
 }
 
+/// [`paint_text_centered`], turned clockwise by `radians` about the centre of
+/// `rect` (QML's `rotation` on a centred item).
+pub fn paint_text_centered_rotated(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    value: &str,
+    rect: Rect,
+    size: f32,
+    color: Color,
+    radians: f32,
+) {
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight: 400,
+        color,
+    };
+    let width = ctx.text.measure(value, &style).0;
+    let (ascent, line_height) = ctx.text.metrics(&style);
+    let x = rect.x + (rect.width - width) * 0.5;
+    let baseline = rect.y + (rect.height - line_height) * 0.5 + ascent;
+    let mut run = ctx.text.shape(value, &style, x, baseline);
+    run.transform = Transform::rotate_about(radians, rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
+    list.push_text(run);
+}
+
 /// Draw a single line vertically centred in `rect`, starting at `x`.
 ///
 /// Uses the font's real ascent and line height, so text sits on the optical
