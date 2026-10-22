@@ -598,6 +598,22 @@ fn wrap_with(text: &str, max_width: f32, max_lines: usize, mut measure: impl FnM
     lines
 }
 
+/// `text` cut to fit `max_width` on one line, ending in an ellipsis when cut.
+/// Unlike [`wrap_text`], a single long word is cut too.
+pub fn elide(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16, max_width: f32) -> String {
+    let style = TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight,
+        color: ctx.theme.text_main,
+    };
+    let mut measure = |s: &str| ctx.text.measure(s, &style).0;
+    if measure(text) <= max_width {
+        return text.to_string();
+    }
+    elide_with(text, max_width, &mut measure)
+}
+
 fn elide_with(text: &str, max_width: f32, measure: &mut impl FnMut(&str) -> f32) -> String {
     let mut chars: Vec<char> = text.chars().collect();
     loop {

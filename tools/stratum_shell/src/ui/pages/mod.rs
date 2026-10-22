@@ -19,6 +19,7 @@ pub mod bluetooth;
 pub mod devices;
 pub mod display;
 pub mod equalizer;
+pub mod layout;
 pub mod notifications;
 pub mod overview;
 pub mod power;
@@ -170,6 +171,8 @@ pub struct Pages {
     pressed_last: bool,
     /// Time since the previous frame, for optimistic values.
     dt: f32,
+    /// A page the last paint asked to show (an Overview card was clicked).
+    pub navigate: Option<Page>,
     pub overview: overview::OverviewPage,
     pub audio: audio::AudioPage,
     pub equalizer: equalizer::EqualizerPage,
@@ -188,6 +191,7 @@ impl Pages {
             clicked: false,
             pressed_last: false,
             dt: 0.0,
+            navigate: None,
             overview: overview::OverviewPage::new(),
             audio: audio::AudioPage::new(),
             equalizer: equalizer::EqualizerPage::new(),
@@ -210,12 +214,20 @@ impl Pages {
         self.clicked = input.pressed && !self.pressed_last;
         self.pressed_last = input.pressed;
 
+        self.overview.tick(dt);
         self.audio.tick(dt);
         self.bluetooth.tick(dt);
         self.wifi.tick(dt);
         self.battery.tick(dt);
         self.display.tick(dt);
         self.power.tick(dt);
+    }
+
+    /// Called when the visible page changes, before `on_page_shown`.
+    pub fn on_page_hidden(&mut self, page: Page) {
+        if page == Page::Power {
+            self.power.disarm();
+        }
     }
 
     /// Called when the visible page changes. Pages refresh lazily, so this is
@@ -262,10 +274,15 @@ impl Pages {
             Page::Bluetooth => self.bluetooth.animating(),
             Page::Wifi => self.wifi.animating(),
             Page::Audio => self.audio.animating(),
+            Page::Power => self.power.animating(),
             _ => false,
         }
     }
 
+    /// Paint `page` into `area`. Returns the bottom of what it drew, which
+    /// may lie below `area`: the window scrolls the page by the difference.
+    /// Pages not yet built on [`layout`] fit their own content and report
+    /// the area's bottom.
     pub fn paint(
         &mut self,
         page: Page,
@@ -273,11 +290,20 @@ impl Pages {
         list: &mut DisplayList,
         area: Rect,
         input: &InputState,
-    ) {
+    ) -> f32 {
         let clicked = self.clicked;
         let pending = &mut self.pending;
+        let fitted = area.y + area.height;
         match page {
-            Page::Overview => self.overview.paint(ctx, list, area),
+            Page::Overview => {
+                let (bottom, navigate) =
+                    self.overview.paint(ctx, list, area, input, clicked, pending);
+                self.navigate = navigate.or(self.navigate);
+                return bottom;
+            }
+            Page::Power => {
+                return self.power.paint(ctx, list, area, input, clicked, pending);
+            }
             Page::Audio => self.audio.paint(ctx, list, area, input, clicked, pending),
             Page::Equalizer => self.equalizer.paint(ctx, list, area, input, clicked, pending),
             Page::Bluetooth => {
@@ -291,8 +317,8 @@ impl Pages {
                     .paint(ctx, list, area, input, clicked, pending)
             }
             Page::Display => self.display.paint(ctx, list, area, input, clicked, pending),
-            Page::Power => self.power.paint(ctx, list, area, input, clicked, pending),
         }
+        fitted
     }
 }
 
@@ -319,12 +345,13 @@ pub(crate) fn heading(
             ..area
         },
         ctx.metrics.typography.heading,
-ctx.metrics.typography.weight_bold,
+        ctx.metrics.typography.weight_bold,
         ctx.theme.text_main,
     );
+    let height = ctx.metrics.window.heading_height;
     Rect {
-        y: area.y + 40.0,
-        height: (area.height - 40.0).max(0.0),
+        y: area.y + height,
+        height: (area.height - height).max(0.0),
         ..area
     }
 }
@@ -338,14 +365,13 @@ pub(crate) fn stat_row(
     label: &str,
     value: &str,
 ) {
-    let rect = Rect {
-        x: area.x,
-        y: area.y + index as f32 * 38.0,
-        width: area.width,
-        height: 32.0,
-        radius: 0.0,
-        color: crate::render::display_list::Color::TRANSPARENT,
-    };
+    let page = &ctx.metrics.page;
+    let rect = layout::rect(
+        area.x,
+        area.y + index as f32 * page.stat_spacing,
+        area.width,
+        page.stat_height,
+    );
     crate::ui::paint_text_vcentered(
         ctx,
         list,
@@ -353,7 +379,7 @@ pub(crate) fn stat_row(
         rect.x,
         rect,
         ctx.metrics.typography.body,
-ctx.metrics.typography.weight_regular,
+        ctx.metrics.typography.weight_regular,
         ctx.theme.text_muted,
     );
     crate::ui::paint_text_vcentered(
@@ -363,7 +389,7 @@ ctx.metrics.typography.weight_regular,
         rect.x + rect.width * 0.45,
         rect,
         ctx.metrics.typography.body,
-ctx.metrics.typography.weight_medium,
+        ctx.metrics.typography.weight_medium,
         ctx.theme.text_main,
     );
 }
@@ -383,11 +409,11 @@ pub(crate) fn section_label(
         area.x,
         Rect {
             y,
-            height: 20.0,
+            height: ctx.metrics.page.section_label_height,
             ..area
         },
         ctx.metrics.typography.label,
-ctx.metrics.typography.weight_bold,
+        ctx.metrics.typography.weight_bold,
         ctx.theme.text_muted,
     );
 }

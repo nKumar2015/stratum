@@ -24,6 +24,10 @@ pub struct ControlCenter {
     /// Animation progress 0..1.
     pub progress: f32,
     pages: Pages,
+    /// How far the visible page is scrolled, and the most it can be: the
+    /// height its last paint overflowed the window by.
+    scroll: f32,
+    max_scroll: f32,
 }
 
 impl ControlCenter {
@@ -36,7 +40,20 @@ impl ControlCenter {
             width,
             progress: 0.0,
             pages: Pages::new(),
+            scroll: 0.0,
+            max_scroll: 0.0,
         }
+    }
+
+    /// Show `page`, telling the pages which one went away. A page change
+    /// starts at the top.
+    fn switch_to(&mut self, page: Page) {
+        if self.page != page {
+            self.pages.on_page_hidden(self.page);
+            self.scroll = 0.0;
+            self.max_scroll = 0.0;
+        }
+        self.page = page;
     }
 
     /// Replace the configuration after a live reload or theme switch, keeping
@@ -58,7 +75,7 @@ impl ControlCenter {
         } else {
             let changed = !self.open || self.page != page;
             self.open = true;
-            self.page = page;
+            self.switch_to(page);
             if changed {
                 self.pages.on_page_shown(page);
             }
@@ -72,11 +89,14 @@ impl ControlCenter {
             self.pages.on_page_shown(page);
         }
         self.open = true;
-        self.page = page;
+        self.switch_to(page);
     }
 
     pub fn close(&mut self) {
         self.open = false;
+        // A confirmation armed before closing must not survive to the next
+        // opening, where one click would run it.
+        self.pages.on_page_hidden(self.page);
     }
 
     /// Advance the open/close animation. Returns true while animating.
@@ -124,16 +144,18 @@ impl ControlCenter {
         self.pages.key(self.page, keysym, text, ctrl);
     }
 
-    /// Wheel scrolling for pages that have lists.
+    /// Wheel scrolling. A page's own list scrolls first; once it is at its
+    /// end, or when the page has none, the page itself scrolls.
     pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
-        match self.page {
-            Page::Wifi => {
-                self.pages.wifi.on_scroll(point, delta);
-            }
-            Page::Bluetooth => {
-                self.pages.bluetooth.on_scroll(point, delta);
-            }
-            _ => {}
+        let consumed = match self.page {
+            Page::Wifi => self.pages.wifi.on_scroll(point, delta),
+            Page::Bluetooth => self.pages.bluetooth.on_scroll(point, delta),
+            _ => false,
+        };
+        if !consumed {
+            // Positive deltas scroll up, as the lists take them.
+            let step = self.config.metrics.window.scroll_step;
+            self.scroll = scroll_by(self.scroll, -delta.signum() * step, self.max_scroll);
         }
     }
 
@@ -151,7 +173,7 @@ impl ControlCenter {
         // Fill the whole window: `surface` may carry a transparent colour, so
         // paint an explicit background.
         list.push_rect(Rect {
-            color: ctx.theme.bg_main,
+            color: ctx.theme.surface,
             ..surface
         });
         let panel = Rect {
@@ -238,14 +260,15 @@ impl ControlCenter {
             width: nav_width,
             height: panel.height,
             radius: 0.0,
-            color: Color::TRANSPARENT,
+            color: ctx.theme.surface_lowest,
         };
+        list.push_rect(nav);
 
         crate::ui::paint_text_vcentered(
             ctx,
             list,
             "Settings",
-            nav.x + 18.0,
+            nav.x + win.nav_title_x,
             Rect {
                 height: win.nav_header,
                 ..nav
@@ -268,7 +291,11 @@ impl ControlCenter {
             let selected = page == self.page;
             if selected {
                 list.push_rect(Rect {
-                    color: ctx.theme.bg_hover,
+                    color: crate::ui::pages::layout::mix(
+                        ctx.theme.surface_high,
+                        ctx.theme.primary,
+                        0.14,
+                    ),
                     ..row
                 });
             }
@@ -281,7 +308,7 @@ impl ControlCenter {
                 ctx,
                 list,
                 page.glyph(),
-                row.x + 10.0,
+                row.x + win.nav_icon_x,
                 row,
                 ctx.metrics.typography.workspace,
                 ctx.metrics.typography.weight_regular,
@@ -291,10 +318,14 @@ impl ControlCenter {
                 ctx,
                 list,
                 page.title(),
-                row.x + 36.0,
+                row.x + win.nav_label_x,
                 row,
                 ctx.metrics.typography.body,
-                ctx.metrics.typography.weight_regular,
+                if selected {
+                    ctx.metrics.typography.weight_bold
+                } else {
+                    ctx.metrics.typography.weight_regular
+                },
                 color,
             );
             y += win.nav_row_spacing;
@@ -306,7 +337,7 @@ impl ControlCenter {
             width: 1.0,
             height: panel.height,
             radius: 0.0,
-            color: ctx.theme.border_inactive,
+            color: ctx.theme.outline,
         });
         nav_width
     }
@@ -327,7 +358,28 @@ impl ControlCenter {
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
-        self.pages.paint(self.page, ctx, list, inner, input);
+        // A resize can leave the page scrolled past its new end.
+        self.scroll = self.scroll.min(self.max_scroll);
+        // Scrolling only moves where the page paints. Controls test the
+        // pointer against the rects they drew, so hits follow for free.
+        list.push_clip(area);
+        let bottom = self.pages.paint(
+            self.page,
+            ctx,
+            list,
+            Rect {
+                y: inner.y - self.scroll,
+                ..inner
+            },
+            input,
+        );
+        list.pop_clip();
+        // Bottom padding belongs to the scrolled content too.
+        self.max_scroll = (bottom + self.scroll + padding - (area.y + area.height)).max(0.0);
+        if let Some(page) = self.pages.navigate.take() {
+            self.switch_to(page);
+            self.pages.on_page_shown(page);
+        }
     }
 
     /// Route a click in window coordinates. Returns an action for the shell.
@@ -351,7 +403,7 @@ impl ControlCenter {
             for page in Page::ALL {
                 if point.y >= y && point.y <= y + win.nav_row_height {
                     if self.page != page {
-                        self.page = page;
+                        self.switch_to(page);
                         self.pages.on_page_shown(page);
                     }
                     return None;
@@ -363,9 +415,31 @@ impl ControlCenter {
     }
 }
 
+/// `scroll` moved by `delta`, kept within the page.
+fn scroll_by(scroll: f32, delta: f32, max: f32) -> f32 {
+    (scroll + delta).clamp(0.0, max.max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_stays_within_the_page() {
+        assert_eq!(scroll_by(0.0, -48.0, 100.0), 0.0);
+        assert_eq!(scroll_by(80.0, 48.0, 100.0), 100.0);
+        assert_eq!(scroll_by(10.0, 48.0, 0.0), 0.0, "a page that fits never scrolls");
+    }
+
+    #[test]
+    fn a_new_page_starts_at_the_top() {
+        let mut center = ControlCenter::new(Arc::new(Config::default()));
+        center.show(Page::Equalizer);
+        center.max_scroll = 200.0;
+        center.scroll = 120.0;
+        center.show(Page::Wifi);
+        assert_eq!(center.scroll, 0.0);
+    }
 
     #[test]
     fn toggle_opens_the_requested_page() {

@@ -1186,10 +1186,17 @@ pub struct WindowMetrics {
     pub nav_top_gap: f32,
     /// Radius of a selected row.
     pub nav_row_radius: f32,
+    /// Left inset of the rail's "Settings" title.
+    pub nav_title_x: f32,
+    /// Offsets of a row's glyph and label from the row's left edge.
+    pub nav_icon_x: f32,
+    pub nav_label_x: f32,
     /// Padding inside the content area.
     pub content_padding: f32,
     /// Height reserved for a page heading.
     pub heading_height: f32,
+    /// Distance one wheel notch scrolls a page.
+    pub scroll_step: f32,
 }
 
 impl Default for WindowMetrics {
@@ -1206,8 +1213,12 @@ impl Default for WindowMetrics {
             nav_inset: 8.0,
             nav_top_gap: 6.0,
             nav_row_radius: 8.0,
-            content_padding: 20.0,
+            nav_title_x: 18.0,
+            nav_icon_x: 10.0,
+            nav_label_x: 36.0,
+            content_padding: 24.0,
             heading_height: 40.0,
+            scroll_step: 48.0,
         }
     }
 }
@@ -1252,6 +1263,39 @@ pub struct PageMetrics {
     pub swatch_gap: f32,
     /// Height of the Display page's theme preview card.
     pub preview_height: f32,
+    /// Widest the page column grows; a wider window centres it.
+    pub max_width: f32,
+    /// The page header: title and summary sizes, the gap between them, and
+    /// the space below the header.
+    pub title: f32,
+    pub summary: f32,
+    pub header_gap: f32,
+    pub header_bottom: f32,
+    /// Between sections of a page, and between a section label and its cards.
+    pub section_spacing: f32,
+    pub label_gap: f32,
+    /// Card grids: the gap between cells and the narrowest a card may be
+    /// before the grid drops a column.
+    pub grid_gap: f32,
+    pub card_min_width: f32,
+    /// Status cards: height, the round badge behind the glyph, glyph size,
+    /// the large value, and the meter along the bottom.
+    pub stat_card_height: f32,
+    pub badge: f32,
+    pub badge_icon: f32,
+    pub value: f32,
+    pub meter: f32,
+    /// Quick toggle tiles: narrowest tile, and its height.
+    pub tile_min_width: f32,
+    pub tile_height: f32,
+    /// Action tiles (the Power page): narrowest tile, and its height.
+    pub action_min_width: f32,
+    pub action_height: f32,
+    /// How long an action tile waits for its confirming second click.
+    pub confirm_ms: u64,
+    /// Outline width of a card, and of a highlighted one.
+    pub outline: f32,
+    pub outline_active: f32,
 }
 
 impl Default for PageMetrics {
@@ -1275,6 +1319,27 @@ impl Default for PageMetrics {
             swatch: 12.0,
             swatch_gap: 4.0,
             preview_height: 124.0,
+            max_width: 760.0,
+            title: 22.0,
+            summary: 12.0,
+            header_gap: 4.0,
+            header_bottom: 20.0,
+            section_spacing: 22.0,
+            label_gap: 10.0,
+            grid_gap: 12.0,
+            card_min_width: 200.0,
+            stat_card_height: 112.0,
+            badge: 34.0,
+            badge_icon: 16.0,
+            value: 20.0,
+            meter: 6.0,
+            tile_min_width: 150.0,
+            tile_height: 76.0,
+            action_min_width: 140.0,
+            action_height: 92.0,
+            confirm_ms: 4000,
+            outline: 1.0,
+            outline_active: 1.5,
         }
     }
 }

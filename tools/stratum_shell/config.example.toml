@@ -487,8 +487,12 @@ nav_row_spacing = 40.0
 nav_inset = 8.0
 nav_top_gap = 6.0
 nav_row_radius = 8.0
-content_padding = 20.0
+nav_title_x = 18.0      # the rail's "Settings" title, from the rail edge
+nav_icon_x = 10.0       # a row's glyph and label, from the row's left edge
+nav_label_x = 36.0
+content_padding = 24.0
 heading_height = 40.0
+scroll_step = 48.0      # one wheel notch scrolls a page this far
 
 [metrics.page]
 card_padding = 14.0
@@ -509,6 +513,27 @@ section_label_height = 20.0
 swatch = 12.0           # a theme's colour swatch
 swatch_gap = 4.0
 preview_height = 124.0  # Display page: the theme preview card
+max_width = 760.0       # the page column stops growing here and is centred
+title = 22.0            # page header: title, summary line, and spacing
+summary = 12.0
+header_gap = 4.0
+header_bottom = 20.0
+section_spacing = 22.0  # between sections, and below a section's label
+label_gap = 10.0
+grid_gap = 12.0         # card grids: gap, and narrowest card before a
+card_min_width = 200.0  # column is dropped (so tiled and floating differ)
+stat_card_height = 112.0  # Overview status cards
+badge = 34.0            # the round badge behind a card's glyph
+badge_icon = 16.0
+value = 20.0            # a status card's large value
+meter = 6.0             # the bar along a status card's bottom
+tile_min_width = 150.0  # Overview quick toggles
+tile_height = 76.0
+action_min_width = 140.0  # Power page tiles
+action_height = 92.0
+confirm_ms = 4000       # how long a Power tile waits for its second click
+outline = 1.0           # card outline, and a selected card's
+outline_active = 1.5
 
 
 # ---------------------------------------------------------------------------
