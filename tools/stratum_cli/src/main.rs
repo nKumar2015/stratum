@@ -45,9 +45,9 @@ fn print_dashboard_help() {
             "calendar [year month]",
             "music",
             "performance",
-            "open",
+            "open [tab]",
             "close",
-            "toggle",
+            "toggle [tab]",
         ],
     );
 }
@@ -68,7 +68,7 @@ fn print_theme_help() {
 
 fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
-        "dashboard" => Some(&["open", "close", "toggle"]),
+        "dashboard" => Some(&["open [tab]", "close", "toggle [tab]"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),

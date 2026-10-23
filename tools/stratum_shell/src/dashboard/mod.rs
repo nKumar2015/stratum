@@ -1,27 +1,37 @@
-//! The dashboard overlay: performance, calendar, and now playing.
+//! The dashboard overlay: tabs of panels (performance, calendar, now
+//! playing), grown from `modules/DashboardMenu.qml`.
 //!
-//! Matching `modules/DashboardMenu.qml` and its three panels:
-//!
-//! - Opened by `stratum-cli dashboard open|close|toggle`, on the focused
-//!   output, as a card dropping in at the top centre over a dimmed screen.
-//!   A click outside the card or Escape closes it.
-//! - Performance: CPU, GPU (with its source), RAM, and storage, each with a
+//! - Opened by `stratum-cli dashboard open|toggle [tab]` (and `close`), on
+//!   the focused output, as a card at the top centre over a dimmed screen.
+//!   It always opens on the first tab unless one is named. A click outside
+//!   the card or Escape closes it.
+//! - Tabs come from `[[dashboard.tabs]]`: each is a row of panels sharing
+//!   its width by weight. The card is the same size on every tab. Keys 1–9
+//!   pick a tab, Ctrl+Tab and Ctrl+Shift+Tab step through them.
+//! - Performance: CPU, each GPU (by name), RAM, and storage, each with a
 //!   bar coloured by load (≥ 90 % error, ≥ 75 % warning, else success).
 //! - Calendar: the month grid (Sunday first, neighbouring months' days
-//!   dimmed, today marked), with «« « Today » »» for year and month.
+//!   dimmed, today marked), with «« « Today » »» for year and month, and
+//!   ← → while a tab with a calendar is shown.
 //! - Now playing: art, title, artist, album, position and length, and
 //!   previous / play-pause / next.
 //!
-//! Data comes from `stratum_sys::managers::dashboard::status` through the
-//! action worker, refreshed every `refresh_ms` only while the dashboard is
-//! open, as the QML `dashboard.watch` / `unwatch` lifecycle did. The calendar
-//! grid is computed here: the QML shell cached ±3 months to hide the daemon's
-//! round trip, and computing a month locally is instant. Closing resets the
-//! calendar to the current month, as QML did.
+//! Resource data comes from the sampler in [`feed`]; now playing is
+//! `SystemState::music`, which the sampler refreshes while the dashboard is
+//! open. The calendar grid is computed here: the QML shell cached ±3 months
+//! to hide the daemon's round trip, and computing a month locally is
+//! instant. Closing resets the calendar to the current month, as QML did.
+
+pub mod feed;
 
 use chrono::Datelike;
 use serde_json::Value;
+use smithay_client_toolkit::seat::keyboard::Modifiers;
 
+use stratum_sys::managers::gpu::Load;
+use stratum_sys::managers::sysmon::{Sample, Usage};
+
+use crate::config::{DashboardConfig, PanelKind};
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::pages::devices::Marquee;
 use crate::ui::text_field;
@@ -32,8 +42,6 @@ use crate::ui::{self, PaintCtx};
 pub enum DashboardAction {
     None,
     Redraw,
-    /// Fetch the dashboard for this month now.
-    Refresh,
     /// `previous`, `play-pause`, or `next`, for the player.
     Media { player: String, action: String },
 }
@@ -83,6 +91,64 @@ pub fn shift(year: i32, month: u32, delta: i32) -> (i32, u32) {
     (index.div_euclid(12).max(1), index.rem_euclid(12) as u32 + 1)
 }
 
+/// `(glyph, label, detail, value, percent)` for each performance row. Before
+/// the first sample, and for CPU until a second, values read "–".
+fn performance_rows(sample: Option<&Sample>) -> Vec<(&'static str, String, String, String, f64)> {
+    const PENDING: &str = "\u{2013}";
+    let percent = |p: Option<f32>| p.map_or_else(|| PENDING.to_string(), |p| format!("{}%", p.round()));
+    let gib = |bytes: u64| bytes as f64 / f64::from(1u32 << 30);
+    let usage = |u: Option<&Usage>| {
+        u.map_or_else(String::new, |u| format!("{:.1} / {:.1} GiB", gib(u.used), gib(u.total)))
+    };
+    let cpu = sample.and_then(|s| s.cpu_percent);
+    let mut rows = vec![("\u{f2db}", "CPU".to_string(), String::new(), percent(cpu), f64::from(cpu.unwrap_or(0.0)))];
+    // A row per GPU present: a hybrid laptop shows both, integrated-only
+    // mode just the one.
+    for gpu in sample.map(|s| s.gpus.as_slice()).unwrap_or_default() {
+        let (text, value) = match gpu.load {
+            Load::Percent(p) => (format!("{}%", p.clamp(0, 100)), p.clamp(0, 100) as f64),
+            Load::Asleep => ("Asleep".to_string(), 0.0),
+            Load::Unknown => ("N/A".to_string(), 0.0),
+        };
+        rows.push(("\u{f08ae}", "GPU".to_string(), gpu.name.clone(), text, value));
+    }
+    let memory = sample.map(|s| &s.memory);
+    let root = sample.map(|s| &s.root);
+    rows.extend([
+        (
+            "\u{f035b}",
+            "RAM".to_string(),
+            usage(memory),
+            percent(memory.map(Usage::percent)),
+            memory.map_or(0.0, |u| f64::from(u.percent())),
+        ),
+        (
+            "\u{f0a0}",
+            "Storage".to_string(),
+            usage(root),
+            percent(root.map(Usage::percent)),
+            root.map_or(0.0, |u| f64::from(u.percent())),
+        ),
+    ]);
+    rows
+}
+
+/// `row` cut into side-by-side rects, `gap` apart, sharing its width by
+/// `weights`.
+fn split(row: Rect, weights: &[f32], gap: f32) -> Vec<Rect> {
+    let total: f32 = weights.iter().sum();
+    let free = (row.width - gap * weights.len().saturating_sub(1) as f32).max(0.0);
+    let mut x = row.x;
+    weights
+        .iter()
+        .map(|w| {
+            let rect = Rect { x, width: free * w / total, ..row };
+            x += rect.width + gap;
+            rect
+        })
+        .collect()
+}
+
 fn today() -> (i32, u32, u32) {
     let now = chrono::Local::now();
     (now.year(), now.month(), now.day())
@@ -117,7 +183,12 @@ pub struct Dashboard {
     error: Option<String>,
     /// The track title, scrolling when it overflows the panel.
     title: Marquee,
+    /// The tab shown, an index into `config.tabs`, and each tab's hit rect
+    /// from the last paint.
+    tab: usize,
+    tab_hits: Vec<(Rect, usize)>,
     metrics: crate::ui::style::DashboardMetrics,
+    config: DashboardConfig,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,7 +202,7 @@ enum Button {
 }
 
 impl Dashboard {
-    pub fn new(metrics: &crate::ui::style::DashboardMetrics) -> Self {
+    pub fn new(metrics: &crate::ui::style::DashboardMetrics, config: &DashboardConfig) -> Self {
         let (year, month, _) = today();
         Self {
             open: false,
@@ -142,7 +213,10 @@ impl Dashboard {
             buttons: Vec::new(),
             error: None,
             title: Marquee::ticker(),
+            tab: 0,
+            tab_hits: Vec::new(),
             metrics: metrics.clone(),
+            config: config.clone(),
         }
     }
 
@@ -151,8 +225,15 @@ impl Dashboard {
         self.open && self.title.moving()
     }
 
-    pub fn set_metrics(&mut self, metrics: &crate::ui::style::DashboardMetrics) {
+    /// Follow a reload. A tab that no longer exists falls back to the first.
+    pub fn set_config(&mut self, metrics: &crate::ui::style::DashboardMetrics, config: &DashboardConfig) {
         self.metrics = metrics.clone();
+        if self.config.tabs != config.tabs {
+            self.config = config.clone();
+            if self.tab >= self.config.tabs.len() {
+                self.tab = 0;
+            }
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -163,49 +244,79 @@ impl Dashboard {
         self.open.then_some(self.target.as_deref()).flatten()
     }
 
-    /// The month whose data should be fetched.
-    pub fn month(&self) -> (i32, u32) {
-        (self.year, self.month)
-    }
-
-    pub fn open_on(&mut self, output: &str) {
+    /// Open on `output`, at `tab` or the first (closing returned to it).
+    /// Already open, it stays on its output and moves only to a named tab.
+    pub fn open_on(&mut self, output: &str, tab: Option<usize>) {
+        if !self.open {
+            self.target = Some(output.to_string());
+        }
         self.open = true;
-        self.target = Some(output.to_string());
+        if let Some(tab) = tab.filter(|&t| t < self.config.tabs.len()) {
+            self.tab = tab;
+        }
         self.error = None;
     }
 
-    /// Close, and return to the current month for next time.
+    /// Close, and return to the first tab and the current month for next
+    /// time.
     pub fn close(&mut self) {
         self.open = false;
         self.target = None;
         self.card = None;
         self.buttons.clear();
+        self.tab_hits.clear();
+        self.tab = 0;
         self.title = Marquee::ticker();
         let (year, month, _) = today();
         (self.year, self.month) = (year, month);
     }
 
-    pub fn toggle(&mut self, output: &str) {
-        if self.open {
+    /// Toggle with a tab named: closed, it opens there; open on another tab,
+    /// it switches; open on that tab, it closes.
+    pub fn toggle(&mut self, output: &str, tab: Option<usize>) {
+        if self.open && tab.is_none_or(|t| t == self.tab) {
             self.close();
         } else {
-            self.open_on(output);
+            self.open_on(output, tab);
         }
     }
 
-    pub fn key(&mut self, keysym: smithay_client_toolkit::seat::keyboard::Keysym) -> DashboardAction {
+    fn select_tab(&mut self, tab: usize) -> DashboardAction {
+        if tab >= self.config.tabs.len() || tab == self.tab {
+            return DashboardAction::None;
+        }
+        self.tab = tab;
+        self.buttons.clear();
+        DashboardAction::Redraw
+    }
+
+    fn shows(&self, kind: PanelKind) -> bool {
+        self.config.tabs.get(self.tab).is_some_and(|t| t.panels.iter().any(|p| p.kind == kind))
+    }
+
+    pub fn key(&mut self, keysym: smithay_client_toolkit::seat::keyboard::Keysym, modifiers: Modifiers) -> DashboardAction {
         use smithay_client_toolkit::seat::keyboard::Keysym;
         if !self.open {
             return DashboardAction::None;
         }
+        let count = self.config.tabs.len();
         match keysym {
             Keysym::Escape => {
                 self.close();
                 DashboardAction::Redraw
             }
-            Keysym::Left => self.navigate(Button::Month(-1)),
-            Keysym::Right => self.navigate(Button::Month(1)),
-            _ => DashboardAction::None,
+            // Shift+Tab is ISO_Left_Tab in most keymaps, but not in every
+            // one (wtype's sends Tab with Shift held).
+            Keysym::Tab | Keysym::ISO_Left_Tab if modifiers.ctrl => {
+                let back = modifiers.shift || keysym == Keysym::ISO_Left_Tab;
+                self.select_tab((self.tab + if back { count - 1 } else { 1 }) % count)
+            }
+            Keysym::Left if self.shows(PanelKind::Calendar) => self.navigate(Button::Month(-1)),
+            Keysym::Right if self.shows(PanelKind::Calendar) => self.navigate(Button::Month(1)),
+            other => match other.raw() {
+                raw @ 0x31..=0x39 => self.select_tab((raw - 0x31) as usize),
+                _ => DashboardAction::None,
+            },
         }
     }
 
@@ -219,17 +330,21 @@ impl Dashboard {
             }
             _ => return DashboardAction::None,
         };
-        DashboardAction::Refresh
+        DashboardAction::Redraw
     }
 
-    pub fn on_click(&mut self, point: Point, snapshot: &Value) -> DashboardAction {
+    /// A click on the dashboard's surface; `music` is `SystemState::music`.
+    pub fn on_click(&mut self, point: Point, music: &Value) -> DashboardAction {
         if !self.open {
             return DashboardAction::None;
+        }
+        if let Some(tab) = self.tab_hits.iter().find(|(r, _)| r.contains(point)).map(|(_, t)| *t) {
+            return self.select_tab(tab);
         }
         if let Some(button) = self.buttons.iter().find(|(r, _)| r.contains(point)).map(|(_, b)| *b) {
             return match button {
                 Button::Previous | Button::PlayPause | Button::Next => {
-                    let player = snapshot["music"]["player"].as_str().unwrap_or("None");
+                    let player = music["player"].as_str().unwrap_or("None");
                     if matches!(player, "" | "None" | "N/A") {
                         self.error = Some("No active player".into());
                         return DashboardAction::Redraw;
@@ -255,16 +370,19 @@ impl Dashboard {
         DashboardAction::None
     }
 
-    pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, surface: Rect, snapshot: &Value) {
+    pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, surface: Rect, snapshot: &feed::Snapshot, music: &Value) {
         if !self.open {
             return;
         }
         let m = self.metrics.clone();
         list.push_rect(Rect { color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha), ..surface });
 
-        let width = (m.performance_width + m.calendar_width + m.music_width + m.gap * 2.0 + m.padding * 2.0)
-            .min(surface.width - m.margin * 2.0);
-        let height = m.panel_height + m.padding * 2.0 + if self.error.is_some() { m.line } else { 0.0 };
+        let width = m.width.min(surface.width - m.margin * 2.0);
+        let height = m.padding * 2.0
+            + m.tab_height
+            + m.gap
+            + m.panel_height
+            + if self.error.is_some() { m.line } else { 0.0 };
         let card = Rect {
             x: surface.x + (surface.width - width) * 0.5,
             y: surface.y + m.margin,
@@ -277,25 +395,56 @@ impl Dashboard {
         self.buttons.clear();
 
         let mut y = card.y + m.padding;
+        let bar = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.tab_height, radius: 0.0, color: Color::TRANSPARENT };
+        self.paint_tabs(ctx, list, bar);
+        y += m.tab_height + m.gap;
         if let Some(error) = self.error.clone() {
             let row = Rect { x: card.x + m.padding, y, width: card.width, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
             ui::paint_text_vcentered(ctx, list, &error, row.x, row, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.error);
             y += m.line;
         }
-        let mut x = card.x + m.padding;
-        let panel = |x: f32, w: f32| Rect { x, y, width: w, height: m.panel_height, radius: m.radius, color: Color::TRANSPARENT };
-        let performance = panel(x, m.performance_width);
-        x += m.performance_width + m.gap;
-        let calendar = panel(x, m.calendar_width);
-        x += m.calendar_width + m.gap;
-        let music = panel(x, m.music_width);
-        for p in [performance, calendar, music] {
-            text_field::paint_frame(list, p, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
+        let Some(tab) = self.config.tabs.get(self.tab).cloned() else {
+            self.card = Some(card);
+            return;
+        };
+        let row = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.panel_height, radius: m.radius, color: Color::TRANSPARENT };
+        let weights: Vec<f32> = tab.panels.iter().map(|p| p.weight).collect();
+        for (spec, panel) in tab.panels.iter().zip(split(row, &weights, m.gap)) {
+            text_field::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
+            match spec.kind {
+                PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
+                PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
+                PanelKind::Music => self.paint_music(ctx, list, panel, music),
+            }
         }
-        self.paint_performance(ctx, list, performance, &snapshot["performance"]);
-        self.paint_calendar(ctx, list, calendar);
-        self.paint_music(ctx, list, music, &snapshot["music"]);
         self.card = Some(card);
+    }
+
+    /// The tab bar: a pill per tab, the shown one framed.
+    fn paint_tabs(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, bar: Rect) {
+        let m = self.metrics.clone();
+        self.tab_hits.clear();
+        let weight = ctx.metrics.typography.weight_medium;
+        let style = crate::text::TextStyle {
+            family: std::sync::Arc::from(ctx.theme.font.as_str()),
+            size: m.text,
+            weight,
+            color: ctx.theme.text_main,
+        };
+        let mut x = bar.x;
+        for (i, tab) in self.config.tabs.iter().enumerate() {
+            let label = format!("{}  {}", tab.icon, tab.name);
+            let width = ctx.text.measure(&label, &style).0 + m.inner * 2.0;
+            let pill = Rect { x, width, radius: m.radius * 0.6, ..bar };
+            let shown = i == self.tab;
+            if shown {
+                text_field::paint_frame(list, pill, m.border, ctx.theme.border_active, ctx.theme.bg_widget);
+            }
+            let color = if shown { ctx.theme.text_main } else { ctx.theme.text_muted };
+            ui::paint_text_vcentered(ctx, list, &label, pill.x + m.inner, pill, m.text, weight, color);
+            self.tab_hits.push((pill, i));
+            x += width + m.tab_gap;
+        }
     }
 
     fn title(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, text: &str, m: &crate::ui::style::DashboardMetrics) -> f32 {
@@ -304,46 +453,12 @@ impl Dashboard {
         row.y + row.height + m.inner
     }
 
-    fn paint_performance(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, perf: &Value) {
+    fn paint_performance(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, sample: Option<&Sample>) {
         let m = self.metrics.clone();
         let mut y = Self::title(ctx, list, panel, "Performance", &m);
         let x = panel.x + m.inner;
         let w = panel.width - m.inner * 2.0;
-        let num = |key: &str| perf[key].as_f64().unwrap_or(0.0);
-        let mut rows = vec![(
-            "\u{f2db}",
-            "CPU".to_string(),
-            String::new(),
-            format!("{}%", num("cpu_percent").round()),
-            num("cpu_percent"),
-        )];
-        // A row per GPU present: a hybrid laptop shows both, integrated-only
-        // mode just the one.
-        for gpu in perf["gpus"].as_array().into_iter().flatten() {
-            rows.push((
-                "\u{f08ae}",
-                "GPU".to_string(),
-                gpu["name"].as_str().unwrap_or_default().to_string(),
-                gpu["text"].as_str().unwrap_or("N/A").to_string(),
-                gpu["percent"].as_f64().unwrap_or(0.0),
-            ));
-        }
-        rows.extend([
-            (
-                "\u{f035b}",
-                "RAM".to_string(),
-                format!("{:.1} / {:.1} GiB", num("ram_used_gib"), num("ram_total_gib")),
-                format!("{}%", num("ram_percent").round()),
-                num("ram_percent"),
-            ),
-            (
-                "\u{f0a0}",
-                "Storage".to_string(),
-                format!("{:.1} / {:.1} GiB", num("storage_used_gib"), num("storage_total_gib")),
-                format!("{}%", num("storage_percent").round()),
-                num("storage_percent"),
-            ),
-        ]);
+        let rows = performance_rows(sample);
         let style = |ctx: &PaintCtx<'_>, size: f32| crate::text::TextStyle {
             family: std::sync::Arc::from(ctx.theme.font.as_str()),
             size,
@@ -541,32 +656,119 @@ mod tests {
 
     #[test]
     fn opening_navigating_and_closing() {
-        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
-        d.toggle("HDMI-A-1");
+        let mut d = dashboard();
+        d.toggle("HDMI-A-1", None);
         assert_eq!(d.target(), Some("HDMI-A-1"));
-        let now = d.month();
-        assert_eq!(d.key(Keysym::Right), DashboardAction::Refresh);
-        assert_eq!(d.month(), shift(now.0, now.1, 1));
-        assert_eq!(d.navigate(Button::Year(-1)), DashboardAction::Refresh);
+        let now = (d.year, d.month);
+        assert_eq!(d.key(Keysym::Right, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!((d.year, d.month), shift(now.0, now.1, 1));
+        assert_eq!(d.navigate(Button::Year(-1)), DashboardAction::Redraw);
         d.navigate(Button::Today);
-        assert_eq!(d.month(), now);
-        d.key(Keysym::Left);
+        assert_eq!((d.year, d.month), now);
+        d.key(Keysym::Left, Modifiers::default());
         // Closing returns to this month for next time.
-        assert_eq!(d.key(Keysym::Escape), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::Escape, Modifiers::default()), DashboardAction::Redraw);
         assert!(!d.is_open());
-        assert_eq!(d.month(), now);
+        assert_eq!((d.year, d.month), now);
+    }
+
+    fn dashboard() -> Dashboard {
+        let config = crate::config::Config::test_defaults();
+        Dashboard::new(&config.metrics.dashboard, &config.dashboard)
+    }
+
+    #[test]
+    fn it_opens_on_the_first_tab_unless_one_is_named() {
+        let mut d = dashboard();
+        let system = d.config.tab_index("system").expect("a System tab ships");
+        d.open_on("a", Some(system));
+        assert_eq!(d.tab, system);
+        d.close();
+        d.open_on("a", None);
+        assert_eq!(d.tab, 0);
+        // Open on another output, naming a tab only switches it.
+        d.open_on("b", Some(system));
+        assert_eq!((d.target(), d.tab), (Some("a"), system));
+    }
+
+    #[test]
+    fn toggling_with_a_tab_switches_before_it_closes() {
+        let mut d = dashboard();
+        d.toggle("a", Some(1));
+        assert_eq!(d.tab, 1);
+        d.toggle("a", Some(2));
+        assert!(d.is_open());
+        assert_eq!(d.tab, 2);
+        d.toggle("a", Some(2));
+        assert!(!d.is_open());
+        assert_eq!(d.tab, 0, "closing returns to the first tab");
+    }
+
+    #[test]
+    fn keys_pick_and_step_through_tabs() {
+        let mut d = dashboard();
+        let count = d.config.tabs.len();
+        d.open_on("a", None);
+        assert_eq!(d.key(Keysym::_2, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.tab, 1);
+        assert_eq!(d.key(Keysym::_9, Modifiers::default()), DashboardAction::None, "no ninth tab");
+        let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+        let ctrl_shift = Modifiers { shift: true, ..ctrl };
+        d.key(Keysym::Tab, ctrl);
+        assert_eq!(d.tab, 2 % count);
+        d.key(Keysym::_1, Modifiers::default());
+        d.key(Keysym::ISO_Left_Tab, ctrl_shift);
+        assert_eq!(d.tab, count - 1, "back from the first wraps to the last");
+        d.key(Keysym::Tab, ctrl_shift);
+        assert_eq!(d.tab, count - 2, "Shift+Tab may arrive as Tab with Shift held");
+        assert_eq!(d.key(Keysym::Tab, Modifiers::default()), DashboardAction::None, "Tab alone is not a tab switch");
+    }
+
+    #[test]
+    fn arrows_move_the_month_only_where_a_calendar_shows() {
+        let mut d = dashboard();
+        let system = d.config.tab_index("system").unwrap();
+        d.open_on("a", Some(system));
+        let now = (d.year, d.month);
+        assert_eq!(d.key(Keysym::Right, Modifiers::default()), DashboardAction::None);
+        assert_eq!((d.year, d.month), now);
+    }
+
+    #[test]
+    fn panels_share_the_width_by_weight() {
+        let row = Rect { x: 10.0, y: 0.0, width: 108.0, height: 5.0, radius: 0.0, color: Color::TRANSPARENT };
+        let rects = split(row, &[1.0, 3.0], 8.0);
+        assert_eq!(rects.iter().map(|r| (r.x, r.width)).collect::<Vec<_>>(), vec![(10.0, 25.0), (43.0, 75.0)]);
+    }
+
+    #[test]
+    fn performance_rows_before_and_after_samples() {
+        let rows = performance_rows(None);
+        assert_eq!(rows.iter().map(|r| r.1.as_str()).collect::<Vec<_>>(), ["CPU", "RAM", "Storage"]);
+        assert!(rows.iter().all(|r| r.3 == "\u{2013}"));
+        let sample = Sample {
+            cpu_percent: Some(41.6),
+            memory: Usage { used: 3 << 30, total: 12 << 30 },
+            root: Usage { used: 1 << 30, total: 2 << 30 },
+            gpus: vec![stratum_sys::managers::gpu::GpuReading { name: "Radeon".into(), load: Load::Asleep }],
+        };
+        let rows = performance_rows(Some(&sample));
+        assert_eq!(rows[0].3, "42%");
+        assert_eq!((rows[1].2.as_str(), rows[1].3.as_str()), ("Radeon", "Asleep"));
+        assert_eq!((rows[2].2.as_str(), rows[2].3.as_str()), ("3.0 / 12.0 GiB", "25%"));
+        assert_eq!(rows[3].4, 50.0);
     }
 
     #[test]
     fn media_buttons_need_a_player() {
-        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
-        d.open_on("a");
+        let mut d = dashboard();
+        d.open_on("a", None);
         let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
         d.buttons = vec![(rect, Button::PlayPause)];
-        let none = json!({"music": {"player": "None"}});
+        let none = json!({"player": "None"});
         assert_eq!(d.on_click(Point::new(5.0, 5.0), &none), DashboardAction::Redraw);
         assert_eq!(d.error.as_deref(), Some("No active player"));
-        let spotify = json!({"music": {"player": "spotify"}});
+        let spotify = json!({"player": "spotify"});
         assert_eq!(
             d.on_click(Point::new(5.0, 5.0), &spotify),
             DashboardAction::Media { player: "spotify".into(), action: "play-pause".into() }
@@ -575,9 +777,18 @@ mod tests {
     }
 
     #[test]
+    fn a_click_on_a_tab_selects_it() {
+        let mut d = dashboard();
+        d.open_on("a", None);
+        d.tab_hits = vec![(Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT }, 2)];
+        assert_eq!(d.on_click(Point::new(5.0, 5.0), &Value::Null), DashboardAction::Redraw);
+        assert_eq!(d.tab, 2);
+    }
+
+    #[test]
     fn a_click_outside_the_card_closes() {
-        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
-        d.open_on("a");
+        let mut d = dashboard();
+        d.open_on("a", None);
         d.card = Some(Rect { x: 100.0, y: 10.0, width: 400.0, height: 300.0, radius: 0.0, color: Color::TRANSPARENT });
         assert_eq!(d.on_click(Point::new(200.0, 100.0), &Value::Null), DashboardAction::None);
         assert!(d.is_open());

@@ -69,6 +69,34 @@ pen_colors = ["#ff3b30", "#34c759", "#0a84ff", "#ffd60a", "#ffffff", "#000000"]
 pen_size = 3            # on-screen px at 100 % zoom
 pen_size_max = 16
 
+[dashboard]             # `stratum-cli dashboard open [tab]`
+sample_ms = 2000        # between CPU, memory, disk and GPU samples
+history = 90            # samples the graphs keep (90 x 2 s = 3 minutes)
+# Keep sampling while closed, so the graphs are full on open. A closed
+# dashboard only records; nothing repaints.
+background_history = true
+
+# Tabs, in order; it always opens on the first. Each tab's panels sit side by
+# side, sharing its width by weight. Panel kinds: performance, calendar, music.
+[[dashboard.tabs]]
+name = "Today"
+icon = "\U000F056E"
+panels = [
+    { kind = "performance", weight = 240.0 },
+    { kind = "calendar", weight = 290.0 },
+    { kind = "music", weight = 250.0 },
+]
+
+[[dashboard.tabs]]
+name = "Calendar"
+icon = "\U000F00ED"
+panels = [{ kind = "calendar", weight = 1.0 }]
+
+[[dashboard.tabs]]
+name = "System"
+icon = "\U000F04C5"
+panels = [{ kind = "performance", weight = 1.0 }]
+
 [sidebar]
 position = "left"       # "left" or "right"
 width = 40              # logical px, vertical rail
@@ -363,17 +391,16 @@ stat_split = 0.38       # where values start in label/value rows
 max_devices = 6         # Bluetooth devices before "+N more"
 
 [metrics.dashboard]
-refresh_ms = 2000       # data refresh while open
 margin = 12.0           # from the top of the screen
 padding = 8.0
 gap = 8.0               # between panels
 inner = 12.0            # inside a panel
 radius = 10.0
 border = 1.0
-performance_width = 240.0
-calendar_width = 290.0
-music_width = 250.0
+width = 812.0           # the card, on every tab
 panel_height = 340.0
+tab_height = 30.0       # the tab bar
+tab_gap = 6.0
 title = 15.0
 text = 13.0
 caption = 11.0

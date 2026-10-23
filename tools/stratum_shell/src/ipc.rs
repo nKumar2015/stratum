@@ -186,8 +186,9 @@ pub fn parse_request(line: &str) -> Result<IpcCall, IpcError> {
         });
     }
 
-    // `theme set` takes exactly one non-empty name, and `settings open|toggle`
-    // an optional page; every other function takes none. Validating here keeps
+    // `theme set` takes exactly one non-empty name, `settings open|toggle`
+    // an optional page and `dashboard open|toggle` an optional tab; every
+    // other function takes none. Validating here keeps
     // the UI-side match arms simple and gives the CLI a useful error instead of
     // a silently ignored argument.
     if target == "settings" && function != "close" {
@@ -201,6 +202,14 @@ pub fn parse_request(line: &str) -> Result<IpcCall, IpcError> {
             if crate::ui::control_center::Page::from_name(name).is_none() {
                 return Err(IpcError::BadArgs(format!("unknown settings page: {name}")));
             }
+        }
+    } else if target == "dashboard" && function != "close" {
+        // An optional tab; the shell checks the name against its config.
+        if args.len() > 1 {
+            return Err(IpcError::BadArgs(format!(
+                "dashboard {function} expects at most 1 argument, got {}",
+                args.len()
+            )));
         }
     } else {
         let required = usize::from(function == "set");
@@ -463,6 +472,18 @@ mod tests {
         assert_eq!(call("open", json!(["nope"])).unwrap_err().code(), "bad_args");
         assert_eq!(call("open", json!(["audio", "x"])).unwrap_err().code(), "bad_args");
         assert_eq!(call("close", json!(["audio"])).unwrap_err().code(), "bad_args");
+    }
+
+    #[test]
+    fn dashboard_takes_an_optional_tab() {
+        let call = |function: &str, args: Value| {
+            parse(json!({ "target": "dashboard", "function": function, "args": args }))
+        };
+        assert!(call("toggle", json!([])).is_ok());
+        // Any name parses: the tabs are config, checked by the shell.
+        assert_eq!(call("open", json!(["system"])).unwrap().args, ["system"]);
+        assert_eq!(call("open", json!(["a", "b"])).unwrap_err().code(), "bad_args");
+        assert_eq!(call("close", json!(["system"])).unwrap_err().code(), "bad_args");
     }
 
     #[test]

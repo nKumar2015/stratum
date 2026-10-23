@@ -39,6 +39,7 @@ pub struct Config {
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
     pub screenshot: ScreenshotConfig,
+    pub dashboard: DashboardConfig,
     pub render: RenderConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
     pub metrics: crate::ui::style::Metrics,
@@ -89,6 +90,27 @@ impl Config {
         for colour in &self.screenshot.pen_colors {
             if parse_color(colour).is_none() {
                 return Err(format!("screenshot.pen_colors: `{colour}` is not a colour"));
+            }
+        }
+        let dashboard = &self.dashboard;
+        if dashboard.tabs.is_empty() {
+            return Err("dashboard.tabs is empty".into());
+        }
+        if dashboard.sample_ms == 0 || dashboard.history < 2 {
+            return Err("dashboard: sample_ms must be positive and history at least 2".into());
+        }
+        for (i, tab) in dashboard.tabs.iter().enumerate() {
+            if tab.name.trim().is_empty() {
+                return Err(format!("dashboard.tabs[{i}] has no name"));
+            }
+            if dashboard.tab_index(&tab.name) != Some(i) {
+                return Err(format!("dashboard.tabs: `{}` is named twice", tab.name));
+            }
+            if tab.panels.is_empty() {
+                return Err(format!("dashboard tab `{}` has no panels", tab.name));
+            }
+            if tab.panels.iter().any(|p| p.weight.is_nan() || p.weight <= 0.0) {
+                return Err(format!("dashboard tab `{}`: every panel weight must be positive", tab.name));
             }
         }
         Ok(())
@@ -454,6 +476,55 @@ impl ScreenshotConfig {
     pub fn colors(&self) -> Vec<Color> {
         self.pen_colors.iter().filter_map(|c| parse_color(c)).collect()
     }
+}
+
+/// The dashboard overlay: how it samples, and what each tab shows.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardConfig {
+    /// Milliseconds between resource samples (CPU, memory, disk, GPUs).
+    pub sample_ms: u64,
+    /// Samples the graphs keep; times `sample_ms` is the span they cover.
+    pub history: usize,
+    /// Keep sampling while the dashboard is closed, so the graphs are full
+    /// when it opens. Closed, samples are only recorded: nothing repaints.
+    pub background_history: bool,
+    /// The tabs, in order. The dashboard always opens on the first.
+    pub tabs: Vec<DashboardTab>,
+}
+
+impl DashboardConfig {
+    /// The index of the tab called `name`, ignoring case.
+    pub fn tab_index(&self, name: &str) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.name.eq_ignore_ascii_case(name))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardTab {
+    /// Shown in the tab bar, and the name `dashboard open <tab>` takes.
+    pub name: String,
+    /// A Nerd Font glyph before the name.
+    pub icon: String,
+    /// Side by side, left to right.
+    pub panels: Vec<DashboardPanel>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardPanel {
+    pub kind: PanelKind,
+    /// Share of the tab's width, relative to the other panels' weights.
+    pub weight: f32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelKind {
+    Performance,
+    Calendar,
+    Music,
 }
 
 /// Which GPU the shell renders on. Read once at start; a reload does not move

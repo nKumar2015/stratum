@@ -80,7 +80,11 @@ pub struct SystemState {
     pub bluetooth: Cell<serde_json::Value>,
     pub battery: Cell<serde_json::Value>,
     pub music: Cell<serde_json::Value>,
-    pub dashboard: Cell<serde_json::Value>,
+    /// Resource samples and their history, published by the dashboard's
+    /// sampler while the dashboard is open.
+    pub dashboard: Cell<crate::dashboard::feed::Snapshot>,
+    /// Tells that sampler whether the dashboard is open and how to sample.
+    pub dashboard_feed: Arc<crate::dashboard::feed::Feed>,
     pub polkit: Cell<serde_json::Value>,
     /// The equalizer for the current output: its presets, the active one, the
     /// backend's limits, and the result of the last EQ action
@@ -124,7 +128,8 @@ impl SystemState {
             bluetooth: Cell::new(serde_json::Value::Null),
             battery: Cell::new(serde_json::Value::Null),
             music: Cell::new(serde_json::Value::Null),
-            dashboard: Cell::new(serde_json::Value::Null),
+            dashboard: Cell::default(),
+            dashboard_feed: Arc::default(),
             polkit: Cell::new(serde_json::Value::Null),
             eq: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
@@ -198,7 +203,6 @@ impl SystemState {
                 "bluetooth" => state.bluetooth.set(payload),
                 "battery" => state.battery.set(payload),
                 "music" => state.music.set(payload),
-                "dashboard" => state.dashboard.set(payload),
                 "polkit" => state.polkit.set(payload),
                 other => {
                     tracing::warn!("unhandled state channel: {other}");

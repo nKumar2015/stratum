@@ -90,8 +90,6 @@ pub enum SystemAction {
     },
     /// Delete a custom preset.
     EqDelete { device: String, name: String },
-    /// Fetch the dashboard (performance, music) for a calendar month.
-    DashboardRefresh { year: i32, month: u32 },
     /// A media control for an MPRIS player: `previous`, `play-pause`, `next`.
     Media { player: String, action: String },
     /// Seek an MPRIS player to an absolute position.
@@ -474,11 +472,6 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             publish_eq(state, device, Some((&result, &format!("Deleted \u{201c}{name}\u{201d}"))));
             result
         }
-        SystemAction::DashboardRefresh { year, month } => {
-            state.dashboard.set(managers::dashboard::status(*year, *month as i32));
-            state.notify();
-            serde_json::json!({ "ok": true })
-        }
         SystemAction::Media { player, action } => {
             // The QML shell's MusicProvider sent the same playerctl commands.
             let status = std::process::Command::new("playerctl")
@@ -490,11 +483,6 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             }
             // Show the new state without waiting for the next poll.
             state.music.set(managers::music::status());
-            let mut dashboard = state.dashboard.get();
-            if dashboard.is_object() {
-                dashboard["music"] = managers::music::status();
-                state.dashboard.set(dashboard);
-            }
             state.notify();
             serde_json::json!({ "ok": true })
         }

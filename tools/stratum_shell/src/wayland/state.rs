@@ -147,11 +147,10 @@ pub struct App {
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
-    /// The dashboard overlay, its per-output surfaces, and when its data was
-    /// last requested (it is polled only while open).
+    /// The dashboard overlay and its per-output surfaces. Its data comes
+    /// from `SystemState::dashboard_feed`.
     dashboard: crate::dashboard::Dashboard,
     dashboard_surfaces: Vec<SurfaceEntry>,
-    dashboard_requested: Option<std::time::Instant>,
     /// The screenshot overlay, its per-output surfaces, and the channel its
     /// `grim` workers answer on.
     screenshot: crate::screenshot::Screenshot,
@@ -323,9 +322,8 @@ impl App {
             polkit_events: None,
             theme_switcher: crate::theme_switcher::ThemeSwitcher::new(&config_for_cc.metrics.theme_switcher),
             theme_surfaces: Vec::new(),
-            dashboard: crate::dashboard::Dashboard::new(&config_for_cc.metrics.dashboard),
+            dashboard: crate::dashboard::Dashboard::new(&config_for_cc.metrics.dashboard, &config_for_cc.dashboard),
             dashboard_surfaces: Vec::new(),
-            dashboard_requested: None,
             screenshot: crate::screenshot::Screenshot::new(&config_for_cc.metrics.screenshot),
             screenshot_surfaces: Vec::new(),
             screenshot_events: None,
@@ -899,21 +897,18 @@ impl App {
             self.apply_hover_events(hover_events);
         }
 
-        // Dashboard: polled only while open, like the QML watch/unwatch.
-        self.dashboard.set_metrics(&self.config.metrics.dashboard);
-        if self.dashboard.is_open() {
-            let interval = std::time::Duration::from_millis(self.config.metrics.dashboard.refresh_ms);
-            if self.dashboard_requested.is_none_or(|t| t.elapsed() >= interval) {
-                let (year, month) = self.dashboard.month();
-                self.actions.push(crate::actions::SystemAction::DashboardRefresh { year, month });
-                self.dashboard_requested = Some(std::time::Instant::now());
-            }
-            if state_changed || self.dashboard.animating() {
-                self.mark_dashboard_dirty();
-            }
+        // Dashboard: its sampler publishes only while it is open, like the
+        // QML watch/unwatch.
+        self.dashboard.set_config(&self.config.metrics.dashboard, &self.config.dashboard);
+        let feed = &self.state.dashboard_feed;
+        feed.configure(crate::dashboard::feed::Settings::from_config(&self.config.dashboard));
+        feed.set_open(self.dashboard.is_open());
+        if self.dashboard.is_open() && (state_changed || self.dashboard.animating()) {
+            self.mark_dashboard_dirty();
         }
         let dash_target = self.dashboard.target().map(str::to_string);
         let dash_snapshot = self.state.dashboard.get();
+        let dash_music = self.state.music.get();
         for entry in &mut self.dashboard_surfaces {
             if dash_target.as_deref() != Some(entry.output_name.as_str()) {
                 entry.unmap();
@@ -938,7 +933,7 @@ impl App {
                 };
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
-                self.dashboard.paint(&mut ctx, &mut list, rect, &dash_snapshot);
+                self.dashboard.paint(&mut ctx, &mut list, rect, &dash_snapshot, &dash_music);
                 entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
                 entry.dirty = false;
             }
@@ -1969,15 +1964,22 @@ impl App {
                 self.mark_themes_dirty();
             }
             ("dashboard", function @ ("open" | "close" | "toggle")) => {
+                // The parser allows one argument; only the config knows the
+                // tabs.
+                let tab = match call.args.first() {
+                    Some(name) => Some(self.config.dashboard.tab_index(name).ok_or_else(|| {
+                        let names: Vec<_> = self.config.dashboard.tabs.iter().map(|t| t.name.as_str()).collect();
+                        IpcError::BadArgs(format!("unknown dashboard tab: {name} (tabs: {})", names.join(", ")))
+                    })?),
+                    None => None,
+                };
                 let output = self.focused_output();
                 match function {
-                    "open" if !self.dashboard.is_open() => self.dashboard.open_on(&output),
+                    "open" => self.dashboard.open_on(&output, tab),
                     "close" => self.dashboard.close(),
-                    "toggle" => self.dashboard.toggle(&output),
+                    "toggle" => self.dashboard.toggle(&output, tab),
                     _ => {}
                 }
-                // Fetch at once on open rather than after the first interval.
-                self.dashboard_requested = None;
                 self.mark_dashboard_dirty();
             }
             ("settings", function @ ("open" | "close" | "toggle")) => {
@@ -2065,7 +2067,6 @@ impl App {
         match action {
             DashboardAction::None => return,
             DashboardAction::Redraw => {}
-            DashboardAction::Refresh => self.dashboard_requested = None,
             DashboardAction::Media { player, action } => {
                 self.actions.push(crate::actions::SystemAction::Media { player, action });
             }
@@ -2233,6 +2234,7 @@ impl App {
 
         let publisher = SystemState::publisher(&self.state);
         self.actions.start_worker(Arc::clone(&self.state));
+        self.state.dashboard_feed.spawn(Arc::clone(&self.state));
 
         // The managers' async entry points expect a Tokio runtime. The shell's
         // UI thread runs calloop, so give them a small dedicated runtime.
@@ -3054,8 +3056,7 @@ impl App {
             }
             Action::OpenDashboard(output) => {
                 if !self.dashboard.is_open() {
-                    self.dashboard.open_on(&output);
-                    self.dashboard_requested = None;
+                    self.dashboard.open_on(&output, None);
                     self.mark_dashboard_dirty();
                 }
             }
@@ -3511,8 +3512,8 @@ impl PointerHandler for App {
                 return;
             }
             if self.dashboard_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
-                let snapshot = self.state.dashboard.get();
-                let action = self.dashboard.on_click(point, &snapshot);
+                let music = self.state.music.get();
+                let action = self.dashboard.on_click(point, &music);
                 self.apply_dashboard_action(action);
                 return;
             }
@@ -3867,7 +3868,7 @@ impl KeyboardHandler for App {
         }
 
         if self.dashboard.is_open() {
-            let action = self.dashboard.key(event.keysym);
+            let action = self.dashboard.key(event.keysym, self.modifiers);
             self.apply_dashboard_action(action);
             return;
         }

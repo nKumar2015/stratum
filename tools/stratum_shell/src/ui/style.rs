@@ -363,8 +363,6 @@ pub struct ThemeSwitcherMetrics {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardMetrics {
-    /// Milliseconds between data refreshes while open (stratumd: 2000).
-    pub refresh_ms: u64,
     /// Distance from the top of the screen, and the card's padding.
     pub margin: f32,
     pub padding: f32,
@@ -373,10 +371,13 @@ pub struct DashboardMetrics {
     pub inner: f32,
     pub radius: f32,
     pub border: f32,
-    pub performance_width: f32,
-    pub calendar_width: f32,
-    pub music_width: f32,
+    /// The card, padding included; the same on every tab, so switching tabs
+    /// does not resize it.
+    pub width: f32,
     pub panel_height: f32,
+    /// The tab bar above the panels, and the gap between its tabs.
+    pub tab_height: f32,
+    pub tab_gap: f32,
     pub title: f32,
     pub text: f32,
     pub caption: f32,

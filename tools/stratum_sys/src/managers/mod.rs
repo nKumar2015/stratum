@@ -13,4 +13,5 @@ pub mod gpu;
 pub mod music;
 pub mod net;
 pub mod polkit;
+pub mod sysmon;
 pub mod wifi;
