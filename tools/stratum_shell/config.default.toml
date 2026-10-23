@@ -42,7 +42,7 @@ polkit = true
 wallpaper = "~/Pictures/Wallpapers/current_wp.png" # PNG, blurred; missing = plain
 avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
 # PAM service for the password check. If /etc/pam.d has no such file, the
-# shell tries stratum-shell, quickshell, then login. It refuses to lock when
+# shell tries stratum-shell, then login. It refuses to lock when
 # none exists, or when the service's modules cannot load in this binary (a
 # build linked against an older glibc than the system's), because such a lock
 # could never be undone; `stratum-cli lockscreen lock` then reports why.

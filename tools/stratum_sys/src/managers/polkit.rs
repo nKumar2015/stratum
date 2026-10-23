@@ -325,12 +325,6 @@ pub enum AgentSubject {
     Process(u32),
 }
 
-/// Register as the session authentication agent and serve requests until the
-/// process exits.
-pub async fn register_agent(agent: Arc<PolkitAgent>) -> zbus::Result<()> {
-    register_agent_for(agent, AgentSubject::Session).await
-}
-
 /// Register as an authentication agent for `subject` and serve requests until
 /// the process exits.
 pub async fn register_agent_for(agent: Arc<PolkitAgent>, subject: AgentSubject) -> zbus::Result<()> {

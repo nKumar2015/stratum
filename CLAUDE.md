@@ -5,12 +5,14 @@ Guidance for working in this repository.
 ## What this project is
 
 Stratum is a NixOS desktop environment built around **Hyprland**. Historically its
-shell was written in QML and run on **Quickshell**; `stratumd` is a daemon that
-serves that QML shell over a Unix socket, with `stratum-cli` as its client.
+shell was written in QML and run on **Quickshell**, served by a daemon,
+`stratumd`.
 
-We are replacing Quickshell with a **native Rust shell** in
+Quickshell has been replaced by a **native Rust shell** in
 `tools/stratum_shell/`. This is not a fork or a port — it is a from-scratch
-implementation with its own renderer, layout, and theming.
+implementation with its own renderer, layout, and theming. The QML tree and
+`stratumd` were deleted on 2026-10-23; code comments that cite a `.qml` file
+or "QML did" refer to the git history before that removal.
 
 ### The user's requirements (verbatim intent, do not reinterpret)
 
@@ -35,21 +37,18 @@ implementation with its own renderer, layout, and theming.
 - **The switch happened on 2026-10-22.** The native shell is installed from
   this flake's Home Manager module and runs as the systemd user unit
   `stratum-shell`; Quickshell and stratumd are no longer installed or started.
-  The QML tree and stratumd stay in the repo until a soak period ends.
 
 ### Naming and layout
 
 ```
 tools/stratum_sys/     library: system managers (audio, wifi, bluetooth,
-                       battery, music, dashboard, polkit), host-agnostic,
+                       battery, music, sysmon, gpu, weather, calendar,
+                       polkit), host-agnostic,
                        publishes snapshots through `Publisher`
-tools/stratumd/        the daemon that served the QML shell; retired, to delete
-tools/stratum_cli/     CLI; its commands are the contract external keybinds use
-                       (audio, battery, bluetooth, net, wifi and dashboard need
-                       stratumd and are to delete with it)
+tools/stratum_cli/     CLI; its IPC targets are the contract external keybinds
+                       use, plus screenshot-post and portal-save-file, which
+                       the screenshot viewer runs
 tools/stratum_shell/   the native shell
-sidebar/ modules/ globals/ components/ themes/ shell.qml
-                       the Quickshell implementation — reference only, to delete
 module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 docs/native-shell-parity.md
                        behavioural acceptance checklist; mark a row `verified`
@@ -134,10 +133,8 @@ and `Dashboard::key_hint` lists them in the tab bar: keep it in step when
 adding one. There is no key repeat anywhere in the shell, the note included.
 
 Notifications persist (`notification_store.rs`) to
-`$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's
-`~/.local/state/quickshell/notifications-snapshot.json`, so the two shells never
-overwrite each other; the Quickshell file is imported once when the native one
-does not exist. Restored notifications are marked as already toasted.
+`$XDG_STATE_HOME/stratum/notifications.json`. Restored notifications are
+marked as already toasted.
 
 A theme picked live (switcher, Display page, `theme set`) is saved to
 `$XDG_STATE_HOME/stratum/theme.json` with the config's `theme` at the time
@@ -245,8 +242,8 @@ and give `-k Return` its own delay. pam_exec runs its script with an empty
 environment, so use shell builtins only.
 
 The **polkit dialog** (`polkit_dialog.rs`) fronts the agent in
-`stratum_sys::managers::polkit`, enabled by `[behavior] polkit` (off while
-stratumd holds the session's agent — polkit allows one). The password field is
+`stratum_sys::managers::polkit`, enabled by `[behavior] polkit` (off in a dev
+build beside the installed shell — polkit allows one agent). The password field is
 shared with the lock screen (`ui/text_field.rs`, masked). The agent's methods run
 on **zbus's own executor, not Tokio**: anything Tokio-specific inside them (a
 `tokio::time` timer) panics on every request. Password checks are spawned onto

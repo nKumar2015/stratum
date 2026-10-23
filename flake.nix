@@ -27,8 +27,8 @@
   in {
     packages = forAllSystems (pkgs: let
       # Single source tree for the Cargo workspace: crates depend on each other
-      # (stratumd and stratum-cli build on stratum_sys), so each package must
-      # see the whole tree plus the shared lockfile.
+      # (the shell builds on stratum_sys), so each package must see the whole
+      # tree plus the shared lockfile.
       workspaceSrc = pkgs.lib.cleanSourceWith {
         src = ./.;
         filter = path: type: let
@@ -50,20 +50,6 @@
 
         nativeBuildInputs = with pkgs; [pkg-config];
         buildInputs = with pkgs; [dbus openssl];
-      };
-
-      stratumd = pkgs.rustPlatform.buildRustPackage {
-        pname = "stratumd";
-        version = "0.1.0";
-
-        src = workspaceSrc;
-        buildAndTestSubdir = "tools/stratumd";
-        cargoLock.lockFile = ./Cargo.lock;
-
-        nativeBuildInputs = with pkgs; [pkg-config clang];
-        buildInputs = with pkgs; [pam dbus pipewire libpulseaudio];
-
-        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
 
       stratum-shell = pkgs.rustPlatform.buildRustPackage {

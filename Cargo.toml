@@ -2,7 +2,6 @@
 members = [
     "tools/stratum_sys",
     "tools/stratum_shell",
-    "tools/stratumd",
     "tools/stratum_cli",
 ]
 resolver = "2"
@@ -34,15 +33,6 @@ lazy_static = "1.4"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2"
-
-# CLI
-dbus = "0.9"
-urlencoding = "2.1"
-
-# The shell (M1+) uses these; declared here so the workspace resolves one
-# version set once the crate lands.
-# wgpu, smithay-client-toolkit, calloop, cosmic-text, lyon, resvg …
 
 [profile.release]
 opt-level = 3

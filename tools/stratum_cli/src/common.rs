@@ -1,7 +1,4 @@
-use std::env;
-use std::io::ErrorKind;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde_json::{json, Value};
 
@@ -64,27 +61,4 @@ pub fn run_command_capture(program: &str, args: &[&str]) -> Result<String, Strin
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-pub fn command_available(program: &str) -> bool {
-    match Command::new(program)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-    {
-        Ok(_) => true,
-        Err(err) => !matches!(err.kind(), ErrorKind::NotFound),
-    }
-}
-
-pub fn config_dir() -> PathBuf {
-    if let Ok(path) = env::var("XDG_CONFIG_HOME") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path).join("stratum");
-        }
-    }
-
-    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".config/stratum")
 }

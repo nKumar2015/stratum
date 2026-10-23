@@ -1,13 +1,8 @@
 //! Notifications that survive a restart.
 //!
-//! The QML shell saved its notification list, do-not-disturb, and next id to
-//! `~/.local/state/quickshell/notifications-snapshot.json` (through
-//! `stratum-cli notifications-snapshot`) 700 ms after the last change, and
-//! restored it on start, actions included. This does the same in-process, to
-//! its own file (`$XDG_STATE_HOME/stratum/notifications.json`), so the two
-//! shells never overwrite each other while both run. When that file does not
-//! exist yet, the Quickshell snapshot is imported once, so notifications carry
-//! over at the switch.
+//! The notification list, do-not-disturb, and next id are saved to
+//! `$XDG_STATE_HOME/stratum/notifications.json` 700 ms after the last change,
+//! as the QML shell did, and restored on start, actions included.
 //!
 //! Decoded `image-data` pixels are not saved; an `image-path` is.
 
@@ -17,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::notifications::{Notification, INLINE_REPLY};
+use crate::notifications::Notification;
 
 /// The QML shell kept this many.
 pub const MAX_SAVED: usize = 50;
@@ -44,28 +39,17 @@ pub fn default_path() -> Option<PathBuf> {
     state_dir().map(|d| d.join("stratum/notifications.json"))
 }
 
-fn quickshell_path() -> Option<PathBuf> {
-    state_dir().map(|d| d.join("quickshell/notifications-snapshot.json"))
-}
-
-/// The saved snapshot, else the Quickshell one, else `None`.
+/// The saved snapshot, if there is one.
 pub fn load() -> Option<Snapshot> {
-    if let Some(path) = default_path().filter(|p| p.exists()) {
-        return read(&path, from_json);
-    }
-    let imported = quickshell_path().and_then(|p| read(&p, from_quickshell_json));
-    if let Some(snapshot) = &imported {
-        tracing::info!("imported {} notifications from the Quickshell snapshot", snapshot.notifications.len());
-    }
-    imported
+    read(&default_path()?)
 }
 
-fn read(path: &Path, parse: fn(&Value) -> Option<Snapshot>) -> Option<Snapshot> {
+fn read(path: &Path) -> Option<Snapshot> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: Value = serde_json::from_str(&text)
         .map_err(|err| tracing::warn!("ignoring unreadable {}: {err}", path.display()))
         .ok()?;
-    parse(&value)
+    from_json(&value)
 }
 
 /// Keep the newest `MAX_SAVED`, and an id above every one kept.
@@ -132,65 +116,6 @@ pub fn from_json(value: &Value) -> Option<Snapshot> {
     Some(normalise(Snapshot {
         do_not_disturb: value["do_not_disturb"].as_bool().unwrap_or(false),
         next_id: value["next_id"].as_u64().unwrap_or(1) as u32,
-        notifications,
-    }))
-}
-
-/// The QML shell's format (`NotificationState.normalizeNotificationEntry`).
-/// Its list was newest first.
-pub fn from_quickshell_json(value: &Value) -> Option<Snapshot> {
-    let list = value["notifications"].as_array()?;
-    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
-    let mut notifications: Vec<Notification> = list
-        .iter()
-        .filter_map(|n| {
-            let id = u32::try_from(n["id"].as_u64()?).ok().filter(|id| *id > 0)?;
-            let mut actions = Vec::new();
-            let mut reply = None;
-            for action in n["actions"].as_array().into_iter().flatten() {
-                let key = text(&action["id"]);
-                if key.is_empty() {
-                    continue;
-                }
-                if action["inlineReply"].as_bool() == Some(true) {
-                    reply = Some(key);
-                    continue;
-                }
-                actions.push(key);
-                actions.push(text(&action["label"]));
-            }
-            let placeholder = Some(text(&n["inlineReplyPlaceholder"])).filter(|p| !p.is_empty());
-            let reply_placeholder = reply.map(|_| placeholder.unwrap_or_else(|| "Reply...".into()));
-            if reply_placeholder.is_some() {
-                actions.push(INLINE_REPLY.into());
-                actions.push("Reply".into());
-            }
-            let image = text(&n["imageUrl"]);
-            let image_path = image
-                .strip_prefix("file://")
-                .map(str::to_string)
-                .or_else(|| image.starts_with('/').then(|| image.clone()));
-            Some(Notification {
-                id,
-                app_name: text(&n["appName"]),
-                app_icon: text(&n["appIcon"]),
-                summary: text(&n["summary"]),
-                body: text(&n["body"]),
-                actions,
-                urgency: n["urgency"].as_u64().unwrap_or(1).min(2) as u8,
-                expire_timeout: n["expiryMs"].as_i64().unwrap_or(5000) as i32,
-                image_path,
-                resident: false,
-                reply_placeholder,
-                last_reply: Some(text(&n["lastInlineReplyText"])).filter(|r| !r.is_empty()),
-                image: None,
-            })
-        })
-        .collect();
-    notifications.reverse();
-    Some(normalise(Snapshot {
-        do_not_disturb: value["doNotDisturb"].as_bool().unwrap_or(false),
-        next_id: value["nextNotificationId"].as_u64().unwrap_or(1) as u32,
         notifications,
     }))
 }
@@ -263,6 +188,7 @@ fn write(path: &Path, snapshot: &Snapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::notifications::INLINE_REPLY;
 
     fn note(id: u32) -> Notification {
         Notification {
@@ -304,40 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn imports_the_quickshell_snapshot() {
-        let qml = json!({
-            "version": 1,
-            "doNotDisturb": true,
-            "nextNotificationId": 12,
-            "notifications": [
-                {"id": 11, "appName": "Chat", "summary": "Ada", "body": "Lunch?", "urgency": 2,
-                 "actions": [{"id": "default", "label": "Open", "inlineReply": false},
-                             {"id": "__inline_reply__", "label": "Reply", "inlineReply": true}],
-                 "inlineReplyPlaceholder": "Message Ada", "imageUrl": "file:///tmp/a.png",
-                 "lastInlineReplyText": "on my way", "expiryMs": 0},
-                {"id": 4, "appName": "Mail", "summary": "Build", "body": "", "actions": []},
-            ],
-        });
-        let snapshot = from_quickshell_json(&qml).unwrap();
-        assert!(snapshot.do_not_disturb);
-        assert_eq!(snapshot.next_id, 12);
-        let ids: Vec<u32> = snapshot.notifications.iter().map(|n| n.id).collect();
-        assert_eq!(ids, vec![4, 11], "QML kept newest first; this list is oldest first");
-        let chat = &snapshot.notifications[1];
-        assert_eq!(chat.actions, vec!["default", "Open", INLINE_REPLY, "Reply"]);
-        assert_eq!(chat.reply_placeholder.as_deref(), Some("Message Ada"));
-        assert_eq!(chat.image_path.as_deref(), Some("/tmp/a.png"));
-        assert_eq!(chat.urgency, 2);
-        assert_eq!(chat.expire_timeout, 0);
-        assert_eq!(chat.last_reply.as_deref(), Some("on my way"));
-    }
-
-    #[test]
-    fn an_empty_quickshell_snapshot_is_nothing() {
-        assert!(from_quickshell_json(&json!({"version": 1})).is_none());
-    }
-
-    #[test]
     fn the_saver_coalesces_and_flushes_on_drop() {
         let dir = std::env::temp_dir().join(format!("stratum-notes-{}", std::process::id()));
         let path = dir.join("notifications.json");
@@ -350,7 +242,7 @@ mod tests {
                 });
             }
         } // drop: flush
-        let saved = read(&path, from_json).unwrap();
+        let saved = read(&path).unwrap();
         assert_eq!(saved.notifications.len(), 1);
         assert_eq!(saved.notifications[0].id, 5, "the latest snapshot wins");
         assert!(!path.with_extension("json.tmp").exists());

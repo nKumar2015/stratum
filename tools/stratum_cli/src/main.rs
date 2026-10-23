@@ -1,33 +1,25 @@
 mod commands;
 mod common;
-mod daemon_client;
+mod shell_client;
 
 use std::env;
 
 use serde_json::json;
-use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, theme, wifi};
+use commands::{portal_save_file, screenshot_post, theme};
 use common::{emit_help, emit_json, fail, is_help_flag};
 
-const ROOT_COMMANDS: [&str; 19] = [
-    "audio",
-    "battery",
-    "bluetooth",
+const ROOT_COMMANDS: [&str; 11] = [
     "dashboard",
     "lockscreen",
-    "net",
     "notifications",
-    "notifications-snapshot",
-    "osd",
     "portal-save-file",
     "powermenu",
     "screenshot",
-    "screenshot-menu",
     "screenshot-post",
     "settings",
     "theme",
     "timer",
     "todo",
-    "wifi",
 ];
 
 fn print_help() {
@@ -35,22 +27,6 @@ fn print_help() {
         "stratum-cli",
         "stratum-cli <command|target> [args] | stratum-cli help [command|target]",
         &ROOT_COMMANDS,
-    );
-}
-
-fn print_dashboard_help() {
-    emit_help(
-        "dashboard",
-        "stratum-cli dashboard <all|calendar|music|performance|open|close|toggle> [args]",
-        &[
-            "all [year month]",
-            "calendar [year month]",
-            "music",
-            "performance",
-            "open [tab]",
-            "close",
-            "toggle [tab]",
-        ],
     );
 }
 
@@ -114,10 +90,9 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
         ));
     }
 
-    // The native shell is the only shell. Quickshell used to take the calls it
-    // answered `unsupported`; now the only such call is a lock the shell will
-    // not take (no usable PAM service), which is reported as it is.
-    match daemon_client::shell_call(target, function, args) {
+    // The only call the shell answers `unsupported` is a lock it will not
+    // take (no usable PAM service), which is reported as it is.
+    match shell_client::shell_call(target, function, args) {
         Ok(response) if response["ok"].as_bool() == Some(true) => {
             let pid = response["pid"].as_i64().unwrap_or(std::process::id() as i64);
             Ok(pid)
@@ -157,27 +132,6 @@ fn dispatch_ipc_target(target: &str, args: &[String]) -> bool {
 }
 
 fn dispatch(command: &str, args: &[String]) -> bool {
-    if command == "dashboard" {
-        let first = args.first().map(String::as_str).unwrap_or("");
-
-        if first.is_empty() {
-            dashboard::handle(args);
-            return true;
-        }
-
-        if is_help_flag(first) {
-            print_dashboard_help();
-            return true;
-        }
-
-        if matches!(first, "open" | "close" | "toggle") {
-            return dispatch_ipc_target("dashboard", args);
-        }
-
-        dashboard::handle(args);
-        return true;
-    }
-
     if command == "theme" {
         let first = args.first().map(String::as_str).unwrap_or("");
 
@@ -209,40 +163,8 @@ fn dispatch(command: &str, args: &[String]) -> bool {
     }
 
     match command {
-        "audio" => {
-            audio::handle(args);
-            true
-        }
-        "battery" => {
-            battery::handle(args);
-            true
-        }
-        "bluetooth" => {
-            bluetooth::handle(args);
-            true
-        }
-        "net" => {
-            net::handle(args);
-            true
-        }
-        "notifications-snapshot" => {
-            notifications_snapshot::handle(args);
-            true
-        }
-        "osd" => {
-            osd::handle(args);
-            true
-        }
-        "wifi" => {
-            wifi::handle(args);
-            true
-        }
         "portal-save-file" => {
             portal_save_file::handle(args);
-            true
-        }
-        "screenshot-menu" => {
-            screenshot_menu::handle(args);
             true
         }
         "screenshot-post" => {

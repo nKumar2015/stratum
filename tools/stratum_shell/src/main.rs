@@ -1,13 +1,8 @@
 //! Stratum's native desktop shell.
 //!
-//! This is the replacement for the Quickshell/QML implementation. It owns the
-//! Wayland connection, renders with wgpu on Vulkan, and — from a later
-//! milestone — hosts the system managers directly instead of talking to
-//! `stratumd` over a socket.
-//!
-//! M1 scope: bring up a single layer-shell surface per output and prove the
-//! Vulkan surface handoff works. The window is a flat background plus one
-//! rounded rectangle; no widgets or state yet.
+//! The replacement for the Quickshell/QML implementation. One process owns the
+//! Wayland connection, renders with wgpu on Vulkan, and hosts the system
+//! managers (`stratum_sys`) directly.
 
 #[allow(dead_code)]
 #[cfg(test)]

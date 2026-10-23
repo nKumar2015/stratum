@@ -6,13 +6,8 @@ embeds the system managers directly (no daemon socket between UI and state).
 
 ## Status
 
-The sidebar is config-driven, the control centre is an xdg-shell window with
-eight pages, and the shell owns notifications, toasts, the OSD, the tray
-watcher, live theme switching, config hot reload, and its IPC socket.
-
-Not yet ported: menus, hover panels, lock screen, polkit dialog, power menu,
-notification actions/inline reply, dashboard, and the screenshot suite. See
-`docs/native-shell-parity.md` at the repository root.
+Every surface of the QML shell is ported, and the native shell replaced it on
+2026-10-22. See `docs/native-shell-parity.md` at the repository root.
 
 ## IPC
 
@@ -27,9 +22,8 @@ stratum-cli notifications toggleDnd
 stratum-cli theme set gruvbox
 ```
 
-The CLI tries the native socket first and falls back to `qs ipc` for functions
-the shell reports as `unsupported`, so both shells can run side by side during
-the migration.
+A function the shell will not serve (only a lock it cannot safely take)
+answers `unsupported`, and the CLI reports it.
 
 ## Configuration
 

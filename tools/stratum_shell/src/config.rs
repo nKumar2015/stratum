@@ -688,7 +688,7 @@ pub struct LockConfig {
     /// Round picture above the password field. Empty or missing shows a glyph.
     pub avatar: String,
     /// PAM service for the password check. Only used if `/etc/pam.d` has it;
-    /// otherwise `stratum-shell`, `quickshell`, then `login` are tried, and the
+    /// otherwise `stratum-shell`, then `login`, are tried, and the
     /// shell refuses to lock when none exists rather than lock with a service
     /// that can never succeed.
     pub pam_service: String,

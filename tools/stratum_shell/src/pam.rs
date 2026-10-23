@@ -352,13 +352,13 @@ pub fn authenticate(
 /// PAM silently falls back to the `other` service when the named one has no
 /// file, and on NixOS `other` denies everything. Locking with such a service
 /// could never be undone, so only services that exist are considered: the
-/// configured one first, then the shell's own, then Quickshell's (which the
-/// QML lock screen used), then `login`, which every system has.
+/// configured one first, then the shell's own, then `login`, which every
+/// system has.
 pub fn resolve_service(configured: &str, confdir: Option<&Path>) -> Option<String> {
     let dir: PathBuf = confdir
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("/etc/pam.d"));
-    let candidates = [configured, "stratum-shell", "quickshell", "login"];
+    let candidates = [configured, "stratum-shell", "login"];
     candidates
         .iter()
         .filter(|name| !name.is_empty() && !name.contains('/'))

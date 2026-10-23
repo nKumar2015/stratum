@@ -1647,7 +1647,7 @@ impl App {
     ///
     /// Debug builds honour two test hooks. `STRATUM_POLKIT_SUBJECT_PID` makes
     /// the agent answer only that process's requests, so it can be tested
-    /// while stratumd holds the session's agent. `STRATUM_POLKIT_FIXTURE_NAME`
+    /// while another agent holds the session's. `STRATUM_POLKIT_FIXTURE_NAME`
     /// skips polkitd entirely and serves the agent on the session bus under
     /// that name, for tests that send the requests themselves.
     fn start_polkit_agent(&mut self, publisher: stratum_sys::Publisher) {
@@ -1687,7 +1687,7 @@ impl App {
                     return;
                 }
                 if let Err(err) = runtime.block_on(polkit::register_agent_for(agent, subject)) {
-                    // Most often another agent (stratumd) already holds the
+                    // Most often another agent (the installed shell's) already holds the
                     // session. The runtime ends with this thread, which is
                     // fine: checks are spawned onto it only in answer to a
                     // request, and without a registration none can arrive.
@@ -1801,9 +1801,8 @@ impl App {
     /// Refuses whenever the lock could not be undone: no PAM service exists,
     /// or its modules cannot load in this process. A lock nobody can unlock is
     /// worse than none. Refusals answer `unsupported` (with the reason in the
-    /// log), the same as a compositor without the session-lock protocol, so
-    /// the CLI hands the request to Quickshell and the keybind still locks
-    /// while both shells run.
+    /// log), the same as a compositor without the session-lock protocol, and
+    /// the CLI reports it.
     fn begin_lock(&mut self) -> Result<(), IpcError> {
         if self.lock.active() {
             return Ok(());
@@ -2360,8 +2359,8 @@ impl App {
             self.start_polkit_agent(publisher.clone());
         }
 
-        // Own org.freedesktop.Notifications when configured to. Off by default
-        // so another daemon (Quickshell) can keep it during migration.
+        // Own org.freedesktop.Notifications when configured to. A dev build
+        // beside the installed shell turns it off and leaves the name to it.
         if self.config.behavior.notifications {
             let sink_state = Arc::clone(&self.state);
             let sink: crate::notifications::NotificationSink =

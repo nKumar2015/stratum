@@ -1,4 +1,3 @@
-use crate::managers::common::{run_capture_optional, run_command_capture};
 use pulsectl::controllers::types::DeviceInfo;
 use pulsectl::controllers::DeviceControl;
 use pulsectl::ControllerError;
@@ -375,21 +374,6 @@ pub fn eq_delete_preset(device_id: &str, preset_name: &str) -> Value {
     }
 
     json!({"ok": true, "deleted": true})
-}
-
-pub fn media_seek(position_sec: i64) -> Value {
-    let player = run_capture_optional("playerctl", &["-l"])
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .to_string();
-    if player.is_empty() {
-        return json!({"ok": false, "error": "no active media player"});
-    }
-
-    let seek_micro = (position_sec * 1_000_000).to_string();
-    let _ = run_command_capture("playerctl", &["-p", &player, "position", &seek_micro]);
-    json!({"ok": true, "player": player})
 }
 
 pub fn devices() -> Value {

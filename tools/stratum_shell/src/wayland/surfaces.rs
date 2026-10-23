@@ -345,7 +345,7 @@ impl SurfaceEntry {
 /// of 0, so the compositor places it past every exclusive zone on that edge:
 /// ours, and any other panel's. Measuring from the screen edge with the rail's
 /// width put the popup on top of the rail whenever another panel came first,
-/// as Quickshell's does while both shells run. `gap` separates it from the
+/// as a second shell's does. `gap` separates it from the
 /// rail; `along` is its offset along the rail.
 pub fn beside_rail(
     position: crate::config::SidebarPosition,

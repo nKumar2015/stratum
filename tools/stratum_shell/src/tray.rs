@@ -5,8 +5,9 @@
 //! advertise icons. The watcher is what applications register with; the host
 //! flag is what makes them believe someone is displaying them.
 //!
-//! Like the notification server this is opt-in, because only one host can own
-//! the watcher name and Quickshell currently does during migration.
+//! Like the notification server this can be turned off (`[behavior] tray`),
+//! because only one host can own the watcher name: a dev build beside the
+//! installed shell leaves it to that one.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -391,8 +392,8 @@ fn decode_node(
 pub async fn serve(tray: Arc<Tray>) -> zbus::Result<()> {
     let connection = Connection::session().await?;
 
-    // Own the watcher when the name is free. During migration another shell
-    // (Quickshell) usually owns it, so fall back to *consuming* its item list:
+    // Own the watcher when the name is free. When another shell owns it, fall
+    // back to *consuming* its item list:
     // the icons and menus are the same objects either way, and both shells can
     // then display them side by side.
     // The object is registered before the name is requested so that no call

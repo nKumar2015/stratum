@@ -7,8 +7,7 @@
 //!
 //! The crate is deliberately host-agnostic. It does not own an event loop, a
 //! socket, or a specific UI. Managers that need to report changes call a
-//! [`Publisher`] supplied by whoever embeds them — `stratumd` today, the
-//! native shell at cutover.
+//! [`Publisher`] supplied by whoever embeds them: the native shell.
 //!
 //! ```no_run
 //! use stratum_sys::{managers, Publisher};
@@ -23,11 +22,6 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub mod managers;
-pub mod state;
-
-pub use state::{
-    AudioState, BatteryState, BluetoothState, DashboardState, MusicState, NetState, PolkitState,
-};
 
 /// Callback a host provides so managers can publish state changes.
 type PublishFn = dyn Fn(&str, Value) + Send + Sync;
@@ -48,7 +42,7 @@ impl Publisher {
     }
 
     /// Publish a snapshot on `channel` (`"audio"`, `"net"`, `"bluetooth"`,
-    /// `"music"`, `"battery"`, `"dashboard"`, `"polkit"`).
+    /// `"music"`, `"battery"`, `"polkit"`).
     pub fn emit(&self, channel: &str, payload: Value) {
         (self.0)(channel, payload);
     }
@@ -71,10 +65,6 @@ impl Publisher {
 
     pub fn music(&self, payload: Value) {
         self.emit("music", payload);
-    }
-
-    pub fn dashboard(&self, payload: Value) {
-        self.emit("dashboard", payload);
     }
 
     pub fn polkit(&self, payload: Value) {
