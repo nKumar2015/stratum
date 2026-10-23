@@ -231,9 +231,9 @@ impl TextEngine {
         const OVERSAMPLE: f32 = 4.0;
         let run = self.shape(text, style, 0.0, 0.0);
         let mut bounds: Option<(f32, f32, f32, f32)> = None;
-        for (glyph, raster) in self.rasterize_run(&run, OVERSAMPLE) {
-            let left = glyph.x + raster.left as f32 / OVERSAMPLE;
-            let top = glyph.y - raster.top as f32 / OVERSAMPLE;
+        for (_, raster) in self.rasterize_run(&run, OVERSAMPLE, (0.0, 0.0)) {
+            let left = raster.left as f32 / OVERSAMPLE;
+            let top = -raster.top as f32 / OVERSAMPLE;
             let right = left + raster.width as f32 / OVERSAMPLE;
             let bottom = top + raster.height as f32 / OVERSAMPLE;
             bounds = Some(match bounds {
@@ -248,6 +248,10 @@ impl TextEngine {
     ///
     /// `font_id` comes from shaping, so per-glyph fallback faces are respected.
     /// Returns `None` for empty glyphs such as spaces.
+    ///
+    /// `(x, y)` is the pen in physical pixels. The bitmap carries the pen's
+    /// sub-pixel fraction, and its `left`/`top` place it from the pixel
+    /// origin, so it lands on whole pixels and is sampled one to one.
     pub fn rasterize(
         &mut self,
         font_id: fontdb::ID,
@@ -257,7 +261,7 @@ impl TextEngine {
         x: f32,
         y: f32,
     ) -> Option<RasterGlyph> {
-        let (key, _, _) = cosmic_text::CacheKey::new(
+        let (key, x_px, y_px) = cosmic_text::CacheKey::new(
             font_id,
             glyph_id,
             size,
@@ -268,32 +272,38 @@ impl TextEngine {
 
         let image: &Option<SwashImage> = self.swash.get_image(&mut self.font_system, key);
         let image = image.as_ref()?;
-        raster_to_mask(image)
+        let mut raster = raster_to_mask(image)?;
+        raster.left += x_px;
+        raster.top -= y_px;
+        Some(raster)
     }
 
     /// Rasterize every drawable glyph in a run, in draw order.
     ///
     /// `scale` is the output's buffer scale. Glyphs are rasterized at
-    /// `run.size * scale` so they are sharp on high-DPI outputs; all positions
-    /// the caller receives stay in *physical* pixels, which is what the
-    /// renderer consumes before converting to logical space.
+    /// `run.size * scale` so they are sharp on high-DPI outputs. `origin` is
+    /// where the run's pen starts, in physical pixels; each raster's
+    /// `left`/`top` place it from the physical origin, `(left, -top)`.
+    ///
+    /// Binning against the whole on-screen position, not just the glyph's
+    /// place in the run, is what keeps text sharp: a run starting between
+    /// pixels was otherwise drawn between them and sampled over two.
     pub fn rasterize_run(
         &mut self,
         run: &TextRun,
         scale: f32,
+        origin: (f32, f32),
     ) -> Vec<(PositionedGlyph, RasterGlyph)> {
         let scale = scale.max(1.0);
         let mut out = Vec::with_capacity(run.glyphs.len());
         for glyph in &run.glyphs {
-            // Subpixel binning uses the scaled pen so hinting matches the
-            // physical grid.
             if let Some(raster) = self.rasterize(
                 glyph.font_id,
                 glyph.glyph_id,
                 run.size * scale,
                 run.weight,
-                glyph.x * scale,
-                glyph.y * scale,
+                origin.0 + (glyph.x + glyph.x_offset * run.size) * scale,
+                origin.1 + (glyph.y - glyph.y_offset * run.size) * scale,
             ) {
                 out.push((*glyph, raster));
             }
@@ -503,7 +513,7 @@ mod placement_tests {
             color: Color::WHITE,
         };
         let run = engine.shape("Desktop", &style, 0.0, 0.0);
-        let rasters = engine.rasterize_run(&run, 1.0);
+        let rasters = engine.rasterize_run(&run, 1.0, (0.0, 0.0));
         assert_eq!(rasters.len(), run.glyphs.len(), "every glyph should rasterize");
 
         // Pens must advance monotonically to the right.

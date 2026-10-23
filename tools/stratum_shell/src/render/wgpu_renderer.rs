@@ -589,18 +589,19 @@ impl SurfaceRenderer {
         // carries the clip that was active when it was pushed.
         let mut glyph_uploads = Vec::new();
         for run in &list.texts {
-            let rasterized = text.rasterize_run(run, self.scale);
-            for (glyph, raster) in rasterized {
-                glyph_uploads.push((
-                    glyph,
-                    run.x,
-                    run.y,
-                    run.size,
-                    run.color,
-                    run.transform,
-                    run.clip,
-                    raster,
-                ));
+            // Upright text is placed in surface pixels, so its bitmaps sit on
+            // the pixel grid; a translation is folded into the pen first.
+            // Rotated or scaled text keeps its transform and lands where the
+            // transform takes it.
+            let [a, b, c, d, tx, ty] = run.transform.m;
+            let (origin, transform) = if (a, b, c, d) == (1.0, 0.0, 0.0, 1.0) {
+                ((run.x + tx, run.y + ty), Transform::IDENTITY)
+            } else {
+                ((run.x, run.y), run.transform)
+            };
+            let physical = (origin.0 * self.scale, origin.1 * self.scale);
+            for (_, raster) in text.rasterize_run(run, self.scale, physical) {
+                glyph_uploads.push((run.color, transform, run.clip, raster));
             }
         }
         // Paths whose geometry changes every frame (a dragged curve) would
@@ -609,16 +610,13 @@ impl SurfaceRenderer {
         if self.path_cache.len() > PATH_CACHE_LIMIT {
             self.path_cache.retain(|key, _| used_paths.contains(key));
         }
-        for (glyph, run_x, run_y, run_size, color, transform, clip, raster) in glyph_uploads {
+        for (color, transform, clip, raster) in glyph_uploads {
             if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
-                // `run_x`/`run_y` place the run's baseline origin; glyph
-                // offsets are relative to it. Swash's bitmap origin is
-                // (left, -top) from the pen.
+                // The raster is placed in whole physical pixels from the
+                // origin: `(left, -top)`.
                 let scale = self.scale;
-                let pen_x = run_x + glyph.x + glyph.x_offset * run_size;
-                let pen_y = run_y + glyph.y - glyph.y_offset * run_size;
-                let lx = pen_x + raster.left as f32 / scale;
-                let ly = pen_y - raster.top as f32 / scale;
+                let lx = raster.left as f32 / scale;
+                let ly = -raster.top as f32 / scale;
                 let lw = raster.width as f32 / scale;
                 let lh = raster.height as f32 / scale;
                 batch.set_clip(clip);

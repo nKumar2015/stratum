@@ -93,7 +93,7 @@ async fn render_probe() -> Vec<u8> {
         color: Color::WHITE,
     };
     let run = text.shape("Desktop", &style, 4.0, 30.0);
-    let rasters = text.rasterize_run(&run, 1.0);
+    let rasters = text.rasterize_run(&run, 1.0, (run.x, run.y));
     assert!(!rasters.is_empty(), "no glyphs rasterized");
 
     // --- Use the shell's real atlas implementation. ---
@@ -169,9 +169,9 @@ async fn render_probe() -> Vec<u8> {
         uv: [f32; 2],
     }
     let mut verts: Vec<V> = Vec::new();
-    for ((glyph, raster), uv) in rasters.iter().zip(uv_rects.iter()) {
-        let x = run.x + glyph.x + raster.left as f32;
-        let y = run.y + glyph.y - raster.top as f32;
+    for ((_, raster), uv) in rasters.iter().zip(uv_rects.iter()) {
+        let x = raster.left as f32;
+        let y = -raster.top as f32;
         let w = raster.width as f32;
         let h = raster.height as f32;
         let (u0, v0, u1, v1) = *uv;
