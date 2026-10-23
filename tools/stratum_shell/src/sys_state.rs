@@ -88,6 +88,9 @@ pub struct SystemState {
     /// The forecast, fetched while the dashboard is open.
     pub weather: Cell<crate::dashboard::weather::WeatherState>,
     pub weather_feed: Arc<crate::dashboard::weather::WeatherFeed>,
+    /// Calendar events, fetched while the dashboard is open.
+    pub calendar: Cell<crate::dashboard::calendar::CalendarState>,
+    pub calendar_feed: Arc<crate::dashboard::calendar::CalendarFeed>,
     pub polkit: Cell<serde_json::Value>,
     /// The equalizer for the current output: its presets, the active one, the
     /// backend's limits, and the result of the last EQ action
@@ -135,6 +138,8 @@ impl SystemState {
             dashboard_feed: Arc::default(),
             weather: Cell::default(),
             weather_feed: Arc::default(),
+            calendar: Cell::default(),
+            calendar_feed: Arc::default(),
             polkit: Cell::new(serde_json::Value::Null),
             eq: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
@@ -187,6 +192,7 @@ impl SystemState {
             | self.music.take_dirty()
             | self.dashboard.take_dirty()
             | self.weather.take_dirty()
+            | self.calendar.take_dirty()
             | self.polkit.take_dirty()
             | self.eq.take_dirty()
             | self.hypr.take_dirty()

@@ -126,12 +126,16 @@ impl Dashboard {
         }
 
         // Right, laid out from the edge inwards: do-not-disturb, devices,
-        // the battery, then CPU and RAM.
+        // the battery, the next event, then CPU and RAM. Short of room, the
+        // leftmost go first.
         let dnd = ctx.state.dnd.get();
         let mut chips: Vec<(&str, String, Color)> = Vec::new();
         if let Some(s) = sample {
             let cpu = s.cpu_percent.map_or_else(|| "\u{2013}".into(), |p| format!("{}%", p.round()));
             chips.push(("", format!("CPU {cpu} \u{b7} RAM {}%", s.memory.percent().round()), ctx.theme.primary));
+        }
+        if let Some(next) = self.next_event_chip(ctx) {
+            chips.push(("\u{f00ed}", next, ctx.theme.primary));
         }
         let battery = ctx.state.battery.get();
         if battery["battery"]["present"].as_bool() == Some(true) {

@@ -91,10 +91,26 @@ refresh_min = 30
 hours = 6               # hourly forecast shown
 days = 5                # daily forecast shown, today first
 
+# Calendar sync from ICS feeds (Google, Outlook, iCloud and Fastmail all
+# offer a private ICS address). Fetched only while the dashboard is open.
+[dashboard.calendar]
+# A file of ICS addresses, one per line; '#' starts a comment. The addresses
+# are secrets, so keep them out of this config, which Home Manager writes to
+# the world-readable Nix store. With sops-nix in Home Manager:
+#   sops.secrets.calendar_ics = {};
+#   programs.stratum.settings.dashboard.calendar.urls_file =
+#     config.sops.secrets.calendar_ics.path;
+# urls_file = "~/.config/sops-nix/secrets/calendar_ics"
+refresh_min = 15
+week_start = "sunday"   # or "monday"
+week_numbers = true
+agenda_days = 14        # how far ahead the agenda looks
+
 # Tabs, in order; it always opens on the first. A tab is rows of panels:
 # rows share its height by weight, a row's panels its width. Panel kinds:
-# glance (time, date, batteries, do-not-disturb), weather, performance (load
-# bars), graphs (history, temperatures, network), calendar, music.
+# glance (time, date, next event, batteries, do-not-disturb), weather, agenda,
+# performance (load bars), graphs (history, temperatures, network), calendar
+# (month grid; a click picks the agenda's day), music.
 [[dashboard.tabs]]
 name = "Today"
 icon = "\U000F056E"
@@ -102,7 +118,7 @@ rows = [
     { weight = 1.0, panels = [{ kind = "glance", weight = 1.0 }] },
     { weight = 5.5, panels = [
         { kind = "weather", weight = 1.0 },
-        { kind = "calendar", weight = 1.15 },
+        { kind = "agenda", weight = 1.15 },
         { kind = "music", weight = 1.0 },
     ] },
 ]
@@ -110,7 +126,10 @@ rows = [
 [[dashboard.tabs]]
 name = "Calendar"
 icon = "\U000F00ED"
-rows = [{ weight = 1.0, panels = [{ kind = "calendar", weight = 1.0 }] }]
+rows = [{ weight = 1.0, panels = [
+    { kind = "calendar", weight = 1.4 },
+    { kind = "agenda", weight = 1.0 },
+] }]
 
 [[dashboard.tabs]]
 name = "System"
@@ -429,6 +448,8 @@ graph_gap = 8.0         # between graph rows
 clock = 26.0            # the glance strip's time
 weather_icon = 34.0     # the current conditions' glyph
 weather_temp = 28.0     # and temperature
+dot = 4.0               # a calendar day's event marker
+stripe = 3.0            # an agenda event's calendar colour
 title = 15.0
 text = 13.0
 caption = 11.0

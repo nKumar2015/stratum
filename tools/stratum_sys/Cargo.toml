@@ -21,3 +21,6 @@ tracing = { workspace = true }
 pipewire = { workspace = true }
 pulsectl-rs = { workspace = true }
 libc = { workspace = true }
+# Calendar events carry IANA zone names (TZID). Only the system's zoneinfo
+# is read: no bundled database, no serde.
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }

@@ -460,7 +460,8 @@ impl ArtworkSpec {
     }
 }
 
-fn expand_home(path: &str) -> Option<PathBuf> {
+/// `path` with a leading `~/` made absolute; `None` when empty.
+pub(crate) fn expand_home(path: &str) -> Option<PathBuf> {
     if path.trim().is_empty() {
         return None;
     }

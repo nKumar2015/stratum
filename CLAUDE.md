@@ -107,7 +107,15 @@ never down. (A process list was built and dropped at the user's request.) Weathe
 (`dashboard/weather.rs`, `stratum_sys::managers::weather`) comes from
 Open-Meteo through `curl`, only while open and at most every `refresh_min`;
 the postal code's coordinates and the last forecast are cached in
-`$XDG_STATE_HOME/stratum/weather.json`, so live tests set `XDG_STATE_HOME`. The sampler also refreshes
+`$XDG_STATE_HOME/stratum/weather.json`, so live tests set `XDG_STATE_HOME`.
+Calendar sync (`dashboard/calendar.rs`, `dashboard/agenda.rs`,
+`stratum_sys::managers::calendar`) reads ICS addresses from
+`[dashboard.calendar] urls_file` (the user supplies it as a sops secret:
+the addresses must never reach the Nix store, the logs, or an error
+message), fetches with `curl` only while open, and keeps copies in
+`$XDG_STATE_HOME/stratum/calendar/` (mode 700). Time zones come from `jiff`
+over the system zoneinfo; series repeat in their own zone's wall time. Test
+with fixture feeds as `file://` addresses, never the user's calendar. The sampler also refreshes
 `SystemState::music` while open. The calendar grid is computed locally. Media
 controls run `playerctl` on the action worker. The overhaul has phases still
 to come (graphs, weather, calendar sync, to-dos); the plan is in memory.

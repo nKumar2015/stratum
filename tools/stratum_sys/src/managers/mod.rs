@@ -7,6 +7,7 @@
 pub mod audio;
 pub mod battery;
 pub mod bluetooth;
+pub mod calendar;
 pub mod common;
 pub mod dashboard;
 pub mod gpu;

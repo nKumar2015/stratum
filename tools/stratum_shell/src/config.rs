@@ -127,6 +127,10 @@ impl Config {
         if weather.refresh_min == 0 || !(1..=48).contains(&weather.hours) || !(1..=16).contains(&weather.days) {
             return Err("dashboard.weather: refresh_min must be positive, hours 1-48 and days 1-16".into());
         }
+        let calendar = &dashboard.calendar;
+        if calendar.refresh_min == 0 || !(1..=60).contains(&calendar.agenda_days) {
+            return Err("dashboard.calendar: refresh_min must be positive and agenda_days 1-60".into());
+        }
         Ok(())
     }
 
@@ -510,6 +514,31 @@ pub struct DashboardConfig {
     /// The tabs, in order. The dashboard always opens on the first.
     pub tabs: Vec<DashboardTab>,
     pub weather: WeatherConfig,
+    pub calendar: CalendarConfig,
+}
+
+/// Calendar sync from ICS feeds. Fetched only while the dashboard is open,
+/// at most every `refresh_min`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CalendarConfig {
+    /// A file of ICS addresses, one per line (`#` starts a comment). The
+    /// addresses are secrets, so they live in this file (a sops secret, say)
+    /// rather than in the config, which Home Manager puts in the
+    /// world-readable Nix store. Unset, there is no sync.
+    pub urls_file: Option<String>,
+    pub refresh_min: u64,
+    pub week_start: WeekStart,
+    pub week_numbers: bool,
+    /// Days the agenda looks ahead.
+    pub agenda_days: u32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WeekStart {
+    Monday,
+    Sunday,
 }
 
 /// Where and how to forecast. Fetched only while the dashboard is open, at
@@ -573,6 +602,8 @@ pub enum PanelKind {
     Glance,
     /// Now, the next hours and the next days.
     Weather,
+    /// Events from the selected day (today unless one is picked) on.
+    Agenda,
     /// Load bars for CPU, GPUs, RAM and storage.
     Performance,
     /// The same, with history graphs, temperatures and network.

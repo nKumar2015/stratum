@@ -84,6 +84,7 @@ pub struct Settings {
     pub background: bool,
     /// Fetched while open, when due.
     pub weather: crate::config::WeatherConfig,
+    pub calendar: crate::config::CalendarConfig,
 }
 
 impl Settings {
@@ -93,6 +94,7 @@ impl Settings {
             history: config.history,
             background: config.background_history,
             weather: config.weather.clone(),
+            calendar: config.calendar.clone(),
         }
     }
 }
@@ -191,6 +193,7 @@ impl Feed {
             }
             if open {
                 state.weather_feed.refresh_if_due(state, &settings.weather);
+                state.calendar_feed.refresh_if_due(state, &settings.calendar);
                 state.music.set(stratum_sys::managers::music::status());
                 state.dashboard.set(Snapshot { sample: last.clone(), history: history.clone() });
                 state.notify();

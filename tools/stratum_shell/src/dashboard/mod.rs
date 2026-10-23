@@ -22,6 +22,8 @@
 //! to hide the daemon's round trip, and computing a month locally is
 //! instant. Closing resets the calendar to the current month, as QML did.
 
+mod agenda;
+pub mod calendar;
 pub mod feed;
 mod system;
 mod today;
@@ -34,7 +36,10 @@ use smithay_client_toolkit::seat::keyboard::Modifiers;
 use stratum_sys::managers::gpu::Load;
 use stratum_sys::managers::sysmon::{Sample, Usage};
 
-use crate::config::{DashboardConfig, PanelKind};
+use chrono::NaiveDate;
+use stratum_sys::managers::calendar::Occurrence;
+
+use crate::config::{DashboardConfig, PanelKind, WeekStart};
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::pages::devices::Marquee;
 use crate::ui::text_field;
@@ -51,43 +56,25 @@ pub enum DashboardAction {
     ToggleDnd,
 }
 
-/// One cell of the month grid.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Day {
-    pub day: u32,
-    pub in_month: bool,
-    pub today: bool,
+/// The 6×7 grid of dates for `year`/`month`, weeks starting on
+/// `week_start`, padded with the neighbouring months' days.
+pub fn month_grid(year: i32, month: u32, week_start: WeekStart) -> [NaiveDate; 42] {
+    let first = NaiveDate::from_ymd_opt(year, month, 1).unwrap_or_default();
+    let lead = match week_start {
+        WeekStart::Sunday => first.weekday().num_days_from_sunday(),
+        WeekStart::Monday => first.weekday().num_days_from_monday(),
+    };
+    let start = first - chrono::Days::new(lead.into());
+    std::array::from_fn(|i| start + chrono::Days::new(i as u64))
 }
 
-fn days_in(year: i32, month: u32) -> u32 {
-    let (ny, nm) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
-    chrono::NaiveDate::from_ymd_opt(ny, nm, 1)
-        .and_then(|d| d.pred_opt())
-        .map(|d| d.day())
-        .unwrap_or(30)
-}
-
-/// The 6×7 grid for `year`/`month`, Sunday first, padded with the
-/// neighbouring months' days.
-pub fn month_grid(year: i32, month: u32, today: (i32, u32, u32)) -> [Day; 42] {
-    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap_or_default();
-    let lead = first.weekday().num_days_from_sunday();
-    let count = days_in(year, month);
-    let (py, pm) = shift(year, month, -1);
-    let prev = days_in(py, pm);
-    let mut grid = [Day { day: 0, in_month: false, today: false }; 42];
-    for (i, cell) in grid.iter_mut().enumerate() {
-        let i = i as u32;
-        *cell = if i < lead {
-            Day { day: prev - lead + i + 1, in_month: false, today: false }
-        } else if i - lead < count {
-            let day = i - lead + 1;
-            Day { day, in_month: true, today: (year, month, day) == today }
-        } else {
-            Day { day: i - lead - count + 1, in_month: false, today: false }
-        };
+/// Weekday labels from `week_start`.
+fn weekday_labels(week_start: WeekStart) -> [&'static str; 7] {
+    let mut labels = WEEKDAYS;
+    if week_start == WeekStart::Monday {
+        labels.rotate_left(1);
     }
-    grid
+    labels
 }
 
 /// Move `delta` months from `year`/`month`.
@@ -165,9 +152,14 @@ fn split_down(body: Rect, weights: &[f32], gap: f32) -> Vec<Rect> {
         .collect()
 }
 
-fn today() -> (i32, u32, u32) {
-    let now = chrono::Local::now();
-    (now.year(), now.month(), now.day())
+fn today() -> NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
+/// A calendar's colour: feeds take the theme's accents in turn.
+fn calendar_color(ctx: &PaintCtx<'_>, calendar: usize) -> Color {
+    let accents = [ctx.theme.primary, ctx.theme.secondary, ctx.theme.tertiary, ctx.theme.success, ctx.theme.warning];
+    accents[calendar % accents.len()]
 }
 
 /// The bar colour for a load percentage, as `metricColor` chose it.
@@ -208,13 +200,20 @@ pub struct Dashboard {
     base: crate::ui::style::DashboardMetrics,
     metrics: crate::ui::style::DashboardMetrics,
     config: DashboardConfig,
+    /// The day the agenda starts from: today until a day is clicked.
+    selected: NaiveDate,
+    /// Expanded events by date range, for the calendar generation they came
+    /// from. Expanding a long-running series walks every instance, so it is
+    /// done once per range rather than on every paint.
+    occurrences: (u64, std::collections::HashMap<(NaiveDate, NaiveDate), Vec<Occurrence>>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Button {
     Month(i32),
-    Year(i32),
     Today,
+    /// A day in the month grid.
+    Day(NaiveDate),
     Previous,
     PlayPause,
     Next,
@@ -224,12 +223,14 @@ enum Button {
 
 impl Dashboard {
     pub fn new(metrics: &crate::ui::style::DashboardMetrics, config: &DashboardConfig) -> Self {
-        let (year, month, _) = today();
+        let today = today();
         Self {
             open: false,
             target: None,
-            year,
-            month,
+            year: today.year(),
+            month: today.month(),
+            selected: today,
+            occurrences: (0, std::collections::HashMap::new()),
             card: None,
             buttons: Vec::new(),
             error: None,
@@ -277,8 +278,8 @@ impl Dashboard {
         self.error = None;
     }
 
-    /// Close, and return to the first tab and the current month for next
-    /// time.
+    /// Close, and return to the first tab, the current month and today for
+    /// next time.
     pub fn close(&mut self) {
         self.open = false;
         self.target = None;
@@ -287,8 +288,22 @@ impl Dashboard {
         self.tab_hits.clear();
         self.tab = 0;
         self.title = Marquee::ticker();
-        let (year, month, _) = today();
-        (self.year, self.month) = (year, month);
+        let today = today();
+        (self.year, self.month, self.selected) = (today.year(), today.month(), today);
+    }
+
+    /// The events overlapping `from`..`to`, expanded once per calendar
+    /// generation.
+    fn occurrences(&mut self, ctx: &PaintCtx<'_>, from: NaiveDate, to: NaiveDate) -> Vec<Occurrence> {
+        let state = ctx.state.calendar.get();
+        if self.occurrences.0 != state.generation {
+            self.occurrences = (state.generation, std::collections::HashMap::new());
+        }
+        self.occurrences
+            .1
+            .entry((from, to))
+            .or_insert_with(|| stratum_sys::managers::calendar::occurrences(&state.events, from, to))
+            .clone()
     }
 
     /// Toggle with a tab named: closed, it opens there; open on another tab,
@@ -341,16 +356,18 @@ impl Dashboard {
     }
 
     fn navigate(&mut self, button: Button) -> DashboardAction {
-        (self.year, self.month) = match button {
-            Button::Month(delta) => shift(self.year, self.month, delta),
-            Button::Year(delta) => ((self.year + delta).max(1), self.month),
-            Button::Today => {
-                let (year, month, _) = today();
-                (year, month)
-            }
+        match button {
+            Button::Month(delta) => (self.year, self.month) = shift(self.year, self.month, delta),
+            Button::Today => self.pick(today()),
+            // A neighbouring month's day turns the page to it.
+            Button::Day(date) => self.pick(date),
             _ => return DashboardAction::None,
-        };
+        }
         DashboardAction::Redraw
+    }
+
+    fn pick(&mut self, date: NaiveDate) {
+        (self.year, self.month, self.selected) = (date.year(), date.month(), date);
     }
 
     /// A click on the dashboard's surface; `music` is `SystemState::music`.
@@ -439,6 +456,7 @@ impl Dashboard {
                 match panel_spec.kind {
                     PanelKind::Glance => self.paint_glance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Weather => self.paint_weather(ctx, list, panel),
+                    PanelKind::Agenda => self.paint_agenda(ctx, list, panel),
                     PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
                     PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
@@ -522,48 +540,82 @@ impl Dashboard {
         let mut y = Self::title(ctx, list, panel, &title, &m);
         let x = panel.x + m.inner;
         let w = panel.width - m.inner * 2.0;
-        let cell_w = w / 7.0;
-        for (i, label) in WEEKDAYS.iter().enumerate() {
-            let cell = Rect { x: x + cell_w * i as f32, y, width: cell_w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
+        let calendar = self.config.calendar.clone();
+        // An extra, leading column for week numbers.
+        let columns = if calendar.week_numbers { 8 } else { 7 };
+        let cell_w = w / columns as f32;
+        let first_col = columns - 7;
+        for (i, label) in weekday_labels(calendar.week_start).iter().enumerate() {
+            let cell = Rect { x: x + cell_w * (i + first_col) as f32, y, width: cell_w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
             ui::paint_text_centered(ctx, list, label, cell, m.caption, ctx.theme.text_muted);
         }
         y += m.line;
-        let grid = month_grid(self.year, self.month, today());
-        for (i, day) in grid.iter().enumerate() {
-            let (row, col) = (i / 7, i % 7);
+        // The rows share what the navigation row leaves.
+        let buttons_y = panel.y + panel.height - m.inner - m.button;
+        let cell_h = ((buttons_y - m.inner - y) / 6.0).max(m.cell);
+        let grid = month_grid(self.year, self.month, calendar.week_start);
+        let today = today();
+        let events = self.occurrences(ctx, grid[0], grid[41] + chrono::Days::new(1));
+        for (i, date) in grid.iter().enumerate() {
+            let (row, col) = (i / 7, i % 7 + first_col);
+            let row_y = y + cell_h * row as f32;
+            if first_col == 1 && i % 7 == 0 {
+                // ISO weeks start on Monday: number the row by its Monday.
+                let monday = grid[row * 7] + chrono::Days::new(u64::from(calendar.week_start == WeekStart::Sunday));
+                let label = Rect { x, y: row_y, width: cell_w, height: cell_h, radius: 0.0, color: Color::TRANSPARENT };
+                ui::paint_text_centered(ctx, list, &monday.iso_week().week().to_string(), label, m.caption, ctx.theme.text_muted);
+            }
             let cell = Rect {
                 x: x + cell_w * col as f32 + m.cell_gap * 0.5,
-                y: y + m.cell * row as f32 + m.cell_gap * 0.5,
+                y: row_y + m.cell_gap * 0.5,
                 width: cell_w - m.cell_gap,
-                height: m.cell - m.cell_gap,
+                height: cell_h - m.cell_gap,
                 radius: m.radius * 0.6,
                 color: Color::TRANSPARENT,
             };
+            let in_month = date.month() == self.month;
+            let selected = *date == self.selected;
             text_field::paint_frame(
                 list,
                 cell,
                 m.border,
-                if day.today { ctx.theme.border_active } else { ctx.theme.border_inactive },
-                if day.in_month { ctx.theme.bg_widget } else { ctx.theme.bg_main },
+                if selected { ctx.theme.border_active } else { ctx.theme.border_inactive },
+                if selected { ctx.theme.bg_hover } else if in_month { ctx.theme.bg_widget } else { ctx.theme.bg_main },
             );
-            let color = if day.today {
+            let color = if *date == today {
                 ctx.theme.primary
-            } else if day.in_month {
+            } else if in_month {
                 ctx.theme.text_main
             } else {
                 ctx.theme.text_muted
             };
-            ui::paint_text_centered(ctx, list, &day.day.to_string(), cell, m.text, color);
+            let number = Rect { height: cell.height - m.dot * 2.0, ..cell };
+            ui::paint_text_centered(ctx, list, &date.day().to_string(), number, m.text, color);
+            // A dot per calendar with something on this day, up to three.
+            let start = date.and_time(chrono::NaiveTime::MIN);
+            let end = start + chrono::Duration::days(1);
+            let mut calendars: Vec<usize> = events
+                .iter()
+                .filter(|o| o.start < end && (o.end > start || o.start == o.end && o.start >= start))
+                .map(|o| o.calendar)
+                .collect();
+            calendars.dedup();
+            calendars.truncate(3);
+            let dots_w = calendars.len() as f32 * m.dot * 2.0 - m.dot;
+            for (k, calendar) in calendars.into_iter().enumerate() {
+                list.push_rect(Rect {
+                    x: cell.x + (cell.width - dots_w) * 0.5 + k as f32 * m.dot * 2.0,
+                    y: cell.y + cell.height - m.dot * 2.0,
+                    width: m.dot,
+                    height: m.dot,
+                    radius: m.dot * 0.5,
+                    color: calendar_color(ctx, calendar),
+                });
+            }
+            self.buttons.push((cell, Button::Day(*date)));
         }
-        y += m.cell * 6.0 + m.inner;
-        let buttons = [
-            ("\u{f0141}\u{f0141}", Button::Year(-1)),
-            ("\u{f0141}", Button::Month(-1)),
-            ("Today", Button::Today),
-            ("\u{f0142}", Button::Month(1)),
-            ("\u{f0142}\u{f0142}", Button::Year(1)),
-        ];
-        self.button_row(ctx, list, Rect { x, y, width: w, height: m.button, radius: 0.0, color: Color::TRANSPARENT }, &buttons);
+        let buttons = [("\u{f0141}", Button::Month(-1)), ("Today", Button::Today), ("\u{f0142}", Button::Month(1))];
+        self.button_row(ctx, list, Rect { x, y: buttons_y, width: w, height: m.button, radius: 0.0, color: Color::TRANSPARENT }, &buttons);
     }
 
     fn paint_music(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, music: &Value) {
@@ -655,24 +707,36 @@ mod tests {
 
     #[test]
     fn october_2026_starts_on_a_thursday() {
-        let grid = month_grid(2026, 10, (2026, 10, 22));
+        let date = |m, d| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let grid = month_grid(2026, 10, WeekStart::Sunday);
         // Sunday-first: Su Mo Tu We are September's 27..30.
-        assert_eq!(grid[..4].iter().map(|d| d.day).collect::<Vec<_>>(), vec![27, 28, 29, 30]);
-        assert!(grid[..4].iter().all(|d| !d.in_month));
-        assert_eq!(grid[4], Day { day: 1, in_month: true, today: false });
-        let today: Vec<_> = grid.iter().filter(|d| d.today).collect();
-        assert_eq!(today.len(), 1);
-        assert_eq!(today[0].day, 22);
+        assert_eq!(grid[..5], [date(9, 27), date(9, 28), date(9, 29), date(9, 30), date(10, 1)]);
         // 4 + 31 = 35 cells of this month and before; then November.
-        assert_eq!(grid[35], Day { day: 1, in_month: false, today: false });
-        assert_eq!(grid[41].day, 7);
+        assert_eq!((grid[35], grid[41]), (date(11, 1), date(11, 7)));
+        // Monday-first, one fewer of September's days leads.
+        let monday = month_grid(2026, 10, WeekStart::Monday);
+        assert_eq!((monday[0], monday[3]), (date(9, 28), date(10, 1)));
+        assert_eq!(weekday_labels(WeekStart::Monday)[0], "Mo");
     }
 
     #[test]
     fn february_in_a_leap_year() {
-        let grid = month_grid(2028, 2, (2000, 1, 1));
-        assert_eq!(grid.iter().filter(|d| d.in_month).count(), 29);
-        assert!(grid.iter().all(|d| !d.today));
+        let grid = month_grid(2028, 2, WeekStart::Sunday);
+        assert_eq!(grid.iter().filter(|d| d.month() == 2).count(), 29);
+    }
+
+    #[test]
+    fn clicking_a_day_picks_it_and_turns_to_its_month() {
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let elsewhere = NaiveDate::from_ymd_opt(2027, 3, 14).unwrap();
+        d.navigate(Button::Day(elsewhere));
+        assert_eq!((d.selected, d.year, d.month), (elsewhere, 2027, 3));
+        d.navigate(Button::Today);
+        assert_eq!(d.selected, today());
+        d.navigate(Button::Day(elsewhere));
+        d.close();
+        assert_eq!(d.selected, today(), "closing returns to today");
     }
 
     #[test]
@@ -686,12 +750,13 @@ mod tests {
     #[test]
     fn opening_navigating_and_closing() {
         let mut d = dashboard();
-        d.toggle("HDMI-A-1", None);
+        let calendar = d.config.tab_index("calendar").expect("a Calendar tab ships");
+        d.toggle("HDMI-A-1", Some(calendar));
         assert_eq!(d.target(), Some("HDMI-A-1"));
         let now = (d.year, d.month);
         assert_eq!(d.key(Keysym::Right, Modifiers::default()), DashboardAction::Redraw);
         assert_eq!((d.year, d.month), shift(now.0, now.1, 1));
-        assert_eq!(d.navigate(Button::Year(-1)), DashboardAction::Redraw);
+        assert_eq!(d.navigate(Button::Month(-3)), DashboardAction::Redraw);
         d.navigate(Button::Today);
         assert_eq!((d.year, d.month), now);
         d.key(Keysym::Left, Modifiers::default());
