@@ -114,6 +114,8 @@ struct FeedState {
     opened: bool,
     /// `None` until the shell has read its config: the sampler waits.
     settings: Option<Settings>,
+    /// The player picked on the dashboard; `None` follows whichever plays.
+    player: Option<String>,
 }
 
 impl Feed {
@@ -128,6 +130,14 @@ impl Feed {
             state.open = open;
             state.opened |= open;
             self.wake.notify_all();
+        }
+    }
+
+    /// Called every frame with the dashboard's picked player.
+    pub fn set_player(&self, player: Option<&str>) {
+        let mut state = self.lock();
+        if state.player.as_deref() != player {
+            state.player = player.map(str::to_string);
         }
     }
 
@@ -171,6 +181,7 @@ impl Feed {
             };
             let opened = std::mem::take(&mut guard.opened);
             let open = guard.open;
+            let player = guard.player.clone();
             drop(guard);
 
             // Without background sampling, what was recorded before the
@@ -194,7 +205,7 @@ impl Feed {
             if open {
                 state.weather_feed.refresh_if_due(state, &settings.weather);
                 state.calendar_feed.refresh_if_due(state, &settings.calendar);
-                state.music.set(stratum_sys::managers::music::status());
+                state.music.set(stratum_sys::managers::music::status_for(player.as_deref()));
                 state.dashboard.set(Snapshot { sample: last.clone(), history: history.clone() });
                 state.notify();
             }

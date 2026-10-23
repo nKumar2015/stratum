@@ -94,6 +94,11 @@ pub enum SystemAction {
     Media { player: String, action: String },
     /// Seek an MPRIS player to an absolute position.
     MediaSeek { player: String, seconds: i64 },
+    /// Set a player's `shuffle` (`Toggle`, `On`, `Off`) or `loop` (`None`,
+    /// `Track`, `Playlist`).
+    MediaSet { player: String, property: &'static str, value: String },
+    /// Re-read now playing for this player (the dashboard's pick).
+    MusicRefresh(Option<String>),
     /// Switch the active theme by name.
     SetTheme(String),
     /// Left-click a tray item.
@@ -481,8 +486,26 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             if !status.success() {
                 return Err(format!("playerctl {action} failed for {player}"));
             }
-            // Show the new state without waiting for the next poll.
-            state.music.set(managers::music::status());
+            // Show the new state without waiting for the next poll, for the
+            // player acted on rather than whichever plays.
+            state.music.set(managers::music::status_for(Some(player)));
+            state.notify();
+            serde_json::json!({ "ok": true })
+        }
+        SystemAction::MediaSet { player, property, value } => {
+            let status = std::process::Command::new("playerctl")
+                .args(["-p", player.as_str(), property, value.as_str()])
+                .status()
+                .map_err(|err| format!("failed to run playerctl: {err}"))?;
+            if !status.success() {
+                return Err(format!("playerctl {property} {value} failed for {player}"));
+            }
+            state.music.set(managers::music::status_for(Some(player)));
+            state.notify();
+            serde_json::json!({ "ok": true })
+        }
+        SystemAction::MusicRefresh(player) => {
+            state.music.set(managers::music::status_for(player.as_deref()));
             state.notify();
             serde_json::json!({ "ok": true })
         }
@@ -496,7 +519,7 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             if !status.success() {
                 return Err(format!("playerctl seek failed for {player}"));
             }
-            state.music.set(managers::music::status());
+            state.music.set(managers::music::status_for(Some(player)));
             state.notify();
             serde_json::json!({ "ok": true })
         }

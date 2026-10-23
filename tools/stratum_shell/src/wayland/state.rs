@@ -903,6 +903,7 @@ impl App {
         let feed = &self.state.dashboard_feed;
         feed.configure(crate::dashboard::feed::Settings::from_config(&self.config.dashboard));
         feed.set_open(self.dashboard.is_open());
+        feed.set_player(self.dashboard.player());
         if self.dashboard.is_open() && (state_changed || self.dashboard.animating()) {
             self.mark_dashboard_dirty();
         }
@@ -2073,6 +2074,15 @@ impl App {
             DashboardAction::ToggleDnd => {
                 let next = !self.state.dnd.get();
                 self.state.dnd.set(next);
+            }
+            DashboardAction::Seek { player, seconds } => {
+                self.actions.push(crate::actions::SystemAction::MediaSeek { player, seconds });
+            }
+            DashboardAction::MediaSet { player, property, value } => {
+                self.actions.push(crate::actions::SystemAction::MediaSet { player, property, value });
+            }
+            DashboardAction::ChoosePlayer(player) => {
+                self.actions.push(crate::actions::SystemAction::MusicRefresh(Some(player)));
             }
         }
         self.mark_dashboard_dirty();

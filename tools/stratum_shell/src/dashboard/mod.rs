@@ -54,6 +54,12 @@ pub enum DashboardAction {
     Media { player: String, action: String },
     /// Flip do-not-disturb.
     ToggleDnd,
+    /// Seek the player to this second.
+    Seek { player: String, seconds: i64 },
+    /// Set the player's `shuffle` or `loop`.
+    MediaSet { player: String, property: &'static str, value: String },
+    /// Show this player from now on, and read it at once.
+    ChoosePlayer(String),
 }
 
 /// The 6×7 grid of dates for `year`/`month`, weeks starting on
@@ -156,6 +162,40 @@ fn today() -> NaiveDate {
     chrono::Local::now().date_naive()
 }
 
+/// The loop mode after `current`: off, the playlist, the track, off again.
+fn next_loop(current: &str) -> &'static str {
+    match current {
+        "Playlist" => "Track",
+        "Track" => "None",
+        _ => "Playlist",
+    }
+}
+
+/// The player after `current` in now playing's list, wrapping; `None`
+/// with fewer than two.
+fn next_player(music: &Value, current: &str) -> Option<String> {
+    let ids: Vec<&str> = music["players"].as_array()?.iter().filter_map(|p| p["id"].as_str()).collect();
+    if ids.len() < 2 {
+        return None;
+    }
+    let at = ids.iter().position(|id| *id == current).map_or(0, |i| i + 1);
+    Some(ids[at % ids.len()].to_string())
+}
+
+/// The shown player's name, numbered when another player has the same one
+/// (two mpv windows are "Mpv 1" and "Mpv 2").
+fn player_label(music: &Value) -> String {
+    let current = music["player"].as_str().unwrap_or_default();
+    let name = music["player_title"].as_str().unwrap_or_default().to_string();
+    let players = music["players"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let namesakes: Vec<&str> =
+        players.iter().filter(|p| p["name"].as_str() == Some(name.as_str())).filter_map(|p| p["id"].as_str()).collect();
+    match namesakes.iter().position(|id| *id == current) {
+        Some(i) if namesakes.len() > 1 => format!("{name} {}", i + 1),
+        _ => name,
+    }
+}
+
 /// A calendar's colour: feeds take the theme's accents in turn.
 fn calendar_color(ctx: &PaintCtx<'_>, calendar: usize) -> Color {
     let accents = [ctx.theme.primary, ctx.theme.secondary, ctx.theme.tertiary, ctx.theme.success, ctx.theme.warning];
@@ -202,6 +242,10 @@ pub struct Dashboard {
     config: DashboardConfig,
     /// The day the agenda starts from: today until a day is clicked.
     selected: NaiveDate,
+    /// The player picked with the player chip; `None` follows whichever
+    /// plays. Kept across openings: it falls back by itself when that player
+    /// goes away.
+    player: Option<String>,
     /// Expanded events by date range, for the calendar generation they came
     /// from. Expanding a long-running series walks every instance, so it is
     /// done once per range rather than on every paint.
@@ -219,6 +263,12 @@ enum Button {
     Next,
     /// The glance strip's do-not-disturb bell.
     Dnd,
+    /// The progress bar: where it is clicked is where to seek.
+    Seek,
+    Shuffle,
+    Loop,
+    /// The player chip, which steps to the next player.
+    NextPlayer,
 }
 
 impl Dashboard {
@@ -230,6 +280,7 @@ impl Dashboard {
             year: today.year(),
             month: today.month(),
             selected: today,
+            player: None,
             occurrences: (0, std::collections::HashMap::new()),
             card: None,
             buttons: Vec::new(),
@@ -259,6 +310,11 @@ impl Dashboard {
 
     pub fn is_open(&self) -> bool {
         self.open
+    }
+
+    /// The player picked on the dashboard, for the sampler.
+    pub fn player(&self) -> Option<&str> {
+        self.player.as_deref()
     }
 
     pub fn target(&self) -> Option<&str> {
@@ -378,25 +434,43 @@ impl Dashboard {
         if let Some(tab) = self.tab_hits.iter().find(|(r, _)| r.contains(point)).map(|(_, t)| *t) {
             return self.select_tab(tab);
         }
-        if let Some(button) = self.buttons.iter().find(|(r, _)| r.contains(point)).map(|(_, b)| *b) {
+        if let Some((rect, button)) = self.buttons.iter().find(|(r, _)| r.contains(point)).copied() {
+            let player = music["player"].as_str().unwrap_or("None").to_string();
+            let media = matches!(
+                button,
+                Button::Previous | Button::PlayPause | Button::Next | Button::Seek | Button::Shuffle | Button::Loop
+            );
+            if media && matches!(player.as_str(), "" | "None" | "N/A") {
+                self.error = Some("No active player".into());
+                return DashboardAction::Redraw;
+            }
+            self.error = None;
             return match button {
                 Button::Previous | Button::PlayPause | Button::Next => {
-                    let player = music["player"].as_str().unwrap_or("None");
-                    if matches!(player, "" | "None" | "N/A") {
-                        self.error = Some("No active player".into());
-                        return DashboardAction::Redraw;
-                    }
-                    self.error = None;
                     let action = match button {
                         Button::Previous => "previous",
                         Button::Next => "next",
                         _ => "play-pause",
                     };
-                    DashboardAction::Media {
-                        player: player.to_string(),
-                        action: action.to_string(),
-                    }
+                    DashboardAction::Media { player, action: action.to_string() }
                 }
+                Button::Seek => {
+                    let length = music["length_sec"].as_f64().unwrap_or(0.0);
+                    let fraction = ((point.x - rect.x) / rect.width).clamp(0.0, 1.0) as f64;
+                    DashboardAction::Seek { player, seconds: (fraction * length).round() as i64 }
+                }
+                Button::Shuffle => DashboardAction::MediaSet { player, property: "shuffle", value: "Toggle".into() },
+                Button::Loop => {
+                    let next = next_loop(music["loop"].as_str().unwrap_or_default());
+                    DashboardAction::MediaSet { player, property: "loop", value: next.into() }
+                }
+                Button::NextPlayer => match next_player(music, &player) {
+                    Some(next) => {
+                        self.player = Some(next.clone());
+                        DashboardAction::ChoosePlayer(next)
+                    }
+                    None => DashboardAction::None,
+                },
                 Button::Dnd => DashboardAction::ToggleDnd,
                 other => self.navigate(other),
             };
@@ -614,7 +688,7 @@ impl Dashboard {
             }
             self.buttons.push((cell, Button::Day(*date)));
         }
-        let buttons = [("\u{f0141}", Button::Month(-1)), ("Today", Button::Today), ("\u{f0142}", Button::Month(1))];
+        let buttons = [("\u{f0141}", Button::Month(-1), false), ("Today", Button::Today, false), ("\u{f0142}", Button::Month(1), false)];
         self.button_row(ctx, list, Rect { x, y: buttons_y, width: w, height: m.button, radius: 0.0, color: Color::TRANSPARENT }, &buttons);
     }
 
@@ -667,32 +741,63 @@ impl Dashboard {
             }
             y += m.line;
         }
-        // Progress.
+        // Progress, which a click seeks along. Its hit area is a whole line
+        // tall: the bar alone is too thin to aim at.
         let length = music["length_sec"].as_f64().unwrap_or(0.0);
         let position = music["position_sec"].as_f64().unwrap_or(0.0);
         let track = Rect { x, y: y + m.bar * 0.5, width: w, height: m.bar, radius: m.bar * 0.5, color: ctx.theme.bg_hover };
         list.push_rect(track);
         if length > 0.0 {
             list.push_rect(Rect { width: w * (position / length).clamp(0.0, 1.0) as f32, color: ctx.theme.primary, ..track });
+            let hit = Rect { y: track.y + track.height * 0.5 - m.line * 0.5, height: m.line, ..track };
+            self.buttons.push((hit, Button::Seek));
         }
         y += m.bar * 2.0 + m.inner;
         let playing = music["status"].as_str() == Some("Playing");
-        let buttons = [
-            ("\u{f04a}", Button::Previous),
-            (if playing { "\u{f04c}" } else { "\u{f04b}" }, Button::PlayPause),
-            ("\u{f04e}", Button::Next),
-        ];
+        // Shuffle and loop only for players that have them; lit while on.
+        let shuffle = music["shuffle"].as_str().unwrap_or_default();
+        let repeat = music["loop"].as_str().unwrap_or_default();
+        let mut buttons = Vec::new();
+        if !shuffle.is_empty() {
+            buttons.push(("\u{f049d}", Button::Shuffle, shuffle == "On"));
+        }
+        buttons.extend([
+            ("\u{f04a}", Button::Previous, false),
+            (if playing { "\u{f04c}" } else { "\u{f04b}" }, Button::PlayPause, false),
+            ("\u{f04e}", Button::Next, false),
+        ]);
+        if !repeat.is_empty() {
+            let glyph = if repeat == "Track" { "\u{f0458}" } else { "\u{f0456}" };
+            buttons.push((glyph, Button::Loop, repeat != "None"));
+        }
         self.button_row(ctx, list, Rect { x, y, width: w, height: m.button, radius: 0.0, color: Color::TRANSPARENT }, &buttons);
+
+        // With more than one player, the title row says which is shown, and
+        // a click steps to the next.
+        let players = music["players"].as_array().map_or(0, Vec::len);
+        if players > 1 {
+            let label = format!("{} \u{f0140}", player_label(music));
+            let weight = ctx.metrics.typography.weight_medium;
+            let style = crate::text::TextStyle { family: std::sync::Arc::from(ctx.theme.font.as_str()), size: m.caption, weight, color: ctx.theme.text_muted };
+            let lw = ctx.text.measure(&label, &style).0;
+            let chip = Rect { x: x + w - lw - m.inner, y: panel.y + m.inner, width: lw + m.inner, height: m.line * 1.2, radius: m.radius * 0.6, color: Color::TRANSPARENT };
+            text_field::paint_frame(list, chip, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
+            ui::paint_text_centered(ctx, list, &label, chip, m.caption, ctx.theme.text_muted);
+            self.buttons.push((chip, Button::NextPlayer));
+        }
     }
 
-    fn button_row(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, row: Rect, buttons: &[(&str, Button)]) {
+    /// Buttons side by side; a lit one carries the accent.
+    fn button_row(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, row: Rect, buttons: &[(&str, Button, bool)]) {
         let m = self.metrics.clone();
         let n = buttons.len() as f32;
         let bw = (row.width - m.cell_gap * (n - 1.0)) / n;
-        for (i, (label, button)) in buttons.iter().enumerate() {
+        for (i, (label, button, lit)) in buttons.iter().enumerate() {
             let rect = Rect { x: row.x + i as f32 * (bw + m.cell_gap), width: bw, radius: m.radius * 0.6, ..row };
-            text_field::paint_frame(list, rect, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
-            ui::paint_text_centered(ctx, list, label, rect, m.text, ctx.theme.text_main);
+            let border = if *lit { ctx.theme.border_active } else { ctx.theme.border_inactive };
+            text_field::paint_frame(list, rect, m.border, border, ctx.theme.bg_main);
+            let color = if *lit { ctx.theme.primary } else { ctx.theme.text_main };
+            ui::paint_text_centered(ctx, list, label, rect, m.text, color);
             self.buttons.push((rect, *button));
         }
     }
@@ -888,6 +993,50 @@ mod tests {
             DashboardAction::Media { player: "spotify".into(), action: "play-pause".into() }
         );
         assert_eq!(d.error, None);
+    }
+
+    #[test]
+    fn a_click_on_the_progress_bar_seeks_there() {
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let bar = Rect { x: 100.0, y: 0.0, width: 200.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
+        d.buttons = vec![(bar, Button::Seek)];
+        let music = json!({"player": "mpv", "length_sec": 240});
+        assert_eq!(d.on_click(Point::new(150.0, 5.0), &music), DashboardAction::Seek { player: "mpv".into(), seconds: 60 });
+    }
+
+    #[test]
+    fn loop_cycles_and_shuffle_toggles() {
+        assert_eq!((next_loop("None"), next_loop("Playlist"), next_loop("Track")), ("Playlist", "Track", "None"));
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
+        d.buttons = vec![(rect, Button::Shuffle)];
+        let music = json!({"player": "mpv", "shuffle": "Off"});
+        assert_eq!(
+            d.on_click(Point::new(5.0, 5.0), &music),
+            DashboardAction::MediaSet { player: "mpv".into(), property: "shuffle", value: "Toggle".into() }
+        );
+        assert_eq!(d.on_click(Point::new(5.0, 5.0), &json!({"player": "None"})), DashboardAction::Redraw, "no player");
+    }
+
+    #[test]
+    fn the_player_chip_steps_through_players_and_is_remembered() {
+        let music = json!({"player": "b", "players": [{"id": "a"}, {"id": "b"}, {"id": "c"}]});
+        assert_eq!(next_player(&music, "b").as_deref(), Some("c"));
+        assert_eq!(next_player(&music, "c").as_deref(), Some("a"), "wrapping");
+        assert_eq!(next_player(&json!({"players": [{"id": "a"}]}), "a"), None);
+        let twins = json!({"player": "mpv.2", "player_title": "Mpv", "players": [
+            {"id": "mpv.1", "name": "Mpv"}, {"id": "mpv.2", "name": "Mpv"}, {"id": "spotify", "name": "Spotify"}]});
+        assert_eq!(player_label(&twins), "Mpv 2");
+        assert_eq!(player_label(&json!({"player": "spotify", "player_title": "Spotify", "players": twins["players"]})), "Spotify");
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
+        d.buttons = vec![(rect, Button::NextPlayer)];
+        assert_eq!(d.on_click(Point::new(5.0, 5.0), &music), DashboardAction::ChoosePlayer("c".into()));
+        d.close();
+        assert_eq!(d.player(), Some("c"), "kept across openings");
     }
 
     #[test]

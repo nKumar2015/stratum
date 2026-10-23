@@ -71,44 +71,42 @@ fn normalize_player_title(raw: &str) -> String {
     }
 }
 
-fn get_active_player() -> (String, String) {
-    if !command_available("playerctl") {
-        return (String::new(), String::new());
-    }
+/// Separates fields in playerctl's `--format` output: titles may hold any
+/// printable character.
+const FIELD: char = '\u{1f}';
 
-    let players_raw = run_capture_optional("playerctl", &["-l"]);
+/// Every player and its status, in playerctl's order, from one run.
+fn players_with_status() -> Vec<(String, String)> {
+    let format = format!("{{{{playerInstance}}}}{FIELD}{{{{status}}}}");
+    let out = run_capture_optional("playerctl", &["-a", "metadata", "--format", &format]);
     let mut seen = HashSet::new();
-    let players = players_raw
-        .lines()
+    out.lines()
         .filter_map(|line| {
-            let name = line.trim();
-            if name.is_empty() {
-                return None;
-            }
-            if seen.insert(name.to_string()) {
-                Some(name.to_string())
-            } else {
-                None
-            }
+            let (name, status) = line.split_once(FIELD)?;
+            let name = name.trim();
+            (!name.is_empty() && seen.insert(name.to_string())).then(|| (name.to_string(), status.trim().to_string()))
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
 
-    for player in &players {
-        let status = run_capture_optional("playerctl", &["-p", player, "status"]);
-        if status == "Playing" {
-            return (player.clone(), status);
-        }
-    }
-
-    if let Some(player) = players.first() {
-        let status = run_capture_optional("playerctl", &["-p", player, "status"]);
-        return (player.clone(), status);
-    }
-
-    (String::new(), String::new())
+/// The player to show: `preferred` while it is there, else the first one
+/// playing, else the first.
+fn pick_player(players: &[(String, String)], preferred: Option<&str>) -> Option<(String, String)> {
+    preferred
+        .and_then(|p| players.iter().find(|(name, _)| name == p))
+        .or_else(|| players.iter().find(|(_, status)| status == "Playing"))
+        .or_else(|| players.first())
+        .cloned()
 }
 
 pub fn status() -> Value {
+    status_for(None)
+}
+
+/// [`status`] for `preferred` while it is there, with every player listed
+/// (`players`: `[{id, name}]`) and its `shuffle` (`On`, `Off`) and `loop`
+/// (`None`, `Track`, `Playlist`); both are empty for a player without them.
+pub fn status_for(preferred: Option<&str>) -> Value {
     if !command_available("playerctl") {
         return json!({
             "ok": true,
@@ -126,9 +124,10 @@ pub fn status() -> Value {
         });
     }
 
-    let (selected_player, selected_status) = get_active_player();
-
-    if selected_player.is_empty() {
+    let players = players_with_status();
+    let listed: Vec<Value> =
+        players.iter().map(|(id, _)| json!({ "id": id, "name": normalize_player_title(id) })).collect();
+    let Some((selected_player, selected_status)) = pick_player(&players, preferred.filter(|p| !p.is_empty())) else {
         return json!({
             "ok": true,
             "status": "Stopped",
@@ -142,72 +141,47 @@ pub fn status() -> Value {
             "length_sec": 0,
             "art_url": "",
             "player_title": "None",
+            "players": listed,
+            "shuffle": "",
+            "loop": "",
         });
-    }
-
-    let mut title = run_capture_optional(
-        "playerctl",
-        &["-p", &selected_player, "metadata", "xesam:title"],
-    );
-    let artist_raw = run_capture_optional(
-        "playerctl",
-        &["-p", &selected_player, "metadata", "xesam:artist"],
-    );
-    let mut artist = artist_raw
-        .lines()
-        .next()
-        .map(|v| v.trim().to_string())
-        .unwrap_or_default();
-    let mut album = run_capture_optional(
-        "playerctl",
-        &["-p", &selected_player, "metadata", "xesam:album"],
-    );
-    let art_url = run_capture_optional(
-        "playerctl",
-        &["-p", &selected_player, "metadata", "mpris:artUrl"],
-    );
-    let mut player_title = run_capture_optional(
-        "playerctl",
-        &[
-            "-p",
-            &selected_player,
-            "metadata",
-            "--format",
-            "{{mpris:identity}}",
-        ],
-    );
-
-    if title.is_empty() {
-        title = "Unknown Title".to_string();
-    }
-    if artist.is_empty() {
-        artist = "Unknown Artist".to_string();
-    }
-    if album.is_empty() {
-        album = "Unknown Album".to_string();
-    }
-    if player_title.is_empty() {
-        player_title = normalize_player_title(&selected_player);
-    }
-    if player_title.is_empty() {
-        player_title = selected_player.clone();
-    }
-
-    let pos_raw = run_capture_optional("playerctl", &["-p", &selected_player, "position"]);
-    let pos_seconds = parse_int_from_text(&pos_raw);
-
-    let len_raw = run_capture_optional(
-        "playerctl",
-        &["-p", &selected_player, "metadata", "mpris:length"],
-    );
-    let len_micro = parse_int_from_text(&len_raw);
-    let len_seconds = if len_micro > 0 {
-        len_micro / 1_000_000
-    } else {
-        0
     };
 
+    // Everything about the player in one run, not one per field.
+    let fields = [
+        "{{xesam:title}}",
+        "{{xesam:artist}}",
+        "{{xesam:album}}",
+        "{{mpris:artUrl}}",
+        "{{mpris:length}}",
+        "{{position}}",
+        "{{shuffle}}",
+        "{{loop}}",
+    ];
+    let format = fields.join(&FIELD.to_string());
+    let out = run_capture_optional("playerctl", &["-p", &selected_player, "metadata", "--format", &format]);
+    let values: Vec<&str> = out.split(FIELD).map(str::trim).collect();
+    let value = |i: usize| values.get(i).copied().unwrap_or_default();
+    let or = |text: &str, fallback: &str| if text.is_empty() { fallback.to_string() } else { text.to_string() };
+
+    let title = or(value(0), "Unknown Title");
+    let artist = or(value(1).lines().next().unwrap_or_default().trim(), "Unknown Artist");
+    let album = or(value(2), "Unknown Album");
+    let art_url = value(3).to_string();
+    let len_micro = parse_int_from_text(value(4));
+    let len_seconds = if len_micro > 0 { len_micro / 1_000_000 } else { 0 };
+    let pos_seconds = parse_int_from_text(value(5)) / 1_000_000;
+    let shuffle = match value(6) {
+        "true" => "On",
+        "false" => "Off",
+        _ => "",
+    };
+    let player_title = or(&normalize_player_title(&selected_player), &selected_player);
+
     json!({
+        "players": listed,
+        "shuffle": shuffle,
+        "loop": value(7),
         "ok": true,
         "status": selected_status,
         "player": selected_player,
@@ -221,4 +195,34 @@ pub fn status() -> Value {
         "art_url": art_url,
         "player_title": player_title,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn players() -> Vec<(String, String)> {
+        [("spotify", "Paused"), ("mpv.instance-1", "Playing"), ("firefox.instance-2", "Stopped")]
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn the_chosen_player_wins_while_it_is_there() {
+        let pick = |preferred| pick_player(&players(), preferred).map(|(name, _)| name);
+        assert_eq!(pick(Some("spotify")).as_deref(), Some("spotify"));
+        assert_eq!(pick(None).as_deref(), Some("mpv.instance-1"), "else the one playing");
+        assert_eq!(pick(Some("gone")).as_deref(), Some("mpv.instance-1"), "a player that left is not kept");
+        let idle = vec![("a".to_string(), "Paused".to_string())];
+        assert_eq!(pick_player(&idle, None).map(|(n, _)| n).as_deref(), Some("a"), "else the first");
+        assert_eq!(pick_player(&[], None), None);
+    }
+
+    #[test]
+    fn instance_names_read_as_player_names() {
+        assert_eq!(normalize_player_title("mpv.instance-ZxzCQqRK"), "Mpv");
+        assert_eq!(normalize_player_title("org.mpris.MediaPlayer2.spotify"), "Spotify");
+        assert_eq!(normalize_player_title("firefox.instance_2_45"), "Firefox");
+    }
 }
