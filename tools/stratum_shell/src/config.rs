@@ -417,27 +417,28 @@ pub struct BehaviorConfig {
     pub poll_ms: u64,
     /// Watch the config file and reload on change.
     pub reload_on_change: bool,
-    /// Own `org.kde.StatusNotifierWatcher` and display tray icons. Off by
-    /// default for the same reason as notifications: only one host can.
+    /// Own `org.kde.StatusNotifierWatcher` and display tray icons. Only one
+    /// host can; turn it off to run beside another shell that owns it.
     pub tray: bool,
-    /// Own `org.freedesktop.Notifications`. Off by default so the shell can run
-    /// beside another notification daemon (including Quickshell) during
-    /// migration; enable it once this shell is the only one.
+    /// Own `org.freedesktop.Notifications`. Only one server can; turn it off
+    /// to run beside another notification daemon.
     pub notifications: bool,
     /// Register as the session's polkit authentication agent and show the
-    /// password dialog. Off by default: polkit allows one agent per session,
-    /// and stratumd holds it while it runs.
+    /// password dialog. polkit allows one agent per session; turn it off
+    /// while another agent (stratumd, during the migration) holds it.
     pub polkit: bool,
 }
 
 impl Default for BehaviorConfig {
     fn default() -> Self {
+        // On: this shell is the session's only shell. They were off while it
+        // ran beside Quickshell, which owned all three.
         Self {
             poll_ms: 3000,
             reload_on_change: true,
-            tray: false,
-            notifications: false,
-            polkit: false,
+            tray: true,
+            notifications: true,
+            polkit: true,
         }
     }
 }

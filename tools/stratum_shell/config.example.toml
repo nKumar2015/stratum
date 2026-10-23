@@ -22,16 +22,15 @@ icon_font = "JetBrainsMonoNL Nerd Font"
 [behavior]
 poll_ms = 3000          # widgets without push updates
 reload_on_change = true # watch this file and redraw when it changes
-# Own org.freedesktop.Notifications. Leave false while another notification
-# daemon (for example Quickshell) is running, or the shell will log that the
-# name is taken. Enable it once this shell is the only one.
-notifications = false
+# Own org.freedesktop.Notifications. Set false to run beside another
+# notification daemon, or the shell will log that the name is taken.
+notifications = true
 # Own org.kde.StatusNotifierWatcher and show tray icons. Same caveat as
 # notifications: only one host can own it.
-tray = false
+tray = true
 # Be the session's polkit authentication agent and show the password dialog.
-# polkit allows one agent per session; leave false while stratumd runs.
-polkit = false
+# polkit allows one agent per session; set false while another agent runs.
+polkit = true
 
 # The lock screen (`stratum-cli lockscreen lock`).
 [lock]
@@ -41,7 +40,7 @@ avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
 # shell tries stratum-shell, quickshell, then login. It refuses to lock when
 # none exists, or when the service's modules cannot load in this binary (a
 # build linked against an older glibc than the system's), because such a lock
-# could never be undone. Refusals fall back to Quickshell while both run.
+# could never be undone; `stratum-cli lockscreen lock` then reports why.
 pam_service = "stratum-shell"
 
 [render]

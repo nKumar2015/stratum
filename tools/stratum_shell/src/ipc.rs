@@ -7,10 +7,9 @@
 //!
 //! Targets and function names are deliberately identical to the QML
 //! `IpcHandler`s in `globals/IpcModule.qml`, so `stratum-cli` and every existing
-//! keybind keep working. A function whose surface has not been ported yet
-//! answers `unsupported`; the CLI then falls back to Quickshell while both
-//! shells run side by side. That is what makes the migration gradual instead of
-//! a flag day.
+//! keybind keep working. A function the shell will not serve answers
+//! `unsupported`; during the migration that sent the call on to Quickshell,
+//! and now the CLI reports it.
 //!
 //! Protocol:
 //!
@@ -54,8 +53,8 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
 
 /// Whether this shell implements the function yet.
 ///
-/// Unported surfaces answer `unsupported` rather than pretending to succeed, so
-/// the CLI can route the call to Quickshell during the migration.
+/// An unserved function answers `unsupported` rather than pretending to
+/// succeed.
 pub fn is_supported(target: &str, function: &str) -> bool {
     match (target, function) {
         // The notification centre exists as a page of the settings window, so

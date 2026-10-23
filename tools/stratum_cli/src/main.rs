@@ -3,11 +3,10 @@ mod common;
 mod daemon_client;
 
 use std::env;
-use std::process::Command;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, theme, wifi};
-use common::{emit_help, emit_json, fail, is_help_flag, run_command_capture};
+use common::{emit_help, emit_json, fail, is_help_flag};
 
 const ROOT_COMMANDS: [&str; 17] = [
     "audio",
@@ -80,12 +79,6 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// Targets only the native shell serves. Quickshell has no equivalent, so a
-/// failed call is reported as is instead of being retried through `qs ipc`.
-fn native_only(target: &str) -> bool {
-    target == "settings"
-}
-
 /// Whether `function` is one of `functions`, ignoring the `[args]` hints that
 /// some entries carry for help output.
 fn has_function(functions: &[&str], function: &str) -> bool {
@@ -103,54 +96,6 @@ fn print_ipc_target_help(target: &str) {
     emit_help(target, &usage, functions);
 }
 
-fn newest_quickshell_pid() -> Result<i64, String> {
-    let list_raw = run_command_capture("qs", &["list", "--all", "--json"])?;
-    let parsed: Value =
-        serde_json::from_str(&list_raw).map_err(|e| format!("failed to parse qs list output: {}", e))?;
-    let list = parsed
-        .as_array()
-        .ok_or_else(|| "qs list returned non-array json".to_string())?;
-
-    let mut selected: Option<(String, i64)> = None;
-
-    for entry in list {
-        let Some(obj) = entry.as_object() else {
-            continue;
-        };
-
-        let pid = obj
-            .get("pid")
-            .and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
-            })
-            .unwrap_or(-1);
-
-        if pid <= 0 {
-            continue;
-        }
-
-        let launch_time = obj
-            .get("launch_time")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-
-        match &selected {
-            None => selected = Some((launch_time, pid)),
-            Some((best_launch, best_pid)) => {
-                if launch_time > *best_launch || (launch_time == *best_launch && pid > *best_pid) {
-                    selected = Some((launch_time, pid));
-                }
-            }
-        }
-    }
-
-    selected
-        .map(|(_, pid)| pid)
-        .ok_or_else(|| "no running quickshell instances found".to_string())
-}
-
 fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, String> {
     let Some(functions) = ipc_functions(target) else {
         return Err(format!("unknown target: {}", target));
@@ -165,19 +110,13 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
         ));
     }
 
-    // Prefer the native shell. It reports `unsupported` for surfaces that have
-    // not been ported yet, which is the cue to fall through to Quickshell while
-    // both shells run side by side. A missing socket means the native shell is
-    // not running at all.
+    // The native shell is the only shell. Quickshell used to take the calls it
+    // answered `unsupported`; now the only such call is a lock the shell will
+    // not take (no usable PAM service), which is reported as it is.
     match daemon_client::shell_call(target, function, args) {
         Ok(response) if response["ok"].as_bool() == Some(true) => {
             let pid = response["pid"].as_i64().unwrap_or(std::process::id() as i64);
             Ok(pid)
-        }
-        Ok(response)
-            if response["code"].as_str() == Some("unsupported") && !native_only(target) =>
-        {
-            run_ipc_call_quickshell(target, function, args)
         }
         Ok(response) => {
             let detail = response["error"]
@@ -185,54 +124,8 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
                 .unwrap_or("shell rejected the request");
             Err(format!("shell ipc failed: {}", detail))
         }
-        Err(err) if native_only(target) => Err(format!("native shell unavailable ({err})")),
-        Err(err) => {
-            // No native shell listening (missing socket, or a stale file left
-            // by a previous run). Fall back to Quickshell; if that is not
-            // running either, report the native error as the more useful one.
-            run_ipc_call_quickshell(target, function, args)
-                .map_err(|fallback| format!("native shell unavailable ({err}); {fallback}"))
-        }
+        Err(err) => Err(format!("native shell unavailable ({err})")),
     }
-}
-
-/// The pre-native path: ask the newest Quickshell instance.
-fn run_ipc_call_quickshell(target: &str, function: &str, args: &[String]) -> Result<i64, String> {
-    let pid = newest_quickshell_pid().map_err(|err| {
-        format!("no native shell IPC socket and no running Quickshell instance ({err})")
-    })?;
-    let pid_text = pid.to_string();
-
-    let mut command_args = vec![
-        "ipc".to_string(),
-        "--pid".to_string(),
-        pid_text,
-        "call".to_string(),
-        target.to_string(),
-        function.to_string(),
-    ];
-    command_args.extend(args.iter().cloned());
-
-    let output = Command::new("qs")
-        .args(&command_args)
-        .output()
-        .map_err(|e| format!("failed to run qs ipc: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit code {}", output.status)
-        };
-
-        return Err(format!("qs ipc failed: {}", detail));
-    }
-
-    Ok(pid)
 }
 
 fn dispatch_ipc_target(target: &str, args: &[String]) -> bool {

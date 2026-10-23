@@ -27,8 +27,8 @@ pub fn shell_socket_path() -> PathBuf {
 ///
 /// The shell answers with `{"ok":true,"pid":...}` on success or
 /// `{"ok":false,"code":"...","error":"..."}` on failure. A `code` of
-/// `unsupported` means the surface has not been ported yet, which is the signal
-/// to fall back to Quickshell during the migration.
+/// `unsupported` is a request the shell will not serve, such as a lock it
+/// cannot safely take.
 pub fn shell_call(target: &str, function: &str, args: &[String]) -> Result<Value, String> {
     let path = shell_socket_path();
     let stream = UnixStream::connect(&path).map_err(|err| format!("cannot connect: {err}"))?;
