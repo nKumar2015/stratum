@@ -531,7 +531,9 @@ pub struct CalendarConfig {
     /// A file of ICS addresses, one per line (`#` starts a comment). The
     /// addresses are secrets, so they live in this file (a sops secret, say)
     /// rather than in the config, which Home Manager puts in the
-    /// world-readable Nix store. Unset, there is no sync.
+    /// world-readable Nix store. A value with `://` is taken as the one
+    /// address itself, for a config that is a secret (a sops template).
+    /// Unset, there is no sync.
     pub urls_file: Option<String>,
     pub refresh_min: u64,
     pub week_start: WeekStart,

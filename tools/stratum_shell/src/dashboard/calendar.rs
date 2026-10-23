@@ -54,15 +54,17 @@ fn cache_dir() -> Option<PathBuf> {
     crate::theme_choice::state_dir().map(|d| d.join("stratum/calendar"))
 }
 
-/// Why `urls_file` could not be read. An address put there by mistake
-/// (sops' `placeholder` rather than the secret's `path`) is a secret, so it
-/// is named as a mistake and never shown.
-fn unreadable_list(list: &Path, err: &std::io::Error) -> String {
-    if list.to_string_lossy().contains("://") {
-        "urls_file is an address; set it to the path of a file of addresses (sops: the secret's .path)".into()
-    } else {
-        format!("cannot read {}: {err}", list.display())
+/// The addresses `urls_file` names: the file's, or, when the setting is
+/// itself an address (a config rendered by a sops template, outside the
+/// Nix store), that one. Errors name the file, never an address.
+fn read_urls(setting: &str) -> Result<Vec<String>, String> {
+    if setting.contains("://") {
+        return Ok(parse_urls(setting));
     }
+    let list = crate::lock::expand_home(setting).ok_or_else(|| "urls_file: no home directory to expand ~".to_string())?;
+    std::fs::read_to_string(&list)
+        .map(|text| parse_urls(&text))
+        .map_err(|err| format!("cannot read {}: {err}", list.display()))
 }
 
 /// The addresses in a URL list: one per line, `#` comments and blank lines
@@ -115,7 +117,7 @@ impl CalendarFeed {
     /// Called with each sample while the dashboard is open.
     pub fn refresh_if_due(&self, state: &Arc<SystemState>, config: &CalendarConfig) {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(list) = config.urls_file.as_deref().and_then(crate::lock::expand_home) else {
+        let Some(setting) = config.urls_file.as_deref().filter(|s| !s.trim().is_empty()) else {
             if state.calendar.get().configured {
                 state.calendar.set(CalendarState::default());
                 state.notify();
@@ -128,10 +130,10 @@ impl CalendarFeed {
         }
         // Read every time: a sops secret changes under a running shell. The
         // path is not secret; the contents are.
-        let urls = match std::fs::read_to_string(&list) {
-            Ok(text) => parse_urls(&text),
-            Err(err) => {
-                let error = Some(unreadable_list(&list, &err));
+        let urls = match read_urls(setting) {
+            Ok(urls) => urls,
+            Err(error) => {
+                let error = Some(error);
                 let mut current = state.calendar.get();
                 if current.error != error || !current.configured {
                     (current.error, current.configured) = (error, true);
@@ -247,11 +249,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_address_in_place_of_the_file_is_never_shown() {
-        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
-        let message = unreadable_list(Path::new("https://example.com/private-token/basic.ics"), &err);
-        assert!(!message.contains("private-token"), "{message}");
-        assert!(unreadable_list(Path::new("/run/secrets/cal"), &err).contains("/run/secrets/cal"));
+    fn urls_file_takes_a_file_or_an_address() {
+        let address = "https://example.com/private-token/basic.ics";
+        assert_eq!(read_urls(address).unwrap(), [address]);
+        let error = read_urls("/nonexistent/stratum-calendar-list").unwrap_err();
+        assert!(error.contains("/nonexistent/stratum-calendar-list"), "{error}");
     }
 
     #[test]

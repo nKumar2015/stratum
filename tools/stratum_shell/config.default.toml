@@ -101,6 +101,8 @@ days = 5                # daily forecast shown, today first
 #   programs.stratum.settings.dashboard.calendar.urls_file =
 #     config.sops.secrets.calendar_ics.path;
 # urls_file = "~/.config/sops-nix/secrets/calendar_ics"
+# An address in place of the path is used as is, for a config rendered as a
+# secret itself (sops.templates with config.sops.placeholder.<name>).
 refresh_min = 15
 week_start = "sunday"   # or "monday"
 week_numbers = true
