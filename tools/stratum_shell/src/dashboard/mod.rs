@@ -7,7 +7,11 @@
 //!   the card or Escape closes it.
 //! - Tabs come from `[[dashboard.tabs]]`: each is a row of panels sharing
 //!   its width by weight. The card is the same size on every tab. Keys 1–9
-//!   pick a tab, Ctrl+Tab and Ctrl+Shift+Tab step through them.
+//!   pick a tab, Ctrl+Tab and Ctrl+Shift+Tab step through them. Where their
+//!   panel shows: ← → turn the month (with Shift, the year), T returns to
+//!   today, Space plays/pauses (the timer where it shows), D toggles
+//!   do-not-disturb, and Tab moves between the Focus tab's fields. The tab
+//!   bar's far end lists the shown tab's keys.
 //! - Performance: CPU, each GPU (by name), RAM, and storage, each with a
 //!   bar coloured by load (≥ 90 % error, ≥ 75 % warning, else success).
 //! - Calendar: the month grid (Sunday first, neighbouring months' days
@@ -418,33 +422,46 @@ impl Dashboard {
         keysym: smithay_client_toolkit::seat::keyboard::Keysym,
         text: Option<&str>,
         modifiers: Modifiers,
+        music: &Value,
     ) -> DashboardAction {
         use smithay_client_toolkit::seat::keyboard::Keysym;
         if !self.open {
             return DashboardAction::None;
         }
         let count = self.config.tabs.len();
-        // A focused field types everything but Ctrl+Tab, which still
-        // switches tabs (and so leaves the field).
-        let tab_switch = modifiers.ctrl && matches!(keysym, Keysym::Tab | Keysym::ISO_Left_Tab);
-        if !tab_switch {
+        // A focused field types everything but Tab, which moves between
+        // fields (Ctrl+Tab between tabs, leaving the field).
+        // Shift+Tab is ISO_Left_Tab in most keymaps, but not in every one
+        // (wtype's sends Tab with Shift held).
+        let tab_key = matches!(keysym, Keysym::Tab | Keysym::ISO_Left_Tab);
+        let back = modifiers.shift || keysym == Keysym::ISO_Left_Tab;
+        if !tab_key {
             if let Some(action) = self.focus_key(keysym, text, modifiers.ctrl) {
                 return action;
             }
         }
+        let plain = !modifiers.ctrl && !modifiers.alt && !modifiers.logo;
         match keysym {
             Keysym::Escape => {
                 self.close();
                 DashboardAction::Redraw
             }
-            // Shift+Tab is ISO_Left_Tab in most keymaps, but not in every
-            // one (wtype's sends Tab with Shift held).
-            Keysym::Tab | Keysym::ISO_Left_Tab if modifiers.ctrl => {
-                let back = modifiers.shift || keysym == Keysym::ISO_Left_Tab;
-                self.select_tab((self.tab + if back { count - 1 } else { 1 }) % count)
+            _ if tab_key && modifiers.ctrl => self.select_tab((self.tab + if back { count - 1 } else { 1 }) % count),
+            _ if tab_key => self.next_field(back),
+            // A year with Shift, as «« »» do.
+            Keysym::Left if self.shows(PanelKind::Calendar) => {
+                self.navigate(Button::Month(if modifiers.shift { -12 } else { -1 }))
             }
-            Keysym::Left if self.shows(PanelKind::Calendar) => self.navigate(Button::Month(-1)),
-            Keysym::Right if self.shows(PanelKind::Calendar) => self.navigate(Button::Month(1)),
+            Keysym::Right if self.shows(PanelKind::Calendar) => {
+                self.navigate(Button::Month(if modifiers.shift { 12 } else { 1 }))
+            }
+            Keysym::t if plain && (self.shows(PanelKind::Calendar) || self.shows(PanelKind::Agenda)) => {
+                self.navigate(Button::Today)
+            }
+            Keysym::d if plain && self.shows(PanelKind::Glance) => DashboardAction::ToggleDnd,
+            // The timer where it shows, else the player.
+            Keysym::space if plain && self.shows(PanelKind::Timer) => self.press(Button::TimerToggle, 0.0, music),
+            Keysym::space if plain && self.shows(PanelKind::Music) => self.press(Button::PlayPause, 0.0, music),
             other => match other.raw() {
                 raw @ 0x31..=0x39 => self.select_tab((raw - 0x31) as usize),
                 _ => DashboardAction::None,
@@ -482,55 +499,59 @@ impl Dashboard {
         if !matches!(hit, Some((_, Button::TodoInput | Button::NoteArea))) {
             self.focus.field = None;
         }
-        if let Some(action) = hit.and_then(|(_, button)| self.focus_click(button)) {
-            return action;
-        }
         if let Some((rect, button)) = hit {
-            let player = music["player"].as_str().unwrap_or("None").to_string();
-            let media = matches!(
-                button,
-                Button::Previous | Button::PlayPause | Button::Next | Button::Seek | Button::Shuffle | Button::Loop
-            );
-            if media && matches!(player.as_str(), "" | "None" | "N/A") {
-                self.error = Some("No active player".into());
-                return DashboardAction::Redraw;
-            }
-            self.error = None;
-            return match button {
-                Button::Previous | Button::PlayPause | Button::Next => {
-                    let action = match button {
-                        Button::Previous => "previous",
-                        Button::Next => "next",
-                        _ => "play-pause",
-                    };
-                    DashboardAction::Media { player, action: action.to_string() }
-                }
-                Button::Seek => {
-                    let length = music["length_sec"].as_f64().unwrap_or(0.0);
-                    let fraction = ((point.x - rect.x) / rect.width).clamp(0.0, 1.0) as f64;
-                    DashboardAction::Seek { player, seconds: (fraction * length).round() as i64 }
-                }
-                Button::Shuffle => DashboardAction::MediaSet { player, property: "shuffle", value: "Toggle".into() },
-                Button::Loop => {
-                    let next = next_loop(music["loop"].as_str().unwrap_or_default());
-                    DashboardAction::MediaSet { player, property: "loop", value: next.into() }
-                }
-                Button::NextPlayer => match next_player(music, &player) {
-                    Some(next) => {
-                        self.player = Some(next.clone());
-                        DashboardAction::ChoosePlayer(next)
-                    }
-                    None => DashboardAction::None,
-                },
-                Button::Dnd => DashboardAction::ToggleDnd,
-                other => self.navigate(other),
-            };
+            // Where along the button: a seek goes there.
+            let fraction = ((point.x - rect.x) / rect.width).clamp(0.0, 1.0);
+            return self.press(button, fraction, music);
         }
         if self.card.is_some_and(|card| !card.contains(point)) {
             self.close();
             return DashboardAction::Redraw;
         }
         DashboardAction::None
+    }
+
+    /// A button, clicked `fraction` of the way across or pressed from the
+    /// keyboard.
+    fn press(&mut self, button: Button, fraction: f32, music: &Value) -> DashboardAction {
+        let player = music["player"].as_str().unwrap_or("None").to_string();
+        let media = matches!(
+            button,
+            Button::Previous | Button::PlayPause | Button::Next | Button::Seek | Button::Shuffle | Button::Loop
+        );
+        if media && matches!(player.as_str(), "" | "None" | "N/A") {
+            self.error = Some("No active player".into());
+            return DashboardAction::Redraw;
+        }
+        self.error = None;
+        match button {
+            Button::Previous | Button::PlayPause | Button::Next => {
+                let action = match button {
+                    Button::Previous => "previous",
+                    Button::Next => "next",
+                    _ => "play-pause",
+                };
+                DashboardAction::Media { player, action: action.to_string() }
+            }
+            Button::Seek => {
+                let length = music["length_sec"].as_f64().unwrap_or(0.0);
+                DashboardAction::Seek { player, seconds: (f64::from(fraction) * length).round() as i64 }
+            }
+            Button::Shuffle => DashboardAction::MediaSet { player, property: "shuffle", value: "Toggle".into() },
+            Button::Loop => {
+                let next = next_loop(music["loop"].as_str().unwrap_or_default());
+                DashboardAction::MediaSet { player, property: "loop", value: next.into() }
+            }
+            Button::NextPlayer => match next_player(music, &player) {
+                Some(next) => {
+                    self.player = Some(next.clone());
+                    DashboardAction::ChoosePlayer(next)
+                }
+                None => DashboardAction::None,
+            },
+            Button::Dnd => DashboardAction::ToggleDnd,
+            other => self.focus_click(other).unwrap_or_else(|| self.navigate(other)),
+        }
     }
 
     pub fn paint(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, surface: Rect, snapshot: &feed::Snapshot, music: &Value) {
@@ -621,6 +642,37 @@ impl Dashboard {
             self.tab_hits.push((pill, i));
             x += width + m.tab_gap;
         }
+        // The shown tab's keys, at the far end while there is room.
+        let hint = self.key_hint();
+        let regular = ctx.metrics.typography.weight_regular;
+        let hint_w = today::measure(ctx, &hint, m.caption, regular);
+        if x + m.inner + hint_w <= bar.x + bar.width {
+            ui::paint_text_vcentered(ctx, list, &hint, bar.x + bar.width - hint_w, bar, m.caption, regular, ctx.theme.text_muted);
+        }
+    }
+
+    /// The keys that do something on the shown tab, shortest first to last.
+    fn key_hint(&self) -> String {
+        let mut keys = Vec::new();
+        if self.shows(PanelKind::Calendar) {
+            keys.push("\u{2190}\u{2192} month \u{b7} \u{21e7} year");
+        }
+        if self.shows(PanelKind::Calendar) || self.shows(PanelKind::Agenda) {
+            keys.push("T today");
+        }
+        if self.shows(PanelKind::Todo) || self.shows(PanelKind::Note) {
+            keys.push("Tab write");
+        }
+        if self.shows(PanelKind::Timer) {
+            keys.push("Space timer");
+        } else if self.shows(PanelKind::Music) {
+            keys.push("Space play");
+        }
+        if self.shows(PanelKind::Glance) {
+            keys.push("D quiet");
+        }
+        keys.push("Esc close");
+        keys.join(" \u{b7} ")
     }
 
     fn title(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, text: &str, m: &crate::ui::style::DashboardMetrics) -> f32 {
@@ -914,14 +966,14 @@ mod tests {
         d.toggle("HDMI-A-1", Some(calendar));
         assert_eq!(d.target(), Some("HDMI-A-1"));
         let now = (d.year, d.month);
-        assert_eq!(d.key(Keysym::Right, None, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::Right, None, Modifiers::default(), &Value::Null), DashboardAction::Redraw);
         assert_eq!((d.year, d.month), shift(now.0, now.1, 1));
         assert_eq!(d.navigate(Button::Month(-3)), DashboardAction::Redraw);
         d.navigate(Button::Today);
         assert_eq!((d.year, d.month), now);
-        d.key(Keysym::Left, None, Modifiers::default());
+        d.key(Keysym::Left, None, Modifiers::default(), &Value::Null);
         // Closing returns to this month for next time.
-        assert_eq!(d.key(Keysym::Escape, None, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::Escape, None, Modifiers::default(), &Value::Null), DashboardAction::Redraw);
         assert!(!d.is_open());
         assert_eq!((d.year, d.month), now);
     }
@@ -963,19 +1015,19 @@ mod tests {
         let mut d = dashboard();
         let count = d.config.tabs.len();
         d.open_on("a", None);
-        assert_eq!(d.key(Keysym::_2, Some("2"), Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::_2, Some("2"), Modifiers::default(), &Value::Null), DashboardAction::Redraw);
         assert_eq!(d.tab, 1);
-        assert_eq!(d.key(Keysym::_9, Some("9"), Modifiers::default()), DashboardAction::None, "no ninth tab");
+        assert_eq!(d.key(Keysym::_9, Some("9"), Modifiers::default(), &Value::Null), DashboardAction::None, "no ninth tab");
         let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
         let ctrl_shift = Modifiers { shift: true, ..ctrl };
-        d.key(Keysym::Tab, None, ctrl);
+        d.key(Keysym::Tab, None, ctrl, &Value::Null);
         assert_eq!(d.tab, 2 % count);
-        d.key(Keysym::_1, Some("1"), Modifiers::default());
-        d.key(Keysym::ISO_Left_Tab, None, ctrl_shift);
+        d.key(Keysym::_1, Some("1"), Modifiers::default(), &Value::Null);
+        d.key(Keysym::ISO_Left_Tab, None, ctrl_shift, &Value::Null);
         assert_eq!(d.tab, count - 1, "back from the first wraps to the last");
-        d.key(Keysym::Tab, None, ctrl_shift);
+        d.key(Keysym::Tab, None, ctrl_shift, &Value::Null);
         assert_eq!(d.tab, count - 2, "Shift+Tab may arrive as Tab with Shift held");
-        assert_eq!(d.key(Keysym::Tab, None, Modifiers::default()), DashboardAction::None, "Tab alone is not a tab switch");
+        assert_eq!(d.key(Keysym::Tab, None, Modifiers::default(), &Value::Null), DashboardAction::None, "Tab alone is not a tab switch");
     }
 
     #[test]
@@ -984,7 +1036,7 @@ mod tests {
         let system = d.config.tab_index("system").unwrap();
         d.open_on("a", Some(system));
         let now = (d.year, d.month);
-        assert_eq!(d.key(Keysym::Right, None, Modifiers::default()), DashboardAction::None);
+        assert_eq!(d.key(Keysym::Right, None, Modifiers::default(), &Value::Null), DashboardAction::None);
         assert_eq!((d.year, d.month), now);
     }
 
@@ -996,11 +1048,11 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
         d.buttons = vec![(rect, Button::NoteArea)];
         d.on_click(Point::new(5.0, 5.0), &Value::Null);
-        assert_eq!(d.key(Keysym::_1, Some("1"), Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::_1, Some("1"), Modifiers::default(), &Value::Null), DashboardAction::Redraw);
         assert_eq!((d.tab, d.focus.note.text()), (focus, "1"), "typed, not a tab switch");
-        d.key(Keysym::Escape, None, Modifiers::default());
+        d.key(Keysym::Escape, None, Modifiers::default(), &Value::Null);
         assert!(d.is_open(), "the first Escape leaves the field");
-        d.key(Keysym::Escape, None, Modifiers::default());
+        d.key(Keysym::Escape, None, Modifiers::default(), &Value::Null);
         assert!(!d.is_open());
     }
 
@@ -1011,8 +1063,51 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
         d.buttons = vec![(rect, Button::TodoInput)];
         d.on_click(Point::new(5.0, 5.0), &Value::Null);
-        d.key(Keysym::Tab, None, Modifiers { ctrl: true, ..Modifiers::default() });
+        d.key(Keysym::Tab, None, Modifiers { ctrl: true, ..Modifiers::default() }, &Value::Null);
         assert_eq!((d.tab, d.focus.field), (1, None));
+    }
+
+    #[test]
+    fn tab_moves_between_the_focus_fields() {
+        let mut d = dashboard();
+        let focus = d.config.tab_index("focus").unwrap();
+        d.open_on("a", Some(focus));
+        let none = Modifiers::default();
+        d.key(Keysym::Tab, None, none, &Value::Null);
+        assert_eq!(d.focus.field, Some(focus::Field::Todo));
+        d.key(Keysym::Tab, None, none, &Value::Null);
+        assert_eq!(d.focus.field, Some(focus::Field::Note), "Tab leaves a field");
+        d.key(Keysym::Tab, None, Modifiers { shift: true, ..none }, &Value::Null);
+        assert_eq!(d.focus.field, Some(focus::Field::Todo), "Shift+Tab goes back");
+        let system = d.config.tab_index("system").unwrap();
+        d.select_tab(system);
+        assert_eq!(d.key(Keysym::Tab, None, none, &Value::Null), DashboardAction::None, "no fields there");
+    }
+
+    #[test]
+    fn letter_keys_act_where_their_panel_shows() {
+        let mut d = dashboard();
+        let none = Modifiers::default();
+        d.open_on("a", None);
+        assert_eq!(d.key(Keysym::d, Some("d"), none, &Value::Null), DashboardAction::ToggleDnd, "the glance strip");
+        let spotify = json!({"player": "spotify"});
+        assert_eq!(
+            d.key(Keysym::space, Some(" "), none, &spotify),
+            DashboardAction::Media { player: "spotify".into(), action: "play-pause".into() }
+        );
+        let calendar = d.config.tab_index("calendar").unwrap();
+        d.select_tab(calendar);
+        assert_eq!(d.key(Keysym::d, Some("d"), none, &Value::Null), DashboardAction::None, "no glance strip");
+        let now = (d.year, d.month);
+        d.key(Keysym::Right, None, Modifiers { shift: true, ..none }, &Value::Null);
+        assert_eq!((d.year, d.month), (now.0 + 1, now.1), "Shift moves a year");
+        d.key(Keysym::t, Some("t"), none, &Value::Null);
+        assert_eq!((d.year, d.month, d.selected), (now.0, now.1, today()));
+        let focus = d.config.tab_index("focus").unwrap();
+        d.select_tab(focus);
+        d.focus.timer.start_stopwatch(std::time::Instant::now());
+        d.key(Keysym::space, Some(" "), none, &Value::Null);
+        assert!(!d.focus.timer.running(), "Space pauses the timer on its tab");
     }
 
     #[test]

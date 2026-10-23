@@ -3905,7 +3905,8 @@ impl KeyboardHandler for App {
         }
 
         if self.dashboard.is_open() {
-            let action = self.dashboard.key(event.keysym, event.utf8.as_deref(), self.modifiers);
+            let music = self.state.music.get();
+            let action = self.dashboard.key(event.keysym, event.utf8.as_deref(), self.modifiers, &music);
             self.apply_dashboard_action(action);
             return;
         }

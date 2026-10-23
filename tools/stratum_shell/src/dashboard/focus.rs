@@ -267,6 +267,30 @@ impl Dashboard {
         self.focus.key(keysym, text, ctrl)
     }
 
+    /// Tab: the shown fields in turn (the to-do input, then the note),
+    /// wrapping; Shift+Tab backwards.
+    pub(super) fn next_field(&mut self, back: bool) -> DashboardAction {
+        let mut fields = Vec::new();
+        if self.shows(crate::config::PanelKind::Todo) {
+            fields.push(Field::Todo);
+        }
+        if self.shows(crate::config::PanelKind::Note) {
+            fields.push(Field::Note);
+        }
+        if fields.is_empty() {
+            return DashboardAction::None;
+        }
+        let n = fields.len();
+        let next = match self.focus.field.and_then(|f| fields.iter().position(|&g| g == f)) {
+            Some(i) if back => (i + n - 1) % n,
+            Some(i) => (i + 1) % n,
+            None if back => n - 1,
+            None => 0,
+        };
+        self.focus.field = Some(fields[next]);
+        DashboardAction::Redraw
+    }
+
     /// Clicks on the Focus tab's buttons; `None` for other buttons.
     pub(super) fn focus_click(&mut self, button: Button) -> Option<DashboardAction> {
         let config = self.config.timer.clone();
