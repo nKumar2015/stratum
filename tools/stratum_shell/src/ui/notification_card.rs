@@ -205,13 +205,18 @@ pub fn paint(
     let x = card.x + m.padding;
     let inner = card.width - m.padding * 2.0;
 
+    // Square on the stripe's side and rounded on the other, as QML's toast
+    // was: a rect has one radius, so the frame reaches `radius` past the
+    // left edge and is clipped there.
+    list.push_clip(card);
     ui::paint_frame(
         list,
-        card,
+        Rect { x: card.x - card.radius, width: card.width + card.radius, ..card },
         theme.surface_high.with_alpha(0.98 * a),
         if state.hovered { theme.border_active } else { theme.outline }.with_alpha(a),
         ctx.appearance.framed_border,
     );
+    list.pop_clip();
     // Urgency stripe.
     list.push_rect(Rect {
         width: ctx.metrics.toasts.stripe_width,
