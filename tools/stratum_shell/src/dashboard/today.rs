@@ -121,14 +121,10 @@ impl Dashboard {
         let date = now.format("%A, %-d %B").to_string();
         ui::paint_text_vcentered(ctx, list, &date, x, row, m.text, medium, ctx.theme.text_main);
         x += measure(ctx, &date, m.text, medium);
-        if let Some(up) = sample.and_then(|s| s.uptime) {
-            let up = format!("  \u{b7}  {}", uptime(up));
-            ui::paint_text_vcentered(ctx, list, &up, x, row, m.caption, regular, ctx.theme.text_muted);
-        }
 
         // Right, laid out from the edge inwards: do-not-disturb, devices,
         // the battery, the next event, then CPU and RAM. Short of room, the
-        // leftmost go first.
+        // uptime goes first, then the leftmost chips.
         let dnd = ctx.state.dnd.get();
         let mut chips: Vec<(&str, String, Color)> = Vec::new();
         if let Some(s) = sample {
@@ -172,6 +168,13 @@ impl Dashboard {
             ui::paint_text_vcentered(ctx, list, glyph, start, row, m.text, regular, color);
             ui::paint_text_vcentered(ctx, list, &text, start + glyph_w + m.inner * 0.4, row, m.text, medium, ctx.theme.text_main);
             right = start;
+        }
+        // Uptime last, in what the chips leave: it matters least.
+        if let Some(up) = sample.and_then(|s| s.uptime) {
+            let up = format!("  \u{b7}  {}", uptime(up));
+            if x + measure(ctx, &up, m.caption, regular) + m.inner <= right {
+                ui::paint_text_vcentered(ctx, list, &up, x, row, m.caption, regular, ctx.theme.text_muted);
+            }
         }
     }
 
