@@ -19,8 +19,11 @@ implementation with its own renderer, layout, and theming.
 - **The motivation is footprint.** Binary size, memory, CPU, and startup time must
   beat Quickshell. Measured baselines: Quickshell's closure is ~1.1 GiB,
   qtdeclarative alone ~692 MiB. Our stripped release binary was ~7.1 MB early
-  on, grew to ~16 MB as the system managers were embedded, and is ~13.1 MB
-  as of 2026-10-22. Before adding a dependency, check its default features:
+  on, grew to ~16 MB as the system managers were embedded, and was ~13.1 MB
+  on 2026-10-22; after the dashboard overhaul it is 14.30 MB (2026-10-23;
+  the dashboard module is ~171 KB of that, jiff and chrono ~90 KB, and
+  naga, zbus and wgpu remain the largest pieces).
+  Before adding a dependency, check its default features:
   resvg's defaults alone cost 1.9 MB. To find what is big, relink with
   `CARGO_PROFILE_RELEASE_STRIP=false` and sum `nm -S -C` sizes by crate.
 - **Feature parity, not pixel parity.** The QML shell's behaviour and data must be
@@ -125,9 +128,10 @@ memory and runs while the dashboard is closed: the loop's timeout follows
 `Dashboard::timer_wake`, and its end is posted over D-Bus
 (`SystemAction::Notify`) so DND and the toasts treat it like any other
 notification. `stratum-cli todo add …` and `timer start|pause|toggle|stop`
-drive it. Keys go to a focused field first; Ctrl+Tab still switches tabs.
-There is no key repeat anywhere in the shell, the note included. Phase 7
-(polish) is still to come; the plan is in memory.
+drive it. Keys go to a focused field first; Tab moves between fields and
+Ctrl+Tab still switches tabs. Other keys act only where their panel shows,
+and `Dashboard::key_hint` lists them in the tab bar: keep it in step when
+adding one. There is no key repeat anywhere in the shell, the note included.
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's
