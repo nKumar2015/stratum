@@ -1,17 +1,9 @@
 {
-  description = "My Quickshell Config";
+  description = "Stratum: a native Wayland shell for Hyprland";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
-
-    # Replace this with the actual URL/path to the stratum repository
-    stratum = {
-      url = "github:nkumar2015/stratum";
-      flake = false;
-    };
-
-    quickshell.url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
   };
 
   outputs = {
@@ -19,7 +11,7 @@
     nixpkgs,
     rust-overlay,
     ...
-  } @ inputs: let
+  }: let
     systems = [
       "x86_64-linux"
       "aarch64-linux"
@@ -98,38 +90,35 @@
         ];
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+
+        # wgpu and xkbcommon dlopen the Vulkan loader, libwayland and
+        # libxkbcommon, which linking alone does not put on the runpath; the
+        # shell then exits with "no suitable Vulkan adapter". A runpath, not a
+        # wrapper script: a wrapper renames the process, and
+        # `pkill -x stratum-shell` stops matching it.
+        postFixup = ''
+          patchelf --add-rpath ${pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon])} \
+            $out/bin/stratum-shell
+        '';
       };
 
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-cli;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-shell;
     });
 
-    # Export the module for use in other system configurations
-    homeManagerModules.default = {
-      config,
-      pkgs,
-      lib,
-      ...
-    }: let
-      hostSystem = pkgs.stdenv.hostPlatform.system;
-    in {
-      imports = [./module.nix];
-      # This passes the inputs (like stratum) down into the module
-      _module.args.inputs = inputs;
+    # Home Manager: the shell, its CLI, and a user unit that runs the shell
+    # with the graphical session. See module.nix.
+    homeManagerModules.default = import ./module.nix self;
 
-      # Ensure CLI and daemon are present on PATH when using the exported HM module.
-      home.packages = [
-        self.packages.${hostSystem}.stratum-cli
-        self.packages.${hostSystem}.stratumd
-      ];
-    };
-
-    # Optional NixOS module that installs the CLI system-wide.
+    # NixOS: what needs the system. The lock screen and polkit dialog check
+    # passwords through PAM's `stratum-shell` service; without it the shell
+    # falls back to `login`, or refuses to lock.
     nixosModules.default = {pkgs, ...}: let
       hostSystem = pkgs.stdenv.hostPlatform.system;
     in {
+      security.pam.services.stratum-shell = {};
       environment.systemPackages = [
+        self.packages.${hostSystem}.stratum-shell
         self.packages.${hostSystem}.stratum-cli
-        self.packages.${hostSystem}.stratumd
       ];
     };
 
