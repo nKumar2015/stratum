@@ -52,6 +52,12 @@ pam_service = "stratum-shell"
 # VK_LOADER_DRIVERS_SELECT in the environment overrides this.
 gpu = "auto"
 
+[control_center]        # the settings window
+width = 520             # logical px
+animation_ms = 160      # 0 opens instantly
+default_page = "overview"  # when opened without a page
+invert_scroll = false   # true: turning the wheel down scrolls the page up
+
 [screenshot]            # the viewer's annotation pen
 # Drawn into the image, so they are fixed colours, not theme colours. The
 # first is selected when the viewer opens.

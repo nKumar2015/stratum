@@ -394,6 +394,8 @@ pub struct ControlCenterConfig {
     pub animation_ms: u32,
     /// Which page to show when opened by something without a page of its own.
     pub default_page: String,
+    /// Reverse the wheel: turning it down scrolls the page up.
+    pub invert_scroll: bool,
 }
 
 impl Default for ControlCenterConfig {
@@ -402,6 +404,7 @@ impl Default for ControlCenterConfig {
             width: 520,
             animation_ms: 160,
             default_page: "overview".into(),
+            invert_scroll: false,
         }
     }
 }

@@ -144,10 +144,13 @@ impl ControlCenter {
         self.pages.key(self.page, keysym, text, ctrl);
     }
 
-    /// Wheel scrolling, which moves the whole page. Positive deltas scroll up.
+    /// Wheel scrolling, which moves the whole page. A positive delta is the
+    /// wheel turned toward the user, which moves the page down unless
+    /// `control_center.invert_scroll` is set.
     pub fn on_scroll(&mut self, _point: crate::render::display_list::Point, delta: f32) {
         let step = self.config.metrics.window.scroll_step;
-        self.scroll = scroll_by(self.scroll, -delta.signum() * step, self.max_scroll);
+        let direction = if self.config.control_center.invert_scroll { -1.0 } else { 1.0 };
+        self.scroll = scroll_by(self.scroll, direction * delta.signum() * step, self.max_scroll);
     }
 
     /// Paint into a normal window: no scrim and no slide, just the panel
@@ -420,6 +423,24 @@ mod tests {
         assert_eq!(scroll_by(0.0, -48.0, 100.0), 0.0);
         assert_eq!(scroll_by(80.0, 48.0, 100.0), 100.0);
         assert_eq!(scroll_by(10.0, 48.0, 0.0), 0.0, "a page that fits never scrolls");
+    }
+
+    #[test]
+    fn the_wheel_down_moves_the_page_down_unless_inverted() {
+        let point = crate::render::display_list::Point::new(0.0, 0.0);
+        let mut center = ControlCenter::new(Arc::new(Config::default()));
+        center.max_scroll = 200.0;
+        // 120 is one notch toward the user.
+        center.on_scroll(point, 120.0);
+        assert!(center.scroll > 0.0, "wheel down scrolls the page down");
+
+        let mut config = Config::default();
+        config.control_center.invert_scroll = true;
+        let mut center = ControlCenter::new(Arc::new(config));
+        center.max_scroll = 200.0;
+        center.scroll = 100.0;
+        center.on_scroll(point, 120.0);
+        assert!(center.scroll < 100.0, "inverted, wheel down scrolls the page up");
     }
 
     #[test]
