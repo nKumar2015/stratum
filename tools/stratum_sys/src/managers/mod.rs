@@ -17,3 +17,4 @@ pub mod polkit;
 pub mod sysmon;
 pub mod weather;
 pub mod wifi;
+mod windows_zones;

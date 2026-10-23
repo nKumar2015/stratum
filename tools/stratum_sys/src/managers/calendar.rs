@@ -10,12 +10,15 @@
 //! series shows its first instance or a superset.
 //!
 //! Times are converted to the system's zone. A `TZID` is looked up in the
-//! system's zoneinfo; one it does not know (Outlook's Windows names) is read
-//! as local time. Series repeat in their own zone's wall time, so a weekly
-//! 9:00 meeting stays at 9:00 across daylight saving changes.
+//! system's zoneinfo, then as a Windows name (Outlook's `Eastern Standard
+//! Time`, through CLDR's table), then in the feed's own `VTIMEZONE`
+//! definitions (Outlook's `Customized Time Zone`); only a zone found nowhere
+//! is read as local time. Series repeat in their own zone's wall time, so a
+//! weekly 9:00 meeting stays at 9:00 across daylight saving changes.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{Datelike, Days, Months, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
@@ -97,6 +100,8 @@ pub struct Event {
     pub cancelled: bool,
     /// Which feed it came from, by position.
     pub calendar: usize,
+    /// Its feed's zone definitions, shared by every event of the feed.
+    pub zones: Arc<ZoneDefs>,
 }
 
 /// One instance of an event, in local time.
@@ -346,20 +351,96 @@ fn parse_rule(value: &str, tzid: Option<&str>) -> Option<Rule> {
     Some(rule)
 }
 
-/// Every `VEVENT` in an ICS document, tagged with `calendar`.
+/// A feed's own zone definitions (`VTIMEZONE`), by `TZID`.
+pub type ZoneDefs = HashMap<String, ZoneRules>;
+
+/// One `VTIMEZONE`: its standard and daylight observances.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneRules {
+    observances: Vec<Observance>,
+}
+
+/// A `STANDARD` or `DAYLIGHT` part: from `start` (wall time under the
+/// offset before it), and on each recurrence of `rule`, the offset becomes
+/// `offset_to`.
+#[derive(Clone, Debug, PartialEq)]
+struct Observance {
+    start: NaiveDateTime,
+    offset_from: i32,
+    offset_to: i32,
+    rule: Option<Rule>,
+}
+
+impl ZoneRules {
+    /// The UTC offset in seconds in force at wall time `wall`: that of the
+    /// observance whose latest onset is the latest of all.
+    fn offset_at(&self, wall: NaiveDateTime) -> Option<i32> {
+        let onsets = self.observances.iter().filter_map(|o| {
+            let last = match &o.rule {
+                Some(rule) => {
+                    // Walking every year from 1601 would be slow; a yearly
+                    // rule without COUNT can start the year before instead.
+                    let shifted = (rule.freq == Freq::Yearly && rule.count.is_none())
+                        .then(|| o.start.with_year(wall.year() - 1))
+                        .flatten()
+                        .filter(|s| *s > o.start)
+                        .unwrap_or(o.start);
+                    let until = rule.until.as_ref().map(When::wall);
+                    expand(rule, shifted, wall, until).last().copied()
+                }
+                None => (o.start <= wall).then_some(o.start),
+            };
+            last.map(|onset| (onset, o.offset_to))
+        });
+        onsets
+            .max_by_key(|(onset, _)| *onset)
+            .map(|(_, offset)| offset)
+            // Before every onset: the earliest observance's previous offset.
+            .or_else(|| self.observances.iter().min_by_key(|o| o.start).map(|o| o.offset_from))
+    }
+}
+
+/// `+0100`, `-0500` or `+053000` in seconds.
+fn parse_offset(value: &str) -> Option<i32> {
+    let value = value.trim();
+    let sign = match value.get(..1)? {
+        "+" => 1,
+        "-" => -1,
+        _ => return None,
+    };
+    let digits = value.get(1..)?;
+    let field = |range: std::ops::Range<usize>| digits.get(range).map_or(Some(0), |d| d.parse::<i32>().ok());
+    let (h, m, s) = (field(0..2)?, field(2..4)?, field(4..6)?);
+    (digits.len() >= 4).then_some(sign * (h * 3600 + m * 60 + s))
+}
+
+fn build_observance(props: &[Property]) -> Option<Observance> {
+    let get = |name: &str| props.iter().find(|p| p.name == name);
+    Some(Observance {
+        start: parse_datetime(get("DTSTART")?.value.trim())?,
+        offset_from: parse_offset(&get("TZOFFSETFROM")?.value)?,
+        offset_to: parse_offset(&get("TZOFFSETTO")?.value)?,
+        rule: get("RRULE").and_then(|p| parse_rule(&p.value, None)),
+    })
+}
+
+/// Every `VEVENT` in an ICS document, tagged with `calendar`, carrying the
+/// document's `VTIMEZONE`s for zones the system does not know.
 pub fn parse(text: &str, calendar: usize) -> Vec<Event> {
+    let lines = unfold(text);
+    let zones = Arc::new(parse_zones(&lines));
     let mut events = Vec::new();
     let mut current: Option<Vec<Property>> = None;
     // VALARMs nest inside events; their properties are not the event's.
     let mut nested = 0usize;
-    for line in unfold(text) {
+    for line in &lines {
         let upper = line.trim().to_ascii_uppercase();
         if upper == "BEGIN:VEVENT" {
             current = Some(Vec::new());
             nested = 0;
         } else if upper == "END:VEVENT" {
             if let Some(props) = current.take() {
-                events.extend(build_event(&props, calendar));
+                events.extend(build_event(&props, calendar, &zones));
             }
         } else if let Some(props) = current.as_mut() {
             if upper.starts_with("BEGIN:") {
@@ -367,14 +448,46 @@ pub fn parse(text: &str, calendar: usize) -> Vec<Event> {
             } else if upper.starts_with("END:") {
                 nested = nested.saturating_sub(1);
             } else if nested == 0 {
-                props.extend(parse_property(&line));
+                props.extend(parse_property(line));
             }
         }
     }
     events
 }
 
-fn build_event(props: &[Property], calendar: usize) -> Option<Event> {
+fn parse_zones(lines: &[String]) -> ZoneDefs {
+    let mut zones = ZoneDefs::new();
+    let mut tzid: Option<String> = None;
+    let mut observances = Vec::new();
+    let mut part: Option<Vec<Property>> = None;
+    let mut inside = false;
+    for line in lines {
+        let upper = line.trim().to_ascii_uppercase();
+        match upper.as_str() {
+            "BEGIN:VTIMEZONE" => (inside, tzid) = (true, None),
+            "END:VTIMEZONE" => {
+                if let Some(id) = tzid.take() {
+                    zones.insert(id, ZoneRules { observances: std::mem::take(&mut observances) });
+                }
+                observances.clear();
+                inside = false;
+            }
+            "BEGIN:STANDARD" | "BEGIN:DAYLIGHT" if inside => part = Some(Vec::new()),
+            "END:STANDARD" | "END:DAYLIGHT" if inside => {
+                observances.extend(part.take().as_deref().and_then(build_observance));
+            }
+            _ if inside => match (part.as_mut(), parse_property(line)) {
+                (Some(props), Some(prop)) => props.push(prop),
+                (None, Some(prop)) if prop.name == "TZID" => tzid = Some(prop.value.trim().to_string()),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    zones
+}
+
+fn build_event(props: &[Property], calendar: usize, zones: &Arc<ZoneDefs>) -> Option<Event> {
     let get = |name: &str| props.iter().find(|p| p.name == name);
     let start_prop = get("DTSTART")?;
     let start = parse_when(start_prop).into_iter().next()?;
@@ -390,6 +503,7 @@ fn build_event(props: &[Property], calendar: usize) -> Option<Event> {
         cancelled: get("STATUS").is_some_and(|p| p.value.trim().eq_ignore_ascii_case("CANCELLED")),
         start,
         calendar,
+        zones: Arc::clone(zones),
     })
 }
 
@@ -404,27 +518,37 @@ impl Zones {
         Self { local: TimeZone::system(), known: HashMap::new() }
     }
 
-    /// A zone by name. Some feeds prefix the IANA name
-    /// (`/mozilla.org/20050126_1/America/New_York`), so trailing parts are
-    /// tried too.
+    /// A zone by name: an IANA name, which some feeds prefix
+    /// (`/mozilla.org/20050126_1/America/New_York`, so trailing parts are
+    /// tried too), or a Windows name (Outlook's `Eastern Standard Time`).
     fn get(&mut self, name: &str) -> Option<TimeZone> {
         self.known
             .entry(name.to_string())
             .or_insert_with(|| {
                 let parts: Vec<&str> = name.split('/').filter(|p| !p.is_empty()).collect();
-                (0..parts.len()).find_map(|i| TimeZone::get(&parts[i..].join("/")).ok())
+                (0..parts.len())
+                    .find_map(|i| TimeZone::get(&parts[i..].join("/")).ok())
+                    .or_else(|| super::windows_zones::iana(name).and_then(|zone| TimeZone::get(zone).ok()))
             })
             .clone()
     }
 
-    /// `when` as local wall time.
-    fn local(&mut self, when: &When) -> NaiveDateTime {
+    /// `when` as local wall time. A zone the system does not know is read
+    /// from the feed's own definition in `defs`, failing which the time is
+    /// taken as local.
+    fn local(&mut self, when: &When, defs: &ZoneDefs) -> NaiveDateTime {
         let (wall, zone) = match when {
             When::Date(_) | When::Floating(_) => return when.wall(),
-            When::Utc(t) => (*t, Some(TimeZone::UTC)),
-            When::Zoned(t, name) => (*t, self.get(name)),
+            When::Utc(t) => (*t, TimeZone::UTC),
+            When::Zoned(t, name) => match self.get(name) {
+                Some(zone) => (*t, zone),
+                None => match defs.get(name).and_then(|rules| rules.offset_at(*t)) {
+                    // Wall time less the offset is UTC.
+                    Some(offset) => (*t - chrono::Duration::seconds(offset.into()), TimeZone::UTC),
+                    None => return *t,
+                },
+            },
         };
-        let Some(zone) = zone else { return wall };
         let civil = jiff::civil::DateTime::new(
             wall.year() as i16,
             wall.month() as i8,
@@ -563,7 +687,7 @@ pub fn occurrences(events: &[Event], from: NaiveDate, to: NaiveDate) -> Vec<Occu
     let mut overridden: HashSet<(usize, String, NaiveDateTime)> = HashSet::new();
     for event in events {
         if let Some(id) = &event.recurrence_id {
-            overridden.insert((event.calendar, event.uid.clone(), zones.local(id)));
+            overridden.insert((event.calendar, event.uid.clone(), zones.local(id, &event.zones)));
         }
     }
     let mut out = Vec::new();
@@ -577,30 +701,39 @@ pub fn occurrences(events: &[Event], from: NaiveDate, to: NaiveDate) -> Vec<Occu
             (None, None) => chrono::Duration::zero(),
         }
         .max(chrono::Duration::zero());
+        // A UNTIL in UTC on a series in another zone cannot be compared with
+        // its wall times: it bounds the local starts instead.
+        let mut until_local = None;
         let starts = match (&event.rule, &event.recurrence_id) {
             (Some(rule), None) => {
                 // Zone offsets are under a day: two days of slack each side
                 // covers any difference between wall and local time.
                 let limit = window_end + chrono::Duration::days(2);
-                let until = rule.until.as_ref().map(|u| match (u, &event.start) {
-                    // A zoned series' UTC UNTIL, compared in its wall time.
-                    (When::Utc(_), When::Zoned(_, _)) | (When::Utc(_), When::Floating(_)) => zones.local(u),
-                    (When::Date(d), _) => d.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap_or(NaiveTime::MIN)),
-                    (other, _) => other.wall(),
+                let until = rule.until.as_ref().and_then(|u| match (u, &event.start) {
+                    (When::Utc(_), When::Utc(_)) => Some(u.wall()),
+                    (When::Utc(_), _) => {
+                        until_local = Some(zones.local(u, &event.zones));
+                        None
+                    }
+                    (When::Date(d), _) => Some(d.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap_or(NaiveTime::MIN))),
+                    (other, _) => Some(other.wall()),
                 });
                 expand(rule, event.start.wall(), limit, until)
             }
             _ => vec![event.start.wall()],
         };
-        let exdates: HashSet<NaiveDateTime> = event.exdates.iter().map(|e| zones.local(e)).collect();
+        let exdates: HashSet<NaiveDateTime> = event.exdates.iter().map(|e| zones.local(e, &event.zones)).collect();
         for wall in starts {
             let instance = event.start.with_wall(wall);
-            let start = zones.local(&instance);
+            let start = zones.local(&instance, &event.zones);
+            if until_local.is_some_and(|u| start > u) {
+                break;
+            }
             let series = event.rule.is_some() && event.recurrence_id.is_none();
             if series && (exdates.contains(&start) || overridden.contains(&(event.calendar, event.uid.clone(), start))) {
                 continue;
             }
-            let end = zones.local(&instance.with_wall(wall + length));
+            let end = zones.local(&instance.with_wall(wall + length), &event.zones);
             let end = if all_day { end.max(start + chrono::Duration::days(1)) } else { end.max(start) };
             // Overlapping the window; a zero-length event counts at its start.
             if start < window_end && (end > window_start || (end == start && start >= window_start)) {
@@ -740,19 +873,65 @@ mod tests {
     #[test]
     fn zoned_and_utc_times_reach_local_time() {
         let mut zones = Zones::new();
+        let none = ZoneDefs::new();
+        let mut local = |when: When| zones.local(&when, &none);
         // Whatever this machine's zone, a zoned time and its UTC instant agree.
-        let zoned = zones.local(&When::Zoned(at(2026, 7, 1, 9, 0), "America/New_York".into()));
-        let utc = zones.local(&When::Utc(at(2026, 7, 1, 13, 0)));
+        let zoned = local(When::Zoned(at(2026, 7, 1, 9, 0), "America/New_York".into()));
+        let utc = local(When::Utc(at(2026, 7, 1, 13, 0)));
         assert_eq!(zoned, utc, "9:00 EDT is 13:00 UTC");
-        let prefixed = zones.local(&When::Zoned(at(2026, 7, 1, 9, 0), "/mozilla.org/20050126_1/America/New_York".into()));
+        let prefixed = local(When::Zoned(at(2026, 7, 1, 9, 0), "/mozilla.org/20050126_1/America/New_York".into()));
         assert_eq!(prefixed, zoned);
         // The zones come from the system's zoneinfo, not just the local one:
         // 9:00 in Berlin and 9:00 in New York are six hours apart.
-        assert!(zones.get("Europe/Berlin").is_some() && zones.get("Eastern Standard Time").is_none());
-        let berlin = zones.local(&When::Zoned(at(2026, 7, 1, 9, 0), "Europe/Berlin".into()));
+        let berlin = local(When::Zoned(at(2026, 7, 1, 9, 0), "Europe/Berlin".into()));
         assert_eq!(zoned - berlin, chrono::Duration::hours(6));
-        // An unknown zone reads as local wall time.
-        assert_eq!(zones.local(&When::Zoned(at(2026, 7, 1, 9, 0), "Eastern Standard Time".into())), at(2026, 7, 1, 9, 0));
+        // Outlook's Windows names map to IANA zones.
+        assert_eq!(local(When::Zoned(at(2026, 7, 1, 9, 0), "W. Europe Standard Time".into())), berlin);
+        // A zone known neither way, without a definition, reads as local.
+        assert_eq!(local(When::Zoned(at(2026, 7, 1, 9, 0), "Customized Time Zone".into())), at(2026, 7, 1, 9, 0));
+    }
+
+    #[test]
+    fn a_feeds_own_zone_definition_is_used_for_names_the_system_lacks() {
+        // As Outlook writes a custom zone: Central European rules.
+        let text = ics(
+            "BEGIN:VTIMEZONE\r\nTZID:Customized Time Zone\r\n\
+             BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n\
+             BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\n\
+             END:VTIMEZONE\r\n\
+             BEGIN:VEVENT\r\nUID:summer\r\nDTSTART;TZID=Customized Time Zone:20260701T090000\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nUID:winter\r\nDTSTART;TZID=Customized Time Zone:20261201T090000\r\nEND:VEVENT\r\n",
+        );
+        let events = parse(&text, 0);
+        let rules = &events[0].zones["Customized Time Zone"];
+        assert_eq!(rules.offset_at(at(2026, 7, 1, 9, 0)), Some(7200));
+        assert_eq!(rules.offset_at(at(2026, 12, 1, 9, 0)), Some(3600));
+        assert_eq!(rules.offset_at(at(2026, 10, 25, 2, 59)), Some(7200), "just before the October change");
+        assert_eq!(rules.offset_at(at(2026, 10, 25, 3, 0)), Some(3600));
+        // The same instants as Europe/Berlin.
+        let mut zones = Zones::new();
+        let none = ZoneDefs::new();
+        for (event, month) in events.iter().zip([7, 12]) {
+            let custom = zones.local(&event.start, &event.zones);
+            let berlin = zones.local(&When::Zoned(at(2026, month, 1, 9, 0), "Europe/Berlin".into()), &none);
+            assert_eq!(custom, berlin, "month {month}");
+        }
+    }
+
+    #[test]
+    fn offsets_parse_with_and_without_seconds() {
+        assert_eq!(parse_offset("+0100"), Some(3600));
+        assert_eq!(parse_offset("-0500"), Some(-18_000));
+        assert_eq!(parse_offset("+053000"), Some(19_800));
+        assert_eq!(parse_offset("0100"), None);
+    }
+
+    #[test]
+    fn a_utc_until_bounds_a_series_in_another_zone() {
+        // 15:00 Berlin weekly, until 13:00 UTC on 14 Oct: that is 15:00 CEST,
+        // so the 14th is the last. Compared as wall time, 13:00 would cut it.
+        let text = "BEGIN:VEVENT\r\nUID:w\r\nDTSTART;TZID=Europe/Berlin:20261007T150000\r\nRRULE:FREQ=WEEKLY;UNTIL=20261014T130000Z\r\nEND:VEVENT\r\n";
+        assert_eq!(starts(text, date(2026, 10, 1), date(2026, 11, 1)).len(), 2);
     }
 
     #[test]
@@ -760,12 +939,13 @@ mod tests {
         // 9:00 New York, weekly across the November change: the UTC instant
         // moves by an hour, the wall time does not.
         let mut zones = Zones::new();
+        let none = ZoneDefs::new();
         let rule = parse_rule("FREQ=WEEKLY;COUNT=2", Some("America/New_York")).unwrap();
         let walls = expand(&rule, at(2026, 10, 29, 9, 0), at(2027, 1, 1, 0, 0), None);
         assert_eq!(walls, [at(2026, 10, 29, 9, 0), at(2026, 11, 5, 9, 0)]);
         let mut utc = |w: NaiveDateTime| {
-            let local = zones.local(&When::Zoned(w, "America/New_York".into()));
-            let offset = zones.local(&When::Utc(w)) - w;
+            let local = zones.local(&When::Zoned(w, "America/New_York".into()), &none);
+            let offset = zones.local(&When::Utc(w), &none) - w;
             local - offset
         };
         assert_eq!(utc(walls[0]), at(2026, 10, 29, 13, 0));
