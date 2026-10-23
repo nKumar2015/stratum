@@ -9,6 +9,7 @@
 //! frame reflects the change without waiting for the poller. That is what makes
 //! a toggle feel immediate rather than "eventually correct".
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -164,7 +165,8 @@ impl ActionQueue {
         thread::Builder::new()
             .name("stratum-actions".into())
             .spawn(move || {
-                for action in rx {
+                let mut backlog = VecDeque::new();
+                while let Some(action) = next_action(&rx, &mut backlog) {
                     let (ticket, action) = match action {
                         SystemAction::Tracked { ticket, action } => (Some(ticket), *action),
                         action => (None, action),
@@ -187,6 +189,35 @@ impl ActionQueue {
             })
             .ok();
     }
+}
+
+/// The next action worth running, or `None` once the queue has closed.
+///
+/// A slider drag queues a volume change on every frame, and each one costs
+/// several PulseAudio round trips, so running them all left the real volume
+/// seconds behind the slider. Only the newest pending value of each kind
+/// matters: an older one is dropped when a newer one waits behind it.
+fn next_action(rx: &Receiver<SystemAction>, backlog: &mut VecDeque<SystemAction>) -> Option<SystemAction> {
+    loop {
+        if backlog.is_empty() {
+            backlog.push_back(rx.recv().ok()?);
+        }
+        backlog.extend(rx.try_iter());
+        let action = backlog.pop_front()?;
+        if !backlog.iter().any(|later| supersedes(later, &action)) {
+            return Some(action);
+        }
+    }
+}
+
+/// Whether `later` makes `earlier` pointless to run. Tracked actions are
+/// always run, since a page waits for their outcome.
+fn supersedes(later: &SystemAction, earlier: &SystemAction) -> bool {
+    matches!(
+        (later, earlier),
+        (SystemAction::SetVolume(_), SystemAction::SetVolume(_))
+            | (SystemAction::SetInputVolume(_), SystemAction::SetInputVolume(_))
+    )
 }
 
 /// Execute one action and publish how it ended.
@@ -527,6 +558,28 @@ mod tests {
         // No worker started: pushing must not panic or block.
         queue.push(SystemAction::SetVolume(50));
         queue.push(SystemAction::Spawn(vec!["true".into()]));
+    }
+
+    #[test]
+    fn only_the_newest_pending_volume_runs() {
+        let (tx, rx) = channel();
+        for action in [
+            SystemAction::SetVolume(10),
+            SystemAction::SetInputVolume(5),
+            SystemAction::SetVolume(20),
+            SystemAction::SetMuted(true),
+            SystemAction::SetVolume(30),
+            SystemAction::SetInputVolume(6),
+        ] {
+            tx.send(action).unwrap();
+        }
+        drop(tx);
+        let mut backlog = VecDeque::new();
+        let mut ran = Vec::new();
+        while let Some(action) = next_action(&rx, &mut backlog) {
+            ran.push(format!("{action:?}"));
+        }
+        assert_eq!(ran, ["SetMuted(true)", "SetVolume(30)", "SetInputVolume(6)"]);
     }
 
     #[test]

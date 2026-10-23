@@ -490,9 +490,12 @@ fn paint_volume(
     }
     let fraction = state.drag_value.unwrap_or((card.volume / 100.0).clamp(0.0, 1.5) / 1.5);
     if let Some(next) = controls::slider(ctx, list, slider, fraction, state.dragging, input) {
+        // Compare with what this drag last sent, not the published volume,
+        // which lags behind and would resend the same value every frame.
+        let sent = (fraction * 150.0).round() as i64;
         state.drag_value = Some(next);
         let percent = (next * 150.0).round() as i64;
-        if percent != card.volume.round() as i64 {
+        if percent != sent {
             pending.push((card.set_volume)(percent));
         }
     }

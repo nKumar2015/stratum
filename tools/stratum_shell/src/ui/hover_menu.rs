@@ -248,9 +248,12 @@ impl HoverMenus {
         }
         let fraction = self.drag_value.unwrap_or((volume / 100.0).clamp(0.0, 1.5) / 1.5);
         if let Some(next) = controls::slider(ctx, list, slider, fraction, self.dragging, input) {
+            // Compare with what this drag last sent, not the published volume,
+            // which lags behind and would resend the same value every frame.
+            let sent = (fraction * 150.0).round() as i64;
             self.drag_value = Some(next);
             let percent = (next * 150.0).round() as i64;
-            if percent != volume.round() as i64 {
+            if percent != sent {
                 f.events.push(MenuEvent::System(SystemAction::SetVolume(percent)));
             }
         }
