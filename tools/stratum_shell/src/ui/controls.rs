@@ -27,7 +27,8 @@ pub fn slider(
         width: rect.width,
         height: track_height,
         radius: track_height * 0.5,
-        color: ctx.theme.bg_hover,
+        // The top of the surface ramp, so the track shows on a card too.
+        color: ctx.theme.surface_highest,
     };
     list.push_rect(track);
     list.push_rect(Rect {

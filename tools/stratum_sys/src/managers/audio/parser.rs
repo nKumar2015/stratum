@@ -210,6 +210,17 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         .collect::<Vec<_>>();
 
     let source_devices = source_ctrl.list_devices().unwrap_or_default();
+    let default_source_dev = source_devices
+        .iter()
+        .find(|dev| dev.name.as_deref().unwrap_or_default() == default_source);
+    let input_volume = default_source_dev
+        .and_then(|dev| extract_first_percent(&dev.volume.print()))
+        .unwrap_or_else(|| "0%".to_string());
+    let input_mute = if default_source_dev.map(|dev| dev.mute).unwrap_or(true) {
+        "yes"
+    } else {
+        "no"
+    };
     let sources = source_devices
         .iter()
         .filter_map(|dev| {
@@ -237,6 +248,8 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         "status": {
             "volume": volume,
             "mute": mute,
+            "input_volume": input_volume,
+            "input_mute": input_mute,
         },
         "default": {
             "sink": default_sink,

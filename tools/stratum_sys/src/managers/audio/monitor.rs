@@ -207,6 +207,16 @@ fn fetch_current_status() -> Option<Value> {
         .and_then(Value::as_str)
         .unwrap_or("yes")
         .to_string();
+    let status = |key: &str, fallback: &str| {
+        fresh
+            .get("status")
+            .and_then(|v| v.get(key))
+            .and_then(Value::as_str)
+            .unwrap_or(fallback)
+            .to_string()
+    };
+    let input_volume = status("input_volume", "0%");
+    let input_mute = status("input_mute", "yes");
     let sinks = fresh.get("sinks").cloned().unwrap_or_else(|| json!([]));
     let sources = fresh.get("sources").cloned().unwrap_or_else(|| json!([]));
 
@@ -221,6 +231,8 @@ fn fetch_current_status() -> Option<Value> {
         "default_source": default_source,
         "volume": volume,
         "mute": mute,
+        "input_volume": input_volume,
+        "input_mute": input_mute,
         "headphones": headphones,
         "sinks": sinks,
         "sources": sources,

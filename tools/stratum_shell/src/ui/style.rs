@@ -813,13 +813,16 @@ impl Default for DevicePageMetrics {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AudioPageMetrics {
-    pub spacing: f32,
+    /// Between controls in a row (slider and readout, media buttons).
     pub gap: f32,
-    /// The volume row and its readout.
+    /// Volume cards: the narrowest before output and input stack, and their
+    /// height.
+    pub volume_min_width: f32,
+    pub volume_height: f32,
+    /// A volume slider and its readout.
     pub slider_height: f32,
     pub readout_width: f32,
-    /// The now-playing card: padding, art, and text sizes.
-    pub card_padding: f32,
+    /// The now-playing card: art, and text sizes.
     pub art: f32,
     pub title: f32,
     pub text: f32,
@@ -828,14 +831,8 @@ pub struct AudioPageMetrics {
     /// Previous / play-pause / next.
     pub media_button: f32,
     pub media_icon: f32,
-    /// Device rows and the section labels above them.
-    pub label: f32,
-    pub label_height: f32,
-    pub row_height: f32,
-    pub row_gap: f32,
-    pub row_padding: f32,
-    pub row_title: f32,
-    pub row_caption: f32,
+    /// Height of an output or input device row.
+    pub device_height: f32,
     /// How long a chosen device shows as selected before the system agrees
     /// (QML's optimistic guard).
     pub pending_ms: u64,
@@ -844,11 +841,11 @@ pub struct AudioPageMetrics {
 impl Default for AudioPageMetrics {
     fn default() -> Self {
         Self {
-            spacing: 12.0,
             gap: 10.0,
+            volume_min_width: 300.0,
+            volume_height: 108.0,
             slider_height: 24.0,
             readout_width: 56.0,
-            card_padding: 12.0,
             art: 96.0,
             title: 15.0,
             text: 12.0,
@@ -856,13 +853,7 @@ impl Default for AudioPageMetrics {
             line: 20.0,
             media_button: 32.0,
             media_icon: 14.0,
-            label: 12.0,
-            label_height: 20.0,
-            row_height: 44.0,
-            row_gap: 6.0,
-            row_padding: 10.0,
-            row_title: 13.0,
-            row_caption: 10.0,
+            device_height: 60.0,
             pending_ms: 5000,
         }
     }
@@ -1301,6 +1292,8 @@ pub struct PageMetrics {
     /// Display page theme cards: narrowest card, and its height.
     pub theme_min_width: f32,
     pub theme_height: f32,
+    /// The card a page shows when it has nothing to list.
+    pub empty_height: f32,
     /// How long an action tile waits for its confirming second click.
     pub confirm_ms: u64,
     /// Outline width of a card, and of a highlighted one.
@@ -1353,6 +1346,7 @@ impl Default for PageMetrics {
             hero_meter: 10.0,
             theme_min_width: 150.0,
             theme_height: 96.0,
+            empty_height: 168.0,
             confirm_ms: 4000,
             outline: 1.0,
             outline_active: 1.5,

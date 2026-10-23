@@ -25,6 +25,10 @@ pub enum SystemAction {
     SetVolume(i64),
     /// Mute or unmute the default sink.
     SetMuted(bool),
+    /// Set the default source's volume to an absolute percentage (0..=150).
+    SetInputVolume(i64),
+    /// Mute or unmute the default source.
+    SetInputMuted(bool),
     /// Switch the default sink.
     SetOutput(String),
     /// Switch the default source.
@@ -270,6 +274,8 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
     let result = match action {
         SystemAction::SetVolume(percent) => managers::audio::set_volume(*percent),
         SystemAction::SetMuted(muted) => managers::audio::set_mute(*muted),
+        SystemAction::SetInputVolume(percent) => managers::audio::set_input_volume(*percent),
+        SystemAction::SetInputMuted(muted) => managers::audio::set_input_mute(*muted),
         SystemAction::SetOutput(target) => managers::audio::set_output(target),
         SystemAction::SetInput(target) => managers::audio::set_input(target),
         SystemAction::BluetoothPower(on) => {
@@ -493,6 +499,8 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         action,
         SystemAction::SetVolume(_)
             | SystemAction::SetMuted(_)
+            | SystemAction::SetInputVolume(_)
+            | SystemAction::SetInputMuted(_)
             | SystemAction::SetOutput(_)
             | SystemAction::SetInput(_)
     ) {

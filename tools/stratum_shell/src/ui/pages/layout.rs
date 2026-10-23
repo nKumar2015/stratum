@@ -201,6 +201,73 @@ pub fn badge(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, x: f32, y: f32, gly
     ui::paint_icon_centered(ctx, list, glyph, circle, m.badge_icon, fg);
 }
 
+/// A round button the size of a badge, its top-left at `(x, y)`. `on` tints
+/// it with `accent` (a mute that is engaged). Returns whether it was clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn icon_button(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    x: f32,
+    y: f32,
+    glyph: &str,
+    on: bool,
+    accent: Color,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
+    let m = ctx.metrics.page.clone();
+    let theme = ctx.theme.clone();
+    let area = rect(x, y, m.badge, m.badge);
+    let hot = hovered(input, area);
+    let (fg, bg) = match (on, hot) {
+        (true, _) => (accent, mix(theme.surface_high, accent, if hot { 0.3 } else { 0.2 })),
+        (false, true) => (theme.text_main, mix(theme.surface_highest, theme.text_main, 0.08)),
+        (false, false) => (theme.text_muted, theme.surface_highest),
+    };
+    badge(ctx, list, x, y, glyph, fg, bg);
+    hot && clicked
+}
+
+/// How wide [`text_button`] draws `label`.
+pub fn text_button_width(ctx: &mut PaintCtx<'_>, label: &str) -> f32 {
+    let size = ctx.metrics.typography.caption;
+    ctx.measure(label, size) + ctx.metrics.page.card_padding * 2.0
+}
+
+/// A pill with a label, badge-high, its top-left at `(x, y)`. Returns
+/// whether it was clicked.
+pub fn text_button(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    x: f32,
+    y: f32,
+    label: &str,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let theme = ctx.theme.clone();
+    let area = rect(x, y, text_button_width(ctx, label), m.badge);
+    let hot = hovered(input, area);
+    let fill = if hot { mix(theme.surface_highest, theme.text_main, 0.08) } else { theme.surface_highest };
+    list.push_rect(Rect {
+        radius: m.badge * 0.5,
+        color: fill,
+        ..area
+    });
+    ui::paint_text_centered_weighted(
+        ctx,
+        list,
+        label,
+        area,
+        typo.caption,
+        typo.weight_bold,
+        if hot { theme.text_main } else { theme.text_muted },
+    );
+    hot && clicked
+}
+
 /// A clickable tile: a badge, a title and a caption beside it. `on` tints
 /// the tile and fills the badge with the accent (a toggle that is on, the
 /// selected option). Returns whether the pointer is over it.

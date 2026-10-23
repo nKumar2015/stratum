@@ -1,4 +1,5 @@
 use crate::managers::common::{run_capture_optional, run_command_capture};
+use pulsectl::controllers::types::DeviceInfo;
 use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -74,18 +75,26 @@ pub fn snapshot() -> Option<Value> {
 }
 
 pub fn set_volume(percent: i64) -> Value {
-    let target = percent.clamp(0, 150) as f64;
-    let mut sink_ctrl = match SinkController::create() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            return json!({"ok": false, "error": format!("sink controller unavailable: {}", err)});
-        }
-    };
+    match SinkController::create() {
+        Ok(mut ctrl) => set_default_volume(&mut ctrl, "sink", percent),
+        Err(err) => json!({"ok": false, "error": format!("sink controller unavailable: {}", err)}),
+    }
+}
 
-    let default_device = match sink_ctrl.get_default_device() {
+/// Set the default source (microphone) to an absolute percentage.
+pub fn set_input_volume(percent: i64) -> Value {
+    match SourceController::create() {
+        Ok(mut ctrl) => set_default_volume(&mut ctrl, "source", percent),
+        Err(err) => json!({"ok": false, "error": format!("source controller unavailable: {}", err)}),
+    }
+}
+
+fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, percent: i64) -> Value {
+    let target = percent.clamp(0, 150) as f64;
+    let default_device = match ctrl.get_default_device() {
         Ok(device) => device,
         Err(err) => {
-            return json!({"ok": false, "error": format!("failed to query default sink: {}", err)});
+            return json!({"ok": false, "error": format!("failed to query default {}: {}", kind, err)});
         }
     };
 
@@ -95,9 +104,9 @@ pub fn set_volume(percent: i64) -> Value {
 
     let delta = (target - current).abs() / 100.0;
     if target > current {
-        sink_ctrl.increase_device_volume_by_percent(default_device.index, delta);
+        ctrl.increase_device_volume_by_percent(default_device.index, delta);
     } else if target < current {
-        sink_ctrl.decrease_device_volume_by_percent(default_device.index, delta);
+        ctrl.decrease_device_volume_by_percent(default_device.index, delta);
     }
 
     refresh_device_cache();
@@ -110,26 +119,34 @@ pub fn set_volume(percent: i64) -> Value {
 /// "set volume to 0", which destroyed the level the user had set. The sink's
 /// own mute flag is the right control and is what `pactl`/`wpctl` use too.
 pub fn set_mute(muted: bool) -> Value {
-    let mut sink_ctrl = match SinkController::create() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            return json!({"ok": false, "error": format!("sink controller unavailable: {}", err)});
-        }
-    };
+    match SinkController::create() {
+        Ok(mut ctrl) => set_default_mute(&mut ctrl, "sink", muted),
+        Err(err) => json!({"ok": false, "error": format!("sink controller unavailable: {}", err)}),
+    }
+}
 
-    let default_device = match sink_ctrl.get_default_device() {
+/// Mute or unmute the default source (microphone).
+pub fn set_input_mute(muted: bool) -> Value {
+    match SourceController::create() {
+        Ok(mut ctrl) => set_default_mute(&mut ctrl, "source", muted),
+        Err(err) => json!({"ok": false, "error": format!("source controller unavailable: {}", err)}),
+    }
+}
+
+fn set_default_mute<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, muted: bool) -> Value {
+    let default_device = match ctrl.get_default_device() {
         Ok(device) => device,
         Err(err) => {
-            return json!({"ok": false, "error": format!("failed to query default sink: {}", err)});
+            return json!({"ok": false, "error": format!("failed to query default {}: {}", kind, err)});
         }
     };
 
     // `set_device_mute_by_index` returns `()`, so a failure to look the device
-    // up beforehand is the only signal that the sink is unreachable.
-    if let Err(err) = sink_ctrl.get_device_by_index(default_device.index) {
-        return json!({"ok": false, "error": format!("failed to read default sink: {}", err)});
+    // up beforehand is the only signal that the device is unreachable.
+    if let Err(err) = ctrl.get_device_by_index(default_device.index) {
+        return json!({"ok": false, "error": format!("failed to read default {}: {}", kind, err)});
     }
-    sink_ctrl.set_device_mute_by_index(default_device.index, muted);
+    ctrl.set_device_mute_by_index(default_device.index, muted);
     refresh_device_cache();
     json!({"ok": true, "mute": if muted { "yes" } else { "no" }})
 }

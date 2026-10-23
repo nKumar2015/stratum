@@ -304,7 +304,9 @@ impl Pages {
             Page::Power => {
                 return self.power.paint(ctx, list, area, input, clicked, pending);
             }
-            Page::Audio => self.audio.paint(ctx, list, area, input, clicked, pending),
+            Page::Audio => {
+                return self.audio.paint(ctx, list, area, input, clicked, pending);
+            }
             Page::Equalizer => self.equalizer.paint(ctx, list, area, input, clicked, pending),
             Page::Bluetooth => {
                 self.bluetooth
@@ -315,8 +317,7 @@ impl Pages {
                 return self.battery.paint(ctx, list, area, input, clicked, pending);
             }
             Page::Notifications => {
-                self.notifications
-                    .paint(ctx, list, area, input, clicked, pending)
+                return self.notifications.paint(ctx, list, area, input, clicked, pending);
             }
             Page::Display => {
                 return self.display.paint(ctx, list, area, input, clicked, pending);
