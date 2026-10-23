@@ -131,7 +131,7 @@ enum Button {
 }
 
 impl Dashboard {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::DashboardMetrics) -> Self {
         let (year, month, _) = today();
         Self {
             open: false,
@@ -142,7 +142,7 @@ impl Dashboard {
             buttons: Vec::new(),
             error: None,
             title: Marquee::ticker(),
-            metrics: crate::ui::style::DashboardMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -491,11 +491,6 @@ impl Dashboard {
     }
 }
 
-impl Default for Dashboard {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -535,7 +530,7 @@ mod tests {
 
     #[test]
     fn opening_navigating_and_closing() {
-        let mut d = Dashboard::new();
+        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
         d.toggle("HDMI-A-1");
         assert_eq!(d.target(), Some("HDMI-A-1"));
         let now = d.month();
@@ -553,7 +548,7 @@ mod tests {
 
     #[test]
     fn media_buttons_need_a_player() {
-        let mut d = Dashboard::new();
+        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
         d.open_on("a");
         let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
         d.buttons = vec![(rect, Button::PlayPause)];
@@ -570,7 +565,7 @@ mod tests {
 
     #[test]
     fn a_click_outside_the_card_closes() {
-        let mut d = Dashboard::new();
+        let mut d = Dashboard::new(&crate::config::Config::test_defaults().metrics.dashboard);
         d.open_on("a");
         d.card = Some(Rect { x: 100.0, y: 10.0, width: 400.0, height: 300.0, radius: 0.0, color: Color::TRANSPARENT });
         assert_eq!(d.on_click(Point::new(200.0, 100.0), &Value::Null), DashboardAction::None);

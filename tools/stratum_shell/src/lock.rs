@@ -61,7 +61,7 @@ pub struct LockScreen {
 }
 
 impl LockScreen {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::LockMetrics) -> Self {
         Self {
             phase: Phase::Unlocked,
             field: TextField::new(),
@@ -69,7 +69,7 @@ impl LockScreen {
             failed: false,
             reason: None,
             painted_minute: None,
-            metrics: crate::ui::style::LockMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -362,11 +362,6 @@ impl LockScreen {
     }
 }
 
-impl Default for LockScreen {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 struct Layout {
     clock: Rect,
@@ -569,7 +564,7 @@ mod tests {
     use smithay_client_toolkit::seat::keyboard::Keysym;
 
     fn locked() -> LockScreen {
-        let mut lock = LockScreen::new();
+        let mut lock = LockScreen::new(&crate::config::Config::test_defaults().metrics.lock);
         assert!(lock.request());
         lock.confirm();
         lock
@@ -595,7 +590,7 @@ mod tests {
 
     #[test]
     fn a_second_request_does_not_lock_twice() {
-        let mut lock = LockScreen::new();
+        let mut lock = LockScreen::new(&crate::config::Config::test_defaults().metrics.lock);
         assert!(lock.request());
         assert!(!lock.request());
         lock.confirm();
@@ -606,7 +601,7 @@ mod tests {
 
     #[test]
     fn keys_before_confirmation_are_dropped() {
-        let mut lock = LockScreen::new();
+        let mut lock = LockScreen::new(&crate::config::Config::test_defaults().metrics.lock);
         lock.request();
         assert_eq!(lock.key(Keysym::a, Some("a"), false), KeyOutcome::Ignored);
         lock.confirm();

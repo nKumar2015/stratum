@@ -100,6 +100,13 @@
           patchelf --add-rpath ${pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon])} \
             $out/bin/stratum-shell
         '';
+
+        # Every default the shell has; the binary finds it at
+        # <bin>/../share/stratum and has none of its own.
+        postInstall = ''
+          install -Dm644 ${./tools/stratum_shell/config.default.toml} \
+            $out/share/stratum/config.default.toml
+        '';
       };
 
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.stratum-shell;

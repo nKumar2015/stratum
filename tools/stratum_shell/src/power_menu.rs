@@ -83,12 +83,12 @@ pub struct PowerMenu {
 }
 
 impl PowerMenu {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::PowerMenuMetrics) -> Self {
         Self {
             open: false,
             selection: 0,
             target: None,
-            metrics: crate::ui::style::PowerMenuMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -288,11 +288,6 @@ impl PowerMenu {
     }
 }
 
-impl Default for PowerMenu {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -311,7 +306,7 @@ mod tests {
 
     #[test]
     fn toggle_opens_on_the_given_output_and_closes() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         assert_eq!(menu.target(), None);
         menu.toggle("eDP-2");
         assert!(menu.is_open());
@@ -323,7 +318,7 @@ mod tests {
 
     #[test]
     fn opening_always_resets_the_selection() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         menu.apply(KeyAction::Next);
         assert_eq!(menu.selection(), 1);
@@ -334,7 +329,7 @@ mod tests {
 
     #[test]
     fn navigation_wraps_at_both_ends() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         menu.apply(KeyAction::Previous);
         assert_eq!(menu.selection(), OPTIONS.len() - 1);
@@ -344,7 +339,7 @@ mod tests {
 
     #[test]
     fn activation_returns_the_command_and_closes() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         menu.apply(KeyAction::Next);
         let argv = menu.apply(KeyAction::Activate).expect("reboot argv");
@@ -354,7 +349,7 @@ mod tests {
 
     #[test]
     fn escape_closes_without_running_anything() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         assert_eq!(menu.apply(KeyAction::Close), None);
         assert!(!menu.is_open());
@@ -363,7 +358,7 @@ mod tests {
     #[test]
     fn only_known_keys_are_handled() {
         use smithay_client_toolkit::seat::keyboard::Keysym;
-        let menu = PowerMenu::new();
+        let menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         assert_eq!(menu.key_action(Keysym::Escape), Some(KeyAction::Close));
         assert_eq!(menu.key_action(Keysym::Left), Some(KeyAction::Previous));
         assert_eq!(menu.key_action(Keysym::Right), Some(KeyAction::Next));
@@ -373,7 +368,7 @@ mod tests {
 
     #[test]
     fn tiles_are_centred_and_do_not_overlap() {
-        let menu = PowerMenu::new();
+        let menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         let surface = surface();
         let first = menu.tile_rect(surface, 0);
         let second = menu.tile_rect(surface, 1);
@@ -386,7 +381,7 @@ mod tests {
 
     #[test]
     fn clicking_a_tile_selects_and_activates_it() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         let surface = surface();
         let tile = menu.tile_rect(surface, 2);
@@ -401,7 +396,7 @@ mod tests {
 
     #[test]
     fn clicking_outside_every_tile_does_nothing() {
-        let mut menu = PowerMenu::new();
+        let mut menu = PowerMenu::new(&crate::config::Config::test_defaults().metrics.power_menu);
         menu.open_on("a");
         let point = crate::render::display_list::Point::new(2.0, 2.0);
         assert_eq!(menu.on_click(point, surface()), None);

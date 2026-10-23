@@ -33,14 +33,18 @@ the migration.
 
 ## Configuration
 
-The shell reads one TOML file:
+Every default is in `config.default.toml`, which documents every option and is
+installed as `share/stratum/config.default.toml`; the binary has no defaults of
+its own. Your file is merged over it (tables key by key, lists and values
+replaced), so it only needs what you change:
 
 1. `$STRATUM_CONFIG`
 2. `$XDG_CONFIG_HOME/stratum/config.toml`
 3. `~/.config/stratum/config.toml`
 
-With no file it uses built-in defaults that mirror the old QML shell. A copy of
-the full schema with comments is in `config.example.toml`.
+The Home Manager module always writes that file in full: the defaults with
+`programs.stratum.settings` merged in. The shell reloads it when it changes,
+including when a rebuild re-points its link into the Nix store.
 
 ```toml
 theme = "gruvbox"

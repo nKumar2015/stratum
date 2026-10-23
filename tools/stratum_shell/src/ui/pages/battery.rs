@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn the_meter_warns_as_charge_runs_down() {
-        let theme = Theme::default();
+        let theme = crate::config::Config::test_defaults().active_theme();
         assert_eq!(level_color(&theme, Some(80), false), theme.success);
         assert_eq!(level_color(&theme, Some(25), false), theme.warning);
         assert_eq!(level_color(&theme, Some(10), false), theme.error);

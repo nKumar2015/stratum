@@ -76,7 +76,7 @@ pub struct PolkitDialog {
 }
 
 impl PolkitDialog {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::PolkitMetrics) -> Self {
         Self {
             request: None,
             closed: None,
@@ -85,7 +85,7 @@ impl PolkitDialog {
             error: None,
             target: None,
             hits: None,
-            metrics: crate::ui::style::PolkitMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -522,11 +522,6 @@ impl PolkitDialog {
     }
 }
 
-impl Default for PolkitDialog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 fn inset(rect: Rect, by: f32) -> Rect {
     Rect {
@@ -563,7 +558,7 @@ mod tests {
 
     #[test]
     fn a_request_opens_on_the_focused_output() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         assert!(dialog.sync(&request("c1"), "HDMI-A-1"));
         assert_eq!(dialog.target(), Some("HDMI-A-1"));
         // Republishing the same request changes nothing, and a focus change
@@ -574,7 +569,7 @@ mod tests {
 
     #[test]
     fn the_agent_finishing_closes_it() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         dialog.sync(&request("c1"), "a");
         // Another cookie finishing leaves this one alone.
         assert!(!dialog.sync(&json!({"active": false, "cookie": "c2"}), "a"));
@@ -585,7 +580,7 @@ mod tests {
 
     #[test]
     fn enter_submits_and_escape_dismisses() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         dialog.sync(&request("c1"), "a");
         typed(&mut dialog, "pw");
         let DialogAction::Submit { cookie, user, password } =
@@ -605,7 +600,7 @@ mod tests {
 
     #[test]
     fn a_dismissed_request_is_not_reopened_by_stale_state() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         dialog.sync(&request("c1"), "a");
         dialog.key(Keysym::Escape, None, false);
         // The cell still says active until the agent reports the end.
@@ -617,7 +612,7 @@ mod tests {
 
     #[test]
     fn wrong_passwords_retry_then_close() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         dialog.sync(&request("c1"), "a");
         typed(&mut dialog, "x");
         dialog.key(Keysym::Return, None, false);
@@ -635,7 +630,7 @@ mod tests {
 
     #[test]
     fn answers_for_another_request_are_dropped() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         dialog.sync(&request("c2"), "a");
         assert!(!dialog.verdict("c1", Verdict::Accepted));
         assert!(dialog.is_open());
@@ -643,7 +638,7 @@ mod tests {
 
     #[test]
     fn empty_payloads_do_nothing() {
-        let mut dialog = PolkitDialog::new();
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
         assert!(!dialog.sync(&Value::Null, "a"));
         assert!(!dialog.sync(&json!({"active": true}), "a"), "no cookie, no dialog");
         assert!(!dialog.is_open());

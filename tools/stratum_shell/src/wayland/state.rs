@@ -194,9 +194,9 @@ pub struct App {
     /// The surface holding keyboard focus, for routing keys to the settings
     /// window's text fields only when it is the one being typed into.
     keyboard_focus: Option<wl_surface::WlSurface>,
-    /// Where the config came from, and its modification time at load.
-    config_path: Option<std::path::PathBuf>,
-    config_mtime: Option<std::time::SystemTime>,
+    /// Where the config comes from, and the user file's stamp at load.
+    config_source: crate::config::ConfigSource,
+    config_stamp: Option<(std::path::PathBuf, std::time::SystemTime)>,
     last_reload_check: std::time::Instant,
     /// Poke used by worker threads to wake the event loop out of its poll.
     /// Held so the ping source's channel stays open for the shell's lifetime.
@@ -220,16 +220,25 @@ impl App {
 
         let display = display_ptr(&conn)?;
 
-        let (config, path) = Config::load().map_err(|err| err.to_string())?;
-        match &path {
-            Some(path) => info!("loaded configuration from {}", path.display()),
-            None => info!("no configuration file found; using defaults"),
-        }
+        let config_source = crate::config::ConfigSource::locate().map_err(|err| err.to_string())?;
+        let config_stamp = config_source.user_stamp();
+        let config = match config_source.load() {
+            Ok(config) => config,
+            // A broken user file must not leave the session without a bar.
+            Err(err) => {
+                tracing::error!("{err}\nstarting with the defaults alone");
+                config_source.load_defaults().map_err(|err| err.to_string())?
+            }
+        };
+        info!(
+            "loaded configuration: {} with {}",
+            config_source.defaults.display(),
+            match (&config_source.user, &config_stamp) {
+                (Some(user), Some(_)) => user.display().to_string(),
+                _ => "no user file".to_string(),
+            }
+        );
         let gpu = pollster::block_on(Gpu::new(config.render.gpu))?;
-        let config_mtime = path
-            .as_ref()
-            .and_then(|p| std::fs::metadata(p).ok())
-            .and_then(|m| m.modified().ok());
         let config = Arc::new(config);
         let state = SystemState::new();
         let sidebar = Sidebar::new(Arc::clone(&config));
@@ -282,16 +291,16 @@ impl App {
             notification_saver: None,
             saved_notifications: None,
             tray: None,
-            osd: crate::osd::Osd::new(),
+            osd: crate::osd::Osd::new(&config_for_cc.metrics.osd),
             osd_surfaces: Vec::new(),
-            toasts: crate::toasts::Toasts::new(),
+            toasts: crate::toasts::Toasts::new(&config_for_cc.metrics.toasts),
             toast_surfaces: Vec::new(),
-            power_menu: crate::power_menu::PowerMenu::new(),
+            power_menu: crate::power_menu::PowerMenu::new(&config_for_cc.metrics.power_menu),
             power_surfaces: Vec::new(),
-            tray_menu: crate::tray_menu::TrayMenuOverlay::new(),
+            tray_menu: crate::tray_menu::TrayMenuOverlay::new(&config_for_cc.metrics.tray_menu),
             tray_menu_surfaces: Vec::new(),
             tray_menu_geometry: None,
-            lock: crate::lock::LockScreen::new(),
+            lock: crate::lock::LockScreen::new(&config_for_cc.metrics.lock),
             session_lock_state,
             session_lock: None,
             lock_surfaces: Vec::new(),
@@ -299,20 +308,23 @@ impl App {
             lock_art: crate::lock::Artwork::default(),
             lock_art_spec: None,
             lock_events: None,
-            polkit_dialog: crate::polkit_dialog::PolkitDialog::new(),
+            polkit_dialog: crate::polkit_dialog::PolkitDialog::new(&config_for_cc.metrics.polkit),
             polkit_surfaces: Vec::new(),
             polkit_agent: None,
             polkit_runtime: None,
             polkit_events: None,
-            theme_switcher: crate::theme_switcher::ThemeSwitcher::new(),
+            theme_switcher: crate::theme_switcher::ThemeSwitcher::new(&config_for_cc.metrics.theme_switcher),
             theme_surfaces: Vec::new(),
-            dashboard: crate::dashboard::Dashboard::new(),
+            dashboard: crate::dashboard::Dashboard::new(&config_for_cc.metrics.dashboard),
             dashboard_surfaces: Vec::new(),
             dashboard_requested: None,
-            screenshot: crate::screenshot::Screenshot::new(),
+            screenshot: crate::screenshot::Screenshot::new(&config_for_cc.metrics.screenshot),
             screenshot_surfaces: Vec::new(),
             screenshot_events: None,
-            viewer: crate::screenshot_viewer::ScreenshotViewer::new(),
+            viewer: crate::screenshot_viewer::ScreenshotViewer::new(
+                &config_for_cc.metrics.screenshot_viewer,
+                &config_for_cc.screenshot,
+            ),
             viewer_window: None,
             hover_menus: crate::ui::hover_menu::HoverMenus::new(),
             hover_surfaces: Vec::new(),
@@ -331,8 +343,8 @@ impl App {
             pointer_pressed: false,
             modifiers: Modifiers::default(),
             keyboard_focus: None,
-            config_path: path,
-            config_mtime,
+            config_source,
+            config_stamp,
             last_reload_check: std::time::Instant::now(),
             wake: None,
             ipc: None,
@@ -2386,38 +2398,29 @@ impl App {
         if !self.config.behavior.reload_on_change {
             return;
         }
-        let Some(path) = self.config_path.clone() else {
-            return;
-        };
         if self.last_reload_check.elapsed() < std::time::Duration::from_secs(1) {
             return;
         }
         self.last_reload_check = std::time::Instant::now();
 
-        let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-        if mtime.is_none() || mtime == self.config_mtime {
+        // A file that appears, changes or goes away all change the stamp.
+        let stamp = self.config_source.user_stamp();
+        if stamp == self.config_stamp {
             return;
         }
+        self.config_stamp = stamp;
 
-        // Only touch files that changed; re-read through the normal loader so
-        // validation and defaults behave identically to startup.
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(err) => {
-                tracing::warn!("config reload failed to read {}: {err}", path.display());
-                return;
-            }
-        };
-        match toml::from_str::<Config>(&text) {
+        // The same loader as at startup, so the defaults and the checks are
+        // identical.
+        match self.config_source.load() {
             Ok(config) => {
-                info!("reloaded configuration from {}", path.display());
+                info!("reloaded configuration");
                 let width_changed = config.sidebar.width != self.config.sidebar.width
                     || config.sidebar.position != self.config.sidebar.position
                     || config.sidebar.inverted_corners != self.config.sidebar.inverted_corners
                     || config.metrics.bar.corner_size != self.config.metrics.bar.corner_size;
                 self.config = Arc::new(config);
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
-                self.config_mtime = mtime;
                 if width_changed {
                     info!("sidebar geometry changed; restart to apply the new anchorage");
                 }
@@ -2426,10 +2429,7 @@ impl App {
                 }
             }
             Err(err) => {
-                tracing::error!(
-                    "config reload rejected for {}:\n{err}\nkeeping the previous configuration",
-                    path.display()
-                );
+                tracing::error!("config reload rejected: {err}\nkeeping the previous configuration");
             }
         }
     }

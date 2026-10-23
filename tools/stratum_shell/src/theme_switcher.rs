@@ -40,7 +40,7 @@ pub struct ThemeSwitcher {
 }
 
 impl ThemeSwitcher {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::ThemeSwitcherMetrics) -> Self {
         Self {
             open: false,
             target: None,
@@ -49,7 +49,7 @@ impl ThemeSwitcher {
             scroll: 0,
             rows: Vec::new(),
             card: None,
-            metrics: crate::ui::style::ThemeSwitcherMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -329,11 +329,6 @@ impl ThemeSwitcher {
     }
 }
 
-impl Default for ThemeSwitcher {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -355,7 +350,7 @@ mod tests {
 
     #[test]
     fn opens_on_the_current_theme() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.open_on("HDMI-A-1", &themes(), "nord");
         assert_eq!(s.target(), Some("HDMI-A-1"));
         assert_eq!(s.selection, Some(3));
@@ -363,7 +358,7 @@ mod tests {
 
     #[test]
     fn search_filters_case_insensitively_and_clamps() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.open_on("a", &themes(), "rose-pine");
         assert_eq!(s.selection, Some(4));
         typed(&mut s, "CA");
@@ -378,7 +373,7 @@ mod tests {
 
     #[test]
     fn arrows_wrap_and_return_applies() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.open_on("a", &themes(), "carbon");
         s.key(Keysym::Up, None, false, &themes());
         assert_eq!(s.selection, Some(4), "up from the first wraps to the last");
@@ -394,7 +389,7 @@ mod tests {
 
     #[test]
     fn escape_closes() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.toggle("a", &themes(), "carbon");
         assert!(s.is_open());
         s.key(Keysym::Escape, None, false, &themes());
@@ -404,7 +399,7 @@ mod tests {
 
     #[test]
     fn backspace_edits_the_search() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.open_on("a", &themes(), "carbon");
         typed(&mut s, "nordx");
         assert!(s.filtered(&themes()).is_empty());
@@ -415,7 +410,7 @@ mod tests {
 
     #[test]
     fn scrolling_keeps_the_selection_visible() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.metrics.max_rows = 2;
         s.open_on("a", &themes(), "carbon");
         s.selection = Some(4);
@@ -428,7 +423,7 @@ mod tests {
 
     #[test]
     fn clicks_apply_rows_and_close_outside() {
-        let mut s = ThemeSwitcher::new();
+        let mut s = ThemeSwitcher::new(&crate::config::Config::test_defaults().metrics.theme_switcher);
         s.open_on("a", &themes(), "carbon");
         let rect = |x: f32, y: f32, w: f32, h: f32| Rect {
             x,

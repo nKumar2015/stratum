@@ -150,15 +150,11 @@ pub struct ScreenshotViewer {
     colors: Vec<Color>,
 }
 
-impl Default for ScreenshotViewer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ScreenshotViewer {
-    pub fn new() -> Self {
-        let config = crate::config::ScreenshotConfig::default();
+    pub fn new(
+        metrics: &crate::ui::style::ScreenshotViewerMetrics,
+        config: &crate::config::ScreenshotConfig,
+    ) -> Self {
         Self {
             open: false,
             path: String::new(),
@@ -176,7 +172,7 @@ impl ScreenshotViewer {
             working: false,
             status: None,
             layout: Layout::default(),
-            metrics: Default::default(),
+            metrics: metrics.clone(),
             pen_max: config.pen_size_max,
             colors: config.colors(),
         }
@@ -886,7 +882,8 @@ mod tests {
     use super::*;
 
     fn viewer(width: u32, height: u32) -> ScreenshotViewer {
-        let mut v = ScreenshotViewer::new();
+        let config = crate::config::Config::test_defaults();
+        let mut v = ScreenshotViewer::new(&config.metrics.screenshot_viewer, &config.screenshot);
         v.show(
             String::new(),
             Mode::Region,

@@ -428,13 +428,13 @@ mod tests {
     #[test]
     fn the_wheel_down_moves_the_page_down_unless_inverted() {
         let point = crate::render::display_list::Point::new(0.0, 0.0);
-        let mut center = ControlCenter::new(Arc::new(Config::default()));
+        let mut center = ControlCenter::new(Arc::new(Config::test_defaults()));
         center.max_scroll = 200.0;
         // 120 is one notch toward the user.
         center.on_scroll(point, 120.0);
         assert!(center.scroll > 0.0, "wheel down scrolls the page down");
 
-        let mut config = Config::default();
+        let mut config = Config::test_defaults();
         config.control_center.invert_scroll = true;
         let mut center = ControlCenter::new(Arc::new(config));
         center.max_scroll = 200.0;
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn a_new_page_starts_at_the_top() {
-        let mut center = ControlCenter::new(Arc::new(Config::default()));
+        let mut center = ControlCenter::new(Arc::new(Config::test_defaults()));
         center.show(Page::Equalizer);
         center.max_scroll = 200.0;
         center.scroll = 120.0;
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn toggle_opens_the_requested_page() {
-        let config = Arc::new(Config::default());
+        let config = Arc::new(Config::test_defaults());
         let mut center = ControlCenter::new(config);
         assert!(!center.open);
 
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn show_is_not_a_toggle() {
-        let config = Arc::new(Config::default());
+        let config = Arc::new(Config::test_defaults());
         let mut center = ControlCenter::new(config);
         center.show(Page::Notifications);
         assert!(center.open);
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn switching_page_while_open_stays_open() {
-        let config = Arc::new(Config::default());
+        let config = Arc::new(Config::test_defaults());
         let mut center = ControlCenter::new(config);
         center.toggle(Page::Audio);
         center.toggle(Page::Wifi);
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn animation_reaches_its_target() {
-        let config = Arc::new(Config::default());
+        let config = Arc::new(Config::test_defaults());
         let mut center = ControlCenter::new(config);
         center.open = true;
         for _ in 0..100 {
@@ -512,13 +512,13 @@ mod tests {
 
     #[test]
     fn set_config_preserves_open_state_and_page() {
-        let mut config = Config::default();
+        let mut config = Config::test_defaults();
         config.theme = "carbon".into();
         let mut center = ControlCenter::new(Arc::new(config));
         center.toggle(Page::Display);
         assert!(center.open);
 
-        let mut next = Config::default();
+        let mut next = Config::test_defaults();
         next.theme = "gruvbox".into();
         next.control_center.width = 640;
         center.set_config(Arc::new(next));

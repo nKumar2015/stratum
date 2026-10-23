@@ -29,11 +29,11 @@ pub struct TrayMenuOverlay {
 }
 
 impl TrayMenuOverlay {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::TrayMenuMetrics) -> Self {
         Self {
             target: None,
             placement: Placement::default(),
-            metrics: crate::ui::style::TrayMenuMetrics::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -210,11 +210,6 @@ impl TrayMenuOverlay {
     }
 }
 
-impl Default for TrayMenuOverlay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -245,7 +240,7 @@ mod tests {
 
     #[test]
     fn size_follows_the_visible_rows() {
-        let overlay = TrayMenuOverlay::new();
+        let overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         let m = &overlay.metrics;
         let menu = menu(vec![entry(1, "One"), entry(2, "Two")]);
         let (width, height) = overlay.size(Some(&menu), |_| 20.0).unwrap();
@@ -255,7 +250,7 @@ mod tests {
 
     #[test]
     fn width_fits_the_widest_label_up_to_the_maximum() {
-        let overlay = TrayMenuOverlay::new();
+        let overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         let m = &overlay.metrics;
         let mut nested = entry(2, "Nested");
         nested.depth = 1;
@@ -275,7 +270,7 @@ mod tests {
 
     #[test]
     fn hidden_entries_do_not_take_space_or_clicks() {
-        let overlay = TrayMenuOverlay::new();
+        let overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         let mut hidden = entry(2, "Hidden");
         hidden.visible = false;
         let menu = menu(vec![entry(1, "One"), hidden, entry(3, "Three")]);
@@ -295,7 +290,7 @@ mod tests {
 
     #[test]
     fn separators_and_disabled_rows_are_not_clickable() {
-        let overlay = TrayMenuOverlay::new();
+        let overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         let mut separator = entry(2, "");
         separator.separator = true;
         let mut disabled = entry(3, "Disabled");
@@ -315,14 +310,14 @@ mod tests {
 
     #[test]
     fn empty_menu_has_no_size() {
-        let overlay = TrayMenuOverlay::new();
+        let overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         assert_eq!(overlay.size(None, |_| 0.0), None);
         assert_eq!(overlay.size(Some(&menu(Vec::new())), |_| 0.0), None);
     }
 
     #[test]
     fn opening_pins_the_output_and_closing_forgets_it() {
-        let mut overlay = TrayMenuOverlay::new();
+        let mut overlay = TrayMenuOverlay::new(&crate::config::Config::test_defaults().metrics.tray_menu);
         assert_eq!(overlay.target(), None);
         overlay.open("eDP-2", Placement { y: 100.0 });
         assert_eq!(overlay.target(), Some("eDP-2"));

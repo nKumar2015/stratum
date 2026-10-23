@@ -1,10 +1,15 @@
-# Stratum shell configuration
+# Stratum shell defaults
 #
-# Copy to one of:
-#   $XDG_CONFIG_HOME/stratum/config.toml   (usually ~/.config/stratum/config.toml)
-# or point STRATUM_CONFIG at this file.
+# This file is every default the shell has: the binary contains none of its
+# own and refuses a configuration that lacks a key. It is installed as
+# share/stratum/config.default.toml beside the binary.
 #
-# Every field below is optional; the built-in defaults match the old QML shell.
+# Your own file, $XDG_CONFIG_HOME/stratum/config.toml (usually
+# ~/.config/stratum/config.toml) or $STRATUM_CONFIG, is merged over this one:
+# tables merge key by key, anything else (a value, a list) replaces the
+# default. So it only needs the keys you change. The Home Manager module
+# writes this whole file with your `settings` merged in.
+#
 # Unknown keys are a hard error, so typos surface instead of being ignored.
 
 # Active theme, by key from the [themes.*] tables below.
@@ -66,27 +71,35 @@ pen_size_max = 16
 
 [sidebar]
 position = "left"       # "left" or "right"
-width = 40              # logical px
+width = 40              # logical px, vertical rail
+height = 32             # logical px, horizontal bar
 padding = 12            # space above and below the widget column
 spacing = 16            # gap between widgets
 inverted_corners = true # scooped corners where the rail meets the screen edge
+# axis = "vertical"     # or "horizontal"; omitted, it follows `position`
 
 # Widgets are rendered in this order, top to bottom. Delete an entry to hide
-# that widget. A widget with `height` omitted uses its intrinsic size; the
-# app_title widget is flexible and absorbs the leftover space, which pushes
-# everything after it to the bottom of the rail.
+# that widget. Each one says whether it is `framed` (a rounded box behind
+# it). A widget with `height` omitted uses its intrinsic size; the app_title
+# widget is flexible and absorbs the leftover space, which pushes everything
+# after it to the bottom of the rail. Setting `sidebar.widgets` in your own
+# file replaces this whole list.
 
 [[sidebar.widgets]]
 kind = "launcher"
+framed = false
 
 [[sidebar.widgets]]
 kind = "workspaces"
+framed = false
 
 [[sidebar.widgets]]
 kind = "app_title"
+framed = false
 
 [[sidebar.widgets]]
 kind = "tray"
+framed = false
 
 # Container: draws a rounded frame and stacks its children.
 [[sidebar.widgets]]
@@ -94,20 +107,23 @@ kind = "quick_panel"
 framed = true
 height = 86
 children = [
-  { kind = "audio" },
-  { kind = "bluetooth" },
-  { kind = "wifi" },
+  { kind = "audio", framed = false },
+  { kind = "bluetooth", framed = false },
+  { kind = "wifi", framed = false },
 ]
 
 [[sidebar.widgets]]
 kind = "battery"
+framed = false
 
 [[sidebar.widgets]]
 kind = "clock"
+framed = false
 
 # Add a fixed gap anywhere:
 # [[sidebar.widgets]]
 # kind = "spacer"
+# framed = false
 # height = 12
 
 
@@ -118,8 +134,8 @@ kind = "clock"
 # sizes, paddings, gaps, radii, and animation timings. Every value here is what
 # the widgets draw with, so a layout tweak is a number change, not a code change.
 #
-# Any section may be omitted; omitted values keep their defaults. Unknown keys
-# are an error, so a typo tells you instead of silently doing nothing.
+# Your file may omit any of these; omitted values keep the ones here. Unknown
+# keys are an error, so a typo tells you instead of silently doing nothing.
 # ---------------------------------------------------------------------------
 
 [metrics.typography]

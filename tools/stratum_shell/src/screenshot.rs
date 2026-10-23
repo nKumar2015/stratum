@@ -104,14 +104,8 @@ pub struct Screenshot {
     metrics: crate::ui::style::ScreenshotMetrics,
 }
 
-impl Default for Screenshot {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Screenshot {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::ScreenshotMetrics) -> Self {
         Self {
             phase: Phase::Closed,
             origin: String::new(),
@@ -121,7 +115,7 @@ impl Screenshot {
             drag: None,
             hover: None,
             next_key: 1,
-            metrics: Default::default(),
+            metrics: metrics.clone(),
         }
     }
 
@@ -566,7 +560,7 @@ mod tests {
     use super::*;
 
     fn opened() -> Screenshot {
-        let mut shot = Screenshot::new();
+        let mut shot = Screenshot::new(&crate::config::Config::test_defaults().metrics.screenshot);
         assert!(shot.open_on("A"));
         shot.frozen("A", 2, 2, vec![0; 16]);
         shot
@@ -612,7 +606,7 @@ mod tests {
 
     #[test]
     fn an_output_shows_only_once_frozen() {
-        let mut shot = Screenshot::new();
+        let mut shot = Screenshot::new(&crate::config::Config::test_defaults().metrics.screenshot);
         shot.open_on("A");
         assert!(!shot.shows("A"));
         shot.frozen("A", 1, 1, vec![0; 4]);

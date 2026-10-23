@@ -9,6 +9,9 @@ self: {
   cfg = config.programs.stratum;
   hostSystem = pkgs.stdenv.hostPlatform.system;
   toml = pkgs.formats.toml {};
+  # The shell's defaults, which the written file starts from. Read from this
+  # flake's source, not from the package, which would be import-from-derivation.
+  defaults = builtins.fromTOML (builtins.readFile ./tools/stratum_shell/config.default.toml);
 in {
   imports = [
     (lib.mkRemovedOptionModule ["programs" "stratum" "setupPolkit"] ''
@@ -45,9 +48,12 @@ in {
         }
       '';
       description = ''
-        Written to {file}`$XDG_CONFIG_HOME/stratum/config.toml` when not empty.
-        Leave it empty to keep that file your own (the shell reloads it on
-        change). The schema is `tools/stratum_shell/config.example.toml`.
+        Merged over the shell's defaults (`tools/stratum_shell/config.default.toml`,
+        which documents every option) and written whole to
+        {file}`$XDG_CONFIG_HOME/stratum/config.toml`, so that file always lists
+        every option with its value. Tables merge key by key; a list, such as
+        `sidebar.widgets`, replaces the default one. The shell reloads the
+        file when a rebuild changes it.
       '';
     };
 
@@ -72,9 +78,8 @@ in {
       ])
       ++ lib.optional cfg.installPortal pkgs.xdg-desktop-portal-gtk;
 
-    xdg.configFile."stratum/config.toml" = lib.mkIf (cfg.settings != {}) {
-      source = toml.generate "stratum-config.toml" cfg.settings;
-    };
+    xdg.configFile."stratum/config.toml".source =
+      toml.generate "stratum-config.toml" (lib.recursiveUpdate defaults cfg.settings);
 
     systemd.user.services.stratum-shell = {
       Unit = {

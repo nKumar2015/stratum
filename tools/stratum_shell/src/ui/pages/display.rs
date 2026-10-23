@@ -56,7 +56,7 @@ impl DisplayPage {
         let themes: Vec<(String, Theme)> = ctx
             .themes
             .iter()
-            .map(|(name, config)| (name.clone(), config.to_theme()))
+            .map(|(name, config)| (name.clone(), config.resolved()))
             .collect();
         let cols = layout::columns(body.width, m.theme_min_width, m.grid_gap, 4);
         let cells = layout::cells(body.x, y, body.width, themes.len(), cols, m.theme_height, m.grid_gap);

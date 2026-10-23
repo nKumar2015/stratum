@@ -1,19 +1,25 @@
 //! User configuration.
 //!
-//! The shell reads a single TOML file. Everything visual that a user is likely
-//! to want to change lives here: colours, fonts, which widgets appear, their
-//! order and spacing, and window placement.
+//! Every default lives in one file, `config.default.toml`, installed beside
+//! the binary as `share/stratum/config.default.toml`. The binary has none of
+//! its own: every field is required, and a configuration missing one is
+//! refused. The user's file is merged over the defaults (tables key by key,
+//! anything else replaced), so it only needs the keys it changes; the Home
+//! Manager module writes a complete one anyway.
 //!
-//! Resolution order (first match wins):
+//! The defaults, first that exists:
+//!   1. `$STRATUM_DEFAULTS`
+//!   2. `<binary>/../share/stratum/config.default.toml`
+//!   3. this crate's `config.default.toml` (debug builds only, for `cargo run`)
+//!
+//! The user's file, first that is set (it need not exist):
 //!   1. `$STRATUM_CONFIG`
 //!   2. `$XDG_CONFIG_HOME/stratum/config.toml`
 //!   3. `~/.config/stratum/config.toml`
-//!
-//! A missing file is not an error: the built-in defaults are a complete,
-//! sensible configuration (the Carbon theme and the standard sidebar).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -21,11 +27,11 @@ use crate::render::display_list::Color;
 
 /// The whole configuration file.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Name of the active theme from [`Config::themes`].
     pub theme: String,
-    /// Theme definitions. Colour values are `#rrggbb` or `#rrggbbaa`.
+    /// Theme definitions. Colour values are `#rgb`, `#rrggbb` or `#rrggbbaa`.
     pub themes: BTreeMap<String, ThemeConfig>,
     pub sidebar: SidebarConfig,
     pub appearance: AppearanceConfig,
@@ -38,71 +44,185 @@ pub struct Config {
     pub metrics: crate::ui::style::Metrics,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            theme: "carbon".to_string(),
-            themes: builtin_themes(),
-            sidebar: SidebarConfig::default(),
-            appearance: AppearanceConfig::default(),
-            behavior: BehaviorConfig::default(),
-            control_center: ControlCenterConfig::default(),
-            lock: LockConfig::default(),
-            screenshot: ScreenshotConfig::default(),
-            render: RenderConfig::default(),
-            metrics: crate::ui::style::Metrics::default(),
+impl Config {
+    /// Merge `layers` in order, each over the ones before it, and check the
+    /// result. Each layer is a file's path (for errors) and its text.
+    pub fn from_layers(layers: &[(&Path, &str)]) -> Result<Self, ConfigError> {
+        let mut merged = toml::Table::new();
+        for (path, text) in layers {
+            let table: toml::Table = toml::from_str(text).map_err(|err| ConfigError::Parse {
+                path: path.to_path_buf(),
+                message: err.to_string(),
+            })?;
+            merge(&mut merged, table);
+        }
+        let sources = layers
+            .iter()
+            .map(|(path, _)| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let config: Config = toml::Value::Table(merged)
+            .try_into()
+            .map_err(|err: toml::de::Error| ConfigError::Invalid {
+                sources: sources.clone(),
+                message: err.to_string(),
+            })?;
+        config
+            .validate()
+            .map_err(|message| ConfigError::Invalid { sources, message })?;
+        Ok(config)
+    }
+
+    /// What deserialising cannot check: values that must parse, and lists
+    /// that must not be empty. Everything that reads them relies on this, so
+    /// none of it needs a fallback.
+    fn validate(&self) -> Result<(), String> {
+        if self.themes.is_empty() {
+            return Err("no themes are defined".into());
+        }
+        for (name, theme) in &self.themes {
+            theme.to_theme().map_err(|err| format!("themes.{name}: {err}"))?;
+        }
+        if self.screenshot.pen_colors.is_empty() {
+            return Err("screenshot.pen_colors is empty".into());
+        }
+        for colour in &self.screenshot.pen_colors {
+            if parse_color(colour).is_none() {
+                return Err(format!("screenshot.pen_colors: `{colour}` is not a colour"));
+            }
+        }
+        Ok(())
+    }
+
+    /// The active theme. An unknown name (a typo) shows the first theme
+    /// rather than refusing the whole configuration.
+    pub fn active_theme(&self) -> Theme {
+        let named = self
+            .themes
+            .get_key_value(&self.theme)
+            .or_else(|| self.themes.get_key_value(&self.theme.to_lowercase()))
+            .or_else(|| self.themes.iter().next());
+        let (name, theme) = named.expect("validated: at least one theme");
+        let mut resolved = theme.resolved();
+        resolved.name = name.clone();
+        resolved
+    }
+
+    /// The shipped defaults alone, as tests see them.
+    #[cfg(test)]
+    pub fn test_defaults() -> Self {
+        let text = include_str!("../config.default.toml");
+        Self::from_layers(&[(Path::new("config.default.toml"), text)]).expect("shipped defaults are valid")
+    }
+}
+
+/// Where the configuration comes from: the defaults, and the user's file
+/// merged over them.
+#[derive(Clone, Debug)]
+pub struct ConfigSource {
+    pub defaults: PathBuf,
+    /// The user's file, which need not exist. `None` only without `$HOME`.
+    pub user: Option<PathBuf>,
+}
+
+impl ConfigSource {
+    pub fn locate() -> Result<Self, ConfigError> {
+        let candidates = defaults_candidates();
+        let defaults = candidates
+            .iter()
+            .find(|path| path.is_file())
+            .cloned()
+            .ok_or(ConfigError::NoDefaults { searched: candidates })?;
+        Ok(Self {
+            defaults,
+            user: user_path(),
+        })
+    }
+
+    /// The defaults with the user's file, when it exists, merged over them.
+    pub fn load(&self) -> Result<Config, ConfigError> {
+        let defaults = read(&self.defaults)?;
+        match self.user.as_deref().filter(|path| path.is_file()) {
+            Some(user) => {
+                let text = read(user)?;
+                Config::from_layers(&[(&self.defaults, &defaults), (user, &text)])
+            }
+            None => Config::from_layers(&[(&self.defaults, &defaults)]),
+        }
+    }
+
+    /// The defaults alone, for a start whose user file is broken: better the
+    /// default bar than none.
+    pub fn load_defaults(&self) -> Result<Config, ConfigError> {
+        Config::from_layers(&[(&self.defaults, &read(&self.defaults)?)])
+    }
+
+    /// Changes whenever the user's file does. The modification time alone is
+    /// not enough: Home Manager makes the file a link into the Nix store,
+    /// where every file has the same time, and a rebuild only re-points the
+    /// link. The link's target changes with its contents, so it is part of
+    /// the stamp. `None` while the file does not exist.
+    pub fn user_stamp(&self) -> Option<(PathBuf, SystemTime)> {
+        let target = std::fs::canonicalize(self.user.as_ref()?).ok()?;
+        let modified = std::fs::metadata(&target).ok()?.modified().ok()?;
+        Some((target, modified))
+    }
+}
+
+/// Merge `over` into `base`: tables key by key, anything else replaced. A
+/// list is replaced whole, so a user's `sidebar.widgets` is the whole bar.
+fn merge(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base)), toml::Value::Table(over)) => merge(base, over),
+            (_, value) => {
+                base.insert(key, value);
+            }
         }
     }
 }
 
-impl Config {
-    /// Load the configuration, falling back to defaults when no file exists.
-    ///
-    /// Parse errors are returned rather than silently ignored: a typo in a
-    /// colour should be visible, not mysteriously ignored.
-    pub fn load() -> Result<(Self, Option<PathBuf>), ConfigError> {
-        let Some(path) = config_path() else {
-            return Ok((Self::default(), None));
-        };
-        if !path.is_file() {
-            return Ok((Self::default(), None));
-        }
-        let text = std::fs::read_to_string(&path).map_err(|err| ConfigError::Io {
-            path: path.clone(),
-            message: err.to_string(),
-        })?;
-        let config: Config = toml::from_str(&text).map_err(|err| ConfigError::Parse {
-            path: path.clone(),
-            message: err.to_string(),
-        })?;
-        Ok((config, Some(path)))
-    }
+fn read(path: &Path) -> Result<String, ConfigError> {
+    std::fs::read_to_string(path).map_err(|err| ConfigError::Io {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })
+}
 
-    /// Resolve the active theme, falling back to the default when the name is
-    /// unknown (a bad theme name must not blank the shell).
-    pub fn active_theme(&self) -> Theme {
-        let named = self
-            .themes
-            .get(&self.theme)
-            .or_else(|| self.themes.get(&self.theme.to_lowercase()));
-        match named {
-            Some(theme) => {
-                let mut resolved = theme.to_theme();
-                resolved.name = self.theme.clone();
-                resolved
-            }
-            None => {
-                let mut resolved = Theme::default();
-                resolved.name = "carbon".to_string();
-                resolved
-            }
-        }
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn defaults_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    candidates.extend(env_path("STRATUM_DEFAULTS"));
+    if let Some(prefix) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent()?.parent().map(Path::to_path_buf))
+    {
+        candidates.push(prefix.join("share/stratum/config.default.toml"));
     }
+    #[cfg(debug_assertions)]
+    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("config.default.toml"));
+    candidates
+}
+
+fn user_path() -> Option<PathBuf> {
+    if let Some(explicit) = env_path("STRATUM_CONFIG") {
+        return Some(explicit);
+    }
+    // XDG_CONFIG_HOME when set, else ~/.config — both per the XDG base spec.
+    if let Some(config_home) = env_path("XDG_CONFIG_HOME") {
+        return Some(config_home.join("stratum/config.toml"));
+    }
+    env_path("HOME").map(|home| home.join(".config/stratum/config.toml"))
 }
 
 /// One named theme.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ThemeConfig {
     pub bg_main: String,
     pub bg_widget: String,
@@ -120,103 +240,66 @@ pub struct ThemeConfig {
     pub border_inactive: String,
     pub font: String,
 
-    // Optional Material-style aliases. Each falls back to an existing colour,
-    // so a config only needs to set the ones it cares about. This is the
+    // Optional Material-style aliases. Each one left out is derived from a
+    // colour above, so a theme only sets the ones it cares about. This is the
     // vocabulary loaf-fm uses and makes multi-surface theming coherent.
-    #[serde(default)]
     pub surface_lowest: Option<String>,
-    #[serde(default)]
     pub surface_low: Option<String>,
-    #[serde(default)]
     pub surface: Option<String>,
-    #[serde(default)]
     pub surface_high: Option<String>,
-    #[serde(default)]
     pub surface_highest: Option<String>,
-    #[serde(default)]
     pub outline: Option<String>,
-    #[serde(default)]
     pub on_primary: Option<String>,
-    #[serde(default)]
     pub on_surface: Option<String>,
 }
 
-impl Default for ThemeConfig {
-    fn default() -> Self {
-        Self {
-            bg_main: "#161616".into(),
-            bg_widget: "#262626".into(),
-            bg_hover: "#393939".into(),
-            bg_dark: "#15161e".into(),
-            text_main: "#f4f4f4".into(),
-            text_muted: "#8d8d8d".into(),
-            primary: "#4589ff".into(),
-            secondary: "#a56eff".into(),
-            tertiary: "#33b1ff".into(),
-            success: "#42be64".into(),
-            warning: "#f1c21b".into(),
-            error: "#fa4d56".into(),
-            border_active: "#4589ff".into(),
-            border_inactive: "#393939".into(),
-            font: "JetBrainsMono NFM".into(),
-            surface_lowest: None,
-            surface_low: None,
-            surface: None,
-            surface_high: None,
-            surface_highest: None,
-            outline: None,
-            on_primary: None,
-            on_surface: None,
-        }
-    }
-}
-
 impl ThemeConfig {
-    pub(crate) fn to_theme(&self) -> Theme {
-        // Fallbacks are literal colours: calling `Theme::default()` here would
-        // recurse, because the default theme is built from a `ThemeConfig`.
-        let f = Color::BLACK;
-        Theme {
-            bg_main: parse_color(&self.bg_main, f),
-            bg_widget: parse_color(&self.bg_widget, f),
-            bg_hover: parse_color(&self.bg_hover, f),
-            bg_dark: parse_color(&self.bg_dark, f),
-            text_main: parse_color(&self.text_main, f),
-            text_muted: parse_color(&self.text_muted, f),
-            primary: parse_color(&self.primary, f),
-            secondary: parse_color(&self.secondary, f),
-            tertiary: parse_color(&self.tertiary, f),
-            success: parse_color(&self.success, f),
-            warning: parse_color(&self.warning, f),
-            error: parse_color(&self.error, f),
-            border_active: parse_color(&self.border_active, f),
-            border_inactive: parse_color(&self.border_inactive, f),
+    /// The palette, or the first colour that does not parse.
+    fn to_theme(&self) -> Result<Theme, String> {
+        let c = |field: &str, value: &str| {
+            parse_color(value).ok_or_else(|| format!("{field}: `{value}` is not a colour"))
+        };
+        let alias = |field: &str, value: &Option<String>, base: &str| {
+            c(field, value.as_deref().unwrap_or(base))
+        };
+        Ok(Theme {
+            bg_main: c("bg_main", &self.bg_main)?,
+            bg_widget: c("bg_widget", &self.bg_widget)?,
+            bg_hover: c("bg_hover", &self.bg_hover)?,
+            bg_dark: c("bg_dark", &self.bg_dark)?,
+            text_main: c("text_main", &self.text_main)?,
+            text_muted: c("text_muted", &self.text_muted)?,
+            primary: c("primary", &self.primary)?,
+            secondary: c("secondary", &self.secondary)?,
+            tertiary: c("tertiary", &self.tertiary)?,
+            success: c("success", &self.success)?,
+            warning: c("warning", &self.warning)?,
+            error: c("error", &self.error)?,
+            border_active: c("border_active", &self.border_active)?,
+            border_inactive: c("border_inactive", &self.border_inactive)?,
             font: self.font.clone(),
-            surface_lowest: parse_color(
-                self.surface_lowest.as_deref().unwrap_or(&self.bg_dark),
-                f,
-            ),
-            surface_low: parse_color(self.surface_low.as_deref().unwrap_or(&self.bg_main), f),
-            surface: parse_color(self.surface.as_deref().unwrap_or(&self.bg_main), f),
-            surface_high: parse_color(self.surface_high.as_deref().unwrap_or(&self.bg_widget), f),
-            surface_highest: parse_color(
-                self.surface_highest.as_deref().unwrap_or(&self.bg_hover),
-                f,
-            ),
-            outline: parse_color(
-                self.outline.as_deref().unwrap_or(&self.border_inactive),
-                f,
-            ),
-            on_primary: parse_color(self.on_primary.as_deref().unwrap_or(&self.bg_main), f),
-            on_surface: parse_color(self.on_surface.as_deref().unwrap_or(&self.text_main), f),
+            surface_lowest: alias("surface_lowest", &self.surface_lowest, &self.bg_dark)?,
+            surface_low: alias("surface_low", &self.surface_low, &self.bg_main)?,
+            surface: alias("surface", &self.surface, &self.bg_main)?,
+            surface_high: alias("surface_high", &self.surface_high, &self.bg_widget)?,
+            surface_highest: alias("surface_highest", &self.surface_highest, &self.bg_hover)?,
+            outline: alias("outline", &self.outline, &self.border_inactive)?,
+            on_primary: alias("on_primary", &self.on_primary, &self.bg_main)?,
+            on_surface: alias("on_surface", &self.on_surface, &self.text_main)?,
             name: String::new(),
-        }
+        })
+    }
+
+    /// The palette of a theme from a loaded configuration, whose colours
+    /// were checked when it loaded.
+    pub(crate) fn resolved(&self) -> Theme {
+        self.to_theme().expect("theme colours are validated when the config loads")
     }
 }
 
 /// Bar layout: placement, orientation, and which widgets to show, in order.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct SidebarConfig {
     /// Which screen edge the bar occupies.
     pub position: SidebarPosition,
@@ -237,40 +320,9 @@ pub struct SidebarConfig {
     pub inverted_corners: bool,
 }
 
-impl Default for SidebarConfig {
-    fn default() -> Self {
-        Self {
-            position: SidebarPosition::Left,
-            axis: None,
-            width: 40,
-            height: 32,
-            padding: 12,
-            spacing: 16,
-            widgets: vec![
-                WidgetConfig::simple(WidgetKind::Launcher),
-                WidgetConfig::simple(WidgetKind::Workspaces),
-                WidgetConfig::simple(WidgetKind::AppTitle),
-                WidgetConfig::simple(WidgetKind::Tray),
-                WidgetConfig::group(
-                    WidgetKind::QuickPanel,
-                    vec![
-                        WidgetConfig::simple(WidgetKind::Audio),
-                        WidgetConfig::simple(WidgetKind::Bluetooth),
-                        WidgetConfig::simple(WidgetKind::Wifi),
-                    ],
-                ),
-                WidgetConfig::simple(WidgetKind::Battery),
-                WidgetConfig::simple(WidgetKind::Clock),
-            ],
-            inverted_corners: true,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarPosition {
-    #[default]
     Left,
     Right,
     Top,
@@ -305,35 +357,13 @@ impl SidebarConfig {
 pub struct WidgetConfig {
     pub kind: WidgetKind,
     /// Background box drawn behind the widget (the "quick panel" look).
-    #[serde(default)]
     pub framed: bool,
     /// Vertical space this widget reserves. `None` uses the widget's intrinsic
     /// size, which is what most widgets want.
-    #[serde(default)]
     pub height: Option<u32>,
-    /// Children, for container widgets only.
+    /// Children, for container widgets only; left out, there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<WidgetConfig>,
-}
-
-impl WidgetConfig {
-    fn simple(kind: WidgetKind) -> Self {
-        Self {
-            kind,
-            framed: false,
-            height: None,
-            children: Vec::new(),
-        }
-    }
-
-    fn group(kind: WidgetKind, children: Vec<WidgetConfig>) -> Self {
-        Self {
-            kind,
-            framed: true,
-            height: Some(86),
-            children,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -354,7 +384,7 @@ pub enum WidgetKind {
 
 /// Look-and-feel knobs that are not colours.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct AppearanceConfig {
     /// Base font size for body text, in logical pixels.
     pub font_size: f32,
@@ -372,21 +402,9 @@ pub struct AppearanceConfig {
     pub icon_font: String,
 }
 
-impl Default for AppearanceConfig {
-    fn default() -> Self {
-        Self {
-            font_size: 13.0,
-            corner_radius: 15.0,
-            animation_ms: 180,
-            framed_border: true,
-            icon_font: "JetBrainsMonoNL Nerd Font".into(),
-        }
-    }
-}
-
 /// The paged settings surface.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ControlCenterConfig {
     /// Panel width in logical pixels.
     pub width: u32,
@@ -398,20 +416,9 @@ pub struct ControlCenterConfig {
     pub invert_scroll: bool,
 }
 
-impl Default for ControlCenterConfig {
-    fn default() -> Self {
-        Self {
-            width: 520,
-            animation_ms: 160,
-            default_page: "overview".into(),
-            invert_scroll: false,
-        }
-    }
-}
-
 /// Runtime behaviour.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviorConfig {
     /// Poll interval for widgets that are not push-driven, in milliseconds.
     pub poll_ms: u64,
@@ -425,27 +432,13 @@ pub struct BehaviorConfig {
     pub notifications: bool,
     /// Register as the session's polkit authentication agent and show the
     /// password dialog. polkit allows one agent per session; turn it off
-    /// while another agent (stratumd, during the migration) holds it.
+    /// while another agent holds it.
     pub polkit: bool,
-}
-
-impl Default for BehaviorConfig {
-    fn default() -> Self {
-        // On: this shell is the session's only shell. They were off while it
-        // ran beside Quickshell, which owned all three.
-        Self {
-            poll_ms: 3000,
-            reload_on_change: true,
-            tray: true,
-            notifications: true,
-            polkit: true,
-        }
-    }
 }
 
 /// The screenshot viewer's annotation pen.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ScreenshotConfig {
     /// Pen colours offered, in order; the first is selected on open. These
     /// are drawn into the image, so they do not follow the theme.
@@ -455,53 +448,27 @@ pub struct ScreenshotConfig {
     pub pen_size_max: u32,
 }
 
-impl Default for ScreenshotConfig {
-    fn default() -> Self {
-        // The QML viewer's presets.
-        Self {
-            pen_colors: ["#ff3b30", "#34c759", "#0a84ff", "#ffd60a", "#ffffff", "#000000"]
-                .map(String::from)
-                .to_vec(),
-            pen_size: 3,
-            pen_size_max: 16,
-        }
-    }
-}
-
 impl ScreenshotConfig {
-    /// The pen colours, parsed; malformed entries are skipped.
+    /// The pen colours, parsed. Loading checked that they all parse and that
+    /// there is at least one.
     pub fn colors(&self) -> Vec<Color> {
-        let colors: Vec<Color> = self
-            .pen_colors
-            .iter()
-            .filter_map(|c| {
-                let sentinel = Color::rgba(0.0, 0.0, 0.0, 0.0);
-                let parsed = parse_color(c, sentinel);
-                (parsed.a > 0.0).then_some(parsed)
-            })
-            .collect();
-        if colors.is_empty() {
-            Self::default().colors()
-        } else {
-            colors
-        }
+        self.pen_colors.iter().filter_map(|c| parse_color(c)).collect()
     }
 }
 
 /// Which GPU the shell renders on. Read once at start; a reload does not move
 /// the shell to another GPU.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RenderConfig {
     pub gpu: GpuPreference,
 }
 
 /// A GPU by vendor. `Auto` prefers an integrated GPU, then any other; a vendor
 /// that is not present falls back to `Auto`.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GpuPreference {
-    #[default]
     Auto,
     Nvidia,
     Radeon,
@@ -510,7 +477,7 @@ pub enum GpuPreference {
 
 /// The lock screen's artwork and authentication.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct LockConfig {
     /// Wallpaper shown blurred behind the lock screen. `~/` is expanded. A
     /// missing file falls back to the theme's dark background.
@@ -522,17 +489,6 @@ pub struct LockConfig {
     /// shell refuses to lock when none exists rather than lock with a service
     /// that can never succeed.
     pub pam_service: String,
-}
-
-impl Default for LockConfig {
-    fn default() -> Self {
-        // The paths the QML lock screen used.
-        Self {
-            wallpaper: "~/Pictures/Wallpapers/current_wp.png".to_string(),
-            avatar: "~/Pictures/pfp.png".to_string(),
-            pam_service: "stratum-shell".to_string(),
-        }
-    }
 }
 
 /// A resolved, ready-to-draw palette.
@@ -570,167 +526,57 @@ pub struct Theme {
     pub name: String,
 }
 
-impl Default for Theme {
-    fn default() -> Self {
-        ThemeConfig::default().to_theme()
+/// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa`.
+fn parse_color(value: &str) -> Option<Color> {
+    let hex = value.trim().strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
     }
-}
-
-/// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa`, falling back when malformed.
-fn parse_color(value: &str, fallback: Color) -> Color {
-    let hex = value.trim().trim_start_matches('#');
     let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
-    match hex.len() {
+    let (r, g, b, a) = match hex.len() {
         3 => {
-            let expand = |c: u8| c * 17;
-            let r = u8::from_str_radix(&hex[0..1], 16).ok().map(expand);
-            let g = u8::from_str_radix(&hex[1..2], 16).ok().map(expand);
-            let b = u8::from_str_radix(&hex[2..3], 16).ok().map(expand);
-            match (r, g, b) {
-                (Some(r), Some(g), Some(b)) => {
-                    Color::rgba(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
-                }
-                _ => fallback,
-            }
+            let digit = |i: usize| u8::from_str_radix(&hex[i..i + 1], 16).ok().map(|c| c * 17);
+            (digit(0)?, digit(1)?, digit(2)?, 255)
         }
-        6 | 8 => {
-            let (r, g, b) = (channel(0), channel(2), channel(4));
-            let a = if hex.len() == 8 { channel(6) } else { Some(255) };
-            match (r, g, b, a) {
-                (Some(r), Some(g), Some(b), Some(a)) => Color::rgba(
-                    r as f32 / 255.0,
-                    g as f32 / 255.0,
-                    b as f32 / 255.0,
-                    a as f32 / 255.0,
-                ),
-                _ => fallback,
-            }
-        }
-        _ => fallback,
-    }
-}
-
-fn config_path() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("STRATUM_CONFIG") {
-        if !explicit.is_empty() {
-            return Some(PathBuf::from(explicit));
-        }
-    }
-    // XDG_CONFIG_HOME when set, else ~/.config — both per the XDG base spec.
-    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
-        if !config_home.is_empty() {
-            return Some(Path::new(&config_home).join("stratum/config.toml"));
-        }
-    }
-    std::env::var("HOME")
-        .ok()
-        .map(|home| Path::new(&home).join(".config/stratum/config.toml"))
-}
-
-/// The four themes the QML shell shipped with, keyed by lowercase name.
-fn builtin_themes() -> BTreeMap<String, ThemeConfig> {
-    let mut themes = BTreeMap::new();
-    themes.insert(
-        "carbon".into(),
-        ThemeConfig {
-            bg_main: "#161616".into(),
-            bg_widget: "#262626".into(),
-            bg_hover: "#393939".into(),
-            bg_dark: "#15161e".into(),
-            text_main: "#f4f4f4".into(),
-            text_muted: "#8d8d8d".into(),
-            primary: "#4589ff".into(),
-            secondary: "#a56eff".into(),
-            tertiary: "#33b1ff".into(),
-            success: "#42be64".into(),
-            warning: "#f1c21b".into(),
-            error: "#fa4d56".into(),
-            border_active: "#4589ff".into(),
-            border_inactive: "#393939".into(),
-            font: "JetBrainsMono NFM".into(),
-            ..ThemeConfig::default()
-        },
-    );
-    themes.insert(
-        "gruvbox".into(),
-        ThemeConfig {
-            bg_main: "#1d2021".into(),
-            bg_widget: "#282828".into(),
-            bg_hover: "#3c3836".into(),
-            bg_dark: "#141617".into(),
-            text_main: "#ebdbb2".into(),
-            text_muted: "#a89984".into(),
-            primary: "#83a598".into(),
-            secondary: "#d3869b".into(),
-            tertiary: "#fe8019".into(),
-            success: "#b8bb26".into(),
-            warning: "#fabd2f".into(),
-            error: "#fb4934".into(),
-            border_active: "#83a598".into(),
-            border_inactive: "#141617".into(),
-            font: "JetBrainsMono NFM".into(),
-            ..ThemeConfig::default()
-        },
-    );
-    themes.insert(
-        "rosepine".into(),
-        ThemeConfig {
-            bg_main: "#1f1d2e".into(),
-            bg_widget: "#26233a".into(),
-            bg_hover: "#403d52".into(),
-            bg_dark: "#191724".into(),
-            text_main: "#e0def4".into(),
-            text_muted: "#908caa".into(),
-            primary: "#c4a7e7".into(),
-            secondary: "#ebbcba".into(),
-            tertiary: "#31748f".into(),
-            success: "#9ccfd8".into(),
-            warning: "#f6c177".into(),
-            error: "#eb6f92".into(),
-            border_active: "#c4a7e7".into(),
-            border_inactive: "#191724".into(),
-            font: "JetBrainsMono NFM".into(),
-            ..ThemeConfig::default()
-        },
-    );
-    themes.insert(
-        "tokyonight".into(),
-        ThemeConfig {
-            bg_main: "#1a1b26".into(),
-            bg_widget: "#1f2335".into(),
-            bg_hover: "#292e42".into(),
-            bg_dark: "#15161e".into(),
-            text_main: "#c0caf5".into(),
-            text_muted: "#565f89".into(),
-            primary: "#7aa2f7".into(),
-            secondary: "#bb9af7".into(),
-            tertiary: "#7dcfff".into(),
-            success: "#9ece6a".into(),
-            warning: "#e0af68".into(),
-            error: "#f7768e".into(),
-            border_active: "#7aa2f7".into(),
-            border_inactive: "#15161e".into(),
-            font: "JetBrainsMono NFM".into(),
-            ..ThemeConfig::default()
-        },
-    );
-    themes
+        6 => (channel(0)?, channel(2)?, channel(4)?, 255),
+        8 => (channel(0)?, channel(2)?, channel(4)?, channel(6)?),
+        _ => return None,
+    };
+    Some(Color::rgba(
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+        a as f32 / 255.0,
+    ))
 }
 
 #[derive(Debug)]
 pub enum ConfigError {
+    NoDefaults { searched: Vec<PathBuf> },
     Io { path: PathBuf, message: String },
     Parse { path: PathBuf, message: String },
+    Invalid { sources: String, message: String },
 }
 
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ConfigError::NoDefaults { searched } => {
+                let searched = searched
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "no config.default.toml found (searched {searched}); set STRATUM_DEFAULTS")
+            }
             ConfigError::Io { path, message } => {
                 write!(f, "failed to read {}: {}", path.display(), message)
             }
             ConfigError::Parse { path, message } => {
-                write!(f, "invalid config at {}:\n{}", path.display(), message)
+                write!(f, "invalid TOML in {}:\n{}", path.display(), message)
+            }
+            ConfigError::Invalid { sources, message } => {
+                write!(f, "invalid configuration ({sources}):\n{message}")
             }
         }
     }
@@ -742,100 +588,143 @@ impl std::error::Error for ConfigError {}
 mod tests {
     use super::*;
 
+    const DEFAULTS: &str = include_str!("../config.default.toml");
+
+    fn with_user(user: &str) -> Result<Config, ConfigError> {
+        Config::from_layers(&[(Path::new("defaults"), DEFAULTS), (Path::new("user"), user)])
+    }
+
     #[test]
-    fn defaults_cover_every_widget() {
-        let config = Config::default();
+    fn shipped_defaults_are_complete() {
+        let config = Config::test_defaults();
         assert_eq!(config.theme, "carbon");
         assert!(config.themes.contains_key("gruvbox"));
         assert!(config.sidebar.widgets.iter().any(|w| w.kind == WidgetKind::Clock));
     }
 
     #[test]
-    fn parses_hex_with_and_without_alpha() {
-        let fallback = crate::render::display_list::Color::WHITE;
-        let c = parse_color("#ff0000", fallback);
-        assert_eq!(c.r, 1.0);
-        assert_eq!(c.a, 1.0);
-
-        let c = parse_color("#00ff0080", fallback);
-        assert!((c.a - 0.502).abs() < 0.01);
-
-        let c = parse_color("#0f0", fallback);
-        assert_eq!(c.g, 1.0);
+    fn a_key_missing_from_every_layer_is_an_error() {
+        let mut table: toml::Table = toml::from_str(DEFAULTS).unwrap();
+        let tray = table["metrics"]["tray"].as_table().unwrap().clone();
+        let mut tray = tray;
+        tray.remove("cell");
+        table["metrics"].as_table_mut().unwrap().insert("tray".into(), tray.into());
+        let text = toml::to_string(&table).unwrap();
+        let err = Config::from_layers(&[(Path::new("defaults"), &text)]).unwrap_err();
+        assert!(err.to_string().contains("cell"), "{err}");
     }
 
     #[test]
-    fn malformed_colour_falls_back() {
-        let fallback = crate::render::display_list::Color::BLACK;
-        assert_eq!(parse_color("not-a-colour", fallback).r, 0.0);
-        assert_eq!(parse_color("#12345", fallback).r, 0.0);
+    fn user_tables_merge_over_the_defaults() {
+        let config = with_user("[metrics.workspaces]\nvisible = 7\n").unwrap();
+        assert_eq!(config.metrics.workspaces.visible, 7);
+        // Untouched keys, in the same table and elsewhere, keep the defaults.
+        let defaults = Config::test_defaults();
+        assert_eq!(config.metrics.workspaces.gap, defaults.metrics.workspaces.gap);
+        assert_eq!(config.metrics.typography.workspace, defaults.metrics.typography.workspace);
     }
 
     #[test]
-    fn unknown_theme_name_falls_back_to_default() {
-        let mut config = Config::default();
-        config.theme = "does-not-exist".into();
-        let theme = config.active_theme();
-        assert_eq!(theme.bg_main, Theme::default().bg_main);
-    }
-
-    #[test]
-    fn round_trips_through_toml() {
-        let config = Config::default();
-        let text = toml::to_string(&config).expect("serialize");
-        let parsed: Config = toml::from_str(&text).expect("deserialize");
-        assert_eq!(parsed.theme, config.theme);
-        assert_eq!(parsed.sidebar.widgets.len(), config.sidebar.widgets.len());
-    }
-
-    #[test]
-    fn widget_order_and_framing_are_configurable() {
-        let text = r##"
+    fn a_user_list_replaces_the_default_one() {
+        let config = with_user(
+            r##"
             theme = "gruvbox"
 
             [[sidebar.widgets]]
             kind = "clock"
+            framed = false
 
             [[sidebar.widgets]]
             kind = "quick_panel"
             framed = true
             children = [
-              { kind = "audio" },
-              { kind = "battery" },
+              { kind = "audio", framed = false },
+              { kind = "battery", framed = false },
             ]
-        "##;
-        let config: Config = toml::from_str(text).expect("parse");
+            "##,
+        )
+        .unwrap();
         let widgets = &config.sidebar.widgets;
+        assert_eq!(widgets.len(), 2);
         assert_eq!(widgets[0].kind, WidgetKind::Clock);
-        assert_eq!(widgets[1].kind, WidgetKind::QuickPanel);
         assert!(widgets[1].framed);
-        assert_eq!(widgets[1].children.len(), 2);
         assert_eq!(widgets[1].children[1].kind, WidgetKind::Battery);
     }
 
     #[test]
-    fn rejects_unknown_keys() {
-        let text = r#"theme = "carbon"
-            [[sidebar.widgets]]
-            kind = "clock"
-            nonsense = true
-        "#;
-        assert!(toml::from_str::<Config>(text).is_err());
-    }
-}
-
-#[cfg(test)]
-mod example_config_tests {
-    use super::*;
-
-    /// The shipped example must parse through the real schema. This catches
-    /// drift between the documentation and the code.
-    #[test]
-    fn shipped_example_config_is_valid() {
-        let text = include_str!("../config.example.toml");
-        let config: Config = toml::from_str(text).expect("example config must parse");
+    fn a_user_theme_adds_to_the_shipped_ones() {
+        let mut theme = toml::to_string(&Config::test_defaults().themes["carbon"]).unwrap();
+        theme = format!("theme = \"mine\"\n[themes.mine]\n{theme}");
+        let config = with_user(&theme).unwrap();
+        assert!(config.themes.contains_key("mine"));
         assert!(config.themes.contains_key("carbon"));
-        assert!(config.themes.len() >= 4);
-        assert!(config.sidebar.widgets.iter().any(|w| w.kind == WidgetKind::Clock));
+        assert_eq!(config.active_theme().name, "mine");
+    }
+
+    #[test]
+    fn rejects_unknown_keys() {
+        assert!(with_user("[metrics.workspaces]\nrow_heigth = 24.0\n").is_err());
+    }
+
+    #[test]
+    fn a_malformed_colour_is_refused_at_load() {
+        let err = with_user("[themes.carbon]\nprimary = \"blue\"\n").unwrap_err();
+        assert!(err.to_string().contains("themes.carbon: primary"), "{err}");
+        assert!(with_user("[screenshot]\npen_colors = [\"#12345\"]\n").is_err());
+        assert!(with_user("[screenshot]\npen_colors = []\n").is_err());
+    }
+
+    #[test]
+    fn unknown_theme_name_shows_the_first_theme() {
+        let mut config = Config::test_defaults();
+        config.theme = "does-not-exist".into();
+        let first = config.themes.keys().next().unwrap().clone();
+        assert_eq!(config.active_theme().name, first);
+    }
+
+    #[test]
+    fn parses_hex_with_and_without_alpha() {
+        let c = parse_color("#ff0000").unwrap();
+        assert_eq!((c.r, c.a), (1.0, 1.0));
+        let c = parse_color("#00ff0080").unwrap();
+        assert!((c.a - 0.502).abs() < 0.01);
+        assert_eq!(parse_color("#0f0").unwrap().g, 1.0);
+        assert!(parse_color("not-a-colour").is_none());
+        assert!(parse_color("#12345").is_none());
+    }
+
+    #[test]
+    fn round_trips_through_toml() {
+        // What the Home Manager module writes is a serialised whole config;
+        // it must load on its own, with no defaults under it.
+        let config = Config::test_defaults();
+        let text = toml::to_string(&config).expect("serialize");
+        let parsed = Config::from_layers(&[(Path::new("written"), &text)]).expect("deserialize");
+        assert_eq!(parsed.theme, config.theme);
+        assert_eq!(parsed.sidebar.widgets.len(), config.sidebar.widgets.len());
+    }
+
+    #[test]
+    fn the_stamp_follows_a_relinked_file() {
+        let dir = std::env::temp_dir().join(format!("stratum-config-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b, link) = (dir.join("a.toml"), dir.join("b.toml"), dir.join("config.toml"));
+        // Same time on both, as every file in the Nix store has.
+        let epoch = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        for path in [&a, &b] {
+            std::fs::write(path, "").unwrap();
+            std::fs::File::options().write(true).open(path).unwrap().set_modified(epoch).unwrap();
+        }
+        let source = ConfigSource { defaults: PathBuf::new(), user: Some(link.clone()) };
+        let _ = std::fs::remove_file(&link);
+        assert_eq!(source.user_stamp(), None);
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        let first = source.user_stamp();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&b, &link).unwrap();
+        let second = source.user_stamp();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(first.is_some());
+        assert_ne!(first, second);
     }
 }

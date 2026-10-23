@@ -5,14 +5,15 @@
 //! the `[metrics]` table in the config file, so adjusting a row height or a font
 //! size means editing one number rather than hunting through widget code.
 //!
-//! Widgets read these through `PaintCtx::metrics`. The defaults reproduce the
-//! QML shell's proportions.
+//! Widgets read these through `PaintCtx::metrics`. Every field is required:
+//! the defaults, which reproduce the QML shell's proportions, live only in
+//! `config.default.toml` (see [`crate::config`]).
 
 use serde::{Deserialize, Serialize};
 
 /// Everything sizing-related.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct Metrics {
     pub typography: Typography,
     pub bar: BarMetrics,
@@ -37,37 +38,9 @@ pub struct Metrics {
     pub page: PageMetrics,
 }
 
-impl Default for Metrics {
-    fn default() -> Self {
-        Self {
-            typography: Typography::default(),
-            bar: BarMetrics::default(),
-            workspaces: WorkspacesMetrics::default(),
-            tray: TrayMetrics::default(),
-            osd: OsdMetrics::default(),
-            toasts: ToastMetrics::default(),
-            power_menu: PowerMenuMetrics::default(),
-            tray_menu: TrayMenuMetrics::default(),
-            lock: LockMetrics::default(),
-            polkit: PolkitMetrics::default(),
-            notification_card: NotificationCardMetrics::default(),
-            theme_switcher: ThemeSwitcherMetrics::default(),
-            hover_menu: HoverMenuMetrics::default(),
-            equalizer: EqualizerMetrics::default(),
-            dashboard: DashboardMetrics::default(),
-            screenshot: ScreenshotMetrics::default(),
-            screenshot_viewer: ScreenshotViewerMetrics::default(),
-            device_page: DevicePageMetrics::default(),
-            audio_page: AudioPageMetrics::default(),
-            window: WindowMetrics::default(),
-            page: PageMetrics::default(),
-        }
-    }
-}
-
 /// Font sizes by role. All in logical pixels.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct Typography {
     /// Status icons in the bar.
     pub icon: f32,
@@ -99,31 +72,9 @@ pub struct Typography {
     pub weight_bold: u16,
 }
 
-impl Default for Typography {
-    fn default() -> Self {
-        Self {
-            icon: 20.0,
-            battery: 24.0,
-            battery_label: 11.0,
-            clock: 18.0,
-            clock_bar: 13.0,
-            workspace: 15.0,
-            title: 14.0,
-            title_bar: 13.0,
-            tray: 13.0,
-            body: 13.0,
-            caption: 11.0,
-            label: 12.0,
-            weight_regular: 400,
-            weight_medium: 500,
-            weight_bold: 600,
-        }
-    }
-}
-
 /// Sizing shared by the sidebar and any container inside it.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct BarMetrics {
     /// Size of the launcher button.
     pub launcher: f32,
@@ -147,26 +98,9 @@ pub struct BarMetrics {
     pub clock_width: f32,
 }
 
-impl Default for BarMetrics {
-    fn default() -> Self {
-        Self {
-            launcher: 24.0,
-            group_margin: 6.0,
-            group_spacing: 4.0,
-            group_width: 30.0,
-            corner_size: 20.0,
-            title_icon: 16.0,
-            title_icon_gap: 8.0,
-            label_line: 1.2,
-            battery_label_width: 34.0,
-            clock_width: 84.0,
-        }
-    }
-}
-
 /// The scrolling workspace strip.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspacesMetrics {
     /// Rows visible at once.
     pub visible: usize,
@@ -189,22 +123,6 @@ pub struct WorkspacesMetrics {
     pub cell_pitch: f32,
 }
 
-impl Default for WorkspacesMetrics {
-    fn default() -> Self {
-        Self {
-            visible: 5,
-            row_height: 20.0,
-            gap: 3.0,
-            page_size: 10,
-            bias: 2,
-            marker_width: 14.0,
-            marker_height: 2.0,
-            scroll_ms: 400,
-            cell_pitch: 26.0,
-        }
-    }
-}
-
 impl WorkspacesMetrics {
     /// Distance from one row's start to the next.
     pub fn step(&self) -> f32 {
@@ -219,7 +137,7 @@ impl WorkspacesMetrics {
 
 /// The tray strip.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct TrayMetrics {
     /// Size of one icon cell.
     pub cell: f32,
@@ -231,20 +149,9 @@ pub struct TrayMetrics {
     pub horizontal_limit: usize,
 }
 
-impl Default for TrayMetrics {
-    fn default() -> Self {
-        Self {
-            cell: 24.0,
-            gap: 4.0,
-            vertical_limit: 6,
-            horizontal_limit: 8,
-        }
-    }
-}
-
 /// The volume/brightness overlay.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct OsdMetrics {
     /// Surface width.
     pub width: u32,
@@ -279,32 +186,9 @@ pub struct OsdMetrics {
     pub fill_seconds: f32,
 }
 
-impl Default for OsdMetrics {
-    fn default() -> Self {
-        Self {
-            width: 320,
-            height: 94,
-            margin_bottom: 72,
-            padding: 14.0,
-            radius: 12.0,
-            track_height: 9.0,
-            row_height: 30.0,
-            gap: 10.0,
-            icon_gap: 12.0,
-            icon: 22.0,
-            title: 13.0,
-            value: 12.0,
-            hold_seconds: 1.2,
-            fade_in_seconds: 0.13,
-            fade_out_seconds: 0.22,
-            fill_seconds: 0.12,
-        }
-    }
-}
-
 /// The power menu overlay.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct PowerMenuMetrics {
     /// Width of one option tile.
     pub tile_width: f32,
@@ -326,25 +210,9 @@ pub struct PowerMenuMetrics {
     pub scrim_alpha: f32,
 }
 
-impl Default for PowerMenuMetrics {
-    fn default() -> Self {
-        Self {
-            tile_width: 140.0,
-            tile_height: 140.0,
-            tile_gap: 10.0,
-            panel_padding: 20.0,
-            panel_radius: 12.0,
-            tile_radius: 8.0,
-            icon: 48.0,
-            label: 10.0,
-            scrim_alpha: 0.63,
-        }
-    }
-}
-
 /// The lock screen. Defaults follow `modules/LockScreen.qml`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct LockMetrics {
     /// Clock text size.
     pub clock: f32,
@@ -377,32 +245,9 @@ pub struct LockMetrics {
     pub backdrop_blur: f32,
 }
 
-impl Default for LockMetrics {
-    fn default() -> Self {
-        Self {
-            clock: 50.0,
-            avatar: 120.0,
-            avatar_border: 3.0,
-            label: 20.0,
-            field_width: 300.0,
-            field_height: 50.0,
-            field_radius: 8.0,
-            field_border: 2.0,
-            field_padding: 14.0,
-            field_text: 18.0,
-            caret_width: 2.0,
-            status: 14.0,
-            spacing: 24.0,
-            scrim_alpha: 0.5,
-            backdrop_width: 320.0,
-            backdrop_blur: 3.0,
-        }
-    }
-}
-
 /// The polkit authentication dialog. Defaults follow `modules/PolkitDialog.qml`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct PolkitMetrics {
     /// Card width; its height follows the content.
     pub width: f32,
@@ -440,40 +285,9 @@ pub struct PolkitMetrics {
     pub scrim_alpha: f32,
 }
 
-impl Default for PolkitMetrics {
-    fn default() -> Self {
-        Self {
-            width: 450.0,
-            padding: 32.0,
-            spacing: 24.0,
-            radius: 16.0,
-            border: 1.0,
-            icon: 48.0,
-            icon_gap: 20.0,
-            title: 20.0,
-            subtitle: 13.0,
-            message: 14.0,
-            caption: 12.0,
-            message_lines: 4,
-            field_height: 40.0,
-            field_radius: 8.0,
-            field_border: 1.0,
-            field_padding: 12.0,
-            field_text: 14.0,
-            caret_width: 2.0,
-            button_height: 36.0,
-            button_radius: 8.0,
-            cancel_width: 80.0,
-            confirm_width: 120.0,
-            button_gap: 12.0,
-            scrim_alpha: 0.8,
-        }
-    }
-}
-
 /// A notification card, shared by the toasts and the notifications page.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct NotificationCardMetrics {
     /// Inner padding, and the gap from the urgency stripe.
     pub padding: f32,
@@ -513,42 +327,9 @@ pub struct NotificationCardMetrics {
     pub caret_width: f32,
 }
 
-impl Default for NotificationCardMetrics {
-    fn default() -> Self {
-        Self {
-            padding: 14.0,
-            row_gap: 8.0,
-            app: 11.0,
-            summary: 13.0,
-            body: 12.0,
-            body_lines: 3,
-            line_height: 1.35,
-            dismiss: 22.0,
-            dismiss_icon: 12.0,
-            visual: 20.0,
-            visual_radius: 5.0,
-            visual_gap: 10.0,
-            visual_glyph: 16.0,
-            button_height: 26.0,
-            button_min_width: 74.0,
-            button_padding: 9.0,
-            button_gap: 6.0,
-            button_radius: 6.0,
-            button_text: 12.0,
-            reply_height: 30.0,
-            reply_radius: 6.0,
-            reply_border: 1.0,
-            reply_padding: 8.0,
-            reply_text: 12.0,
-            send_width: 52.0,
-            caret_width: 1.5,
-        }
-    }
-}
-
 /// The theme switcher overlay. Defaults follow `modules/ThemeSwitcher.qml`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ThemeSwitcherMetrics {
     pub width: f32,
     pub padding: f32,
@@ -578,37 +359,9 @@ pub struct ThemeSwitcherMetrics {
     pub scrim_alpha: f32,
 }
 
-impl Default for ThemeSwitcherMetrics {
-    fn default() -> Self {
-        Self {
-            width: 360.0,
-            padding: 16.0,
-            spacing: 12.0,
-            radius: 12.0,
-            border: 1.0,
-            title: 20.0,
-            subtitle: 13.0,
-            search_height: 34.0,
-            search_radius: 8.0,
-            search_padding: 10.0,
-            search_text: 13.0,
-            caret_width: 1.5,
-            row_height: 42.0,
-            row_gap: 4.0,
-            row_radius: 8.0,
-            row_padding: 14.0,
-            row_text: 14.0,
-            empty_height: 36.0,
-            empty_text: 12.0,
-            max_rows: 8,
-            scrim_alpha: 0.56,
-        }
-    }
-}
-
 /// The dashboard overlay.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardMetrics {
     /// Milliseconds between data refreshes while open (stratumd: 2000).
     pub refresh_ms: u64,
@@ -640,37 +393,9 @@ pub struct DashboardMetrics {
     pub scrim_alpha: f32,
 }
 
-impl Default for DashboardMetrics {
-    fn default() -> Self {
-        Self {
-            refresh_ms: 2000,
-            margin: 12.0,
-            padding: 8.0,
-            gap: 8.0,
-            inner: 12.0,
-            radius: 10.0,
-            border: 1.0,
-            performance_width: 240.0,
-            calendar_width: 290.0,
-            music_width: 250.0,
-            panel_height: 340.0,
-            title: 15.0,
-            text: 13.0,
-            caption: 11.0,
-            line: 20.0,
-            bar: 6.0,
-            cell: 32.0,
-            cell_gap: 4.0,
-            button: 28.0,
-            art: 110.0,
-            scrim_alpha: 0.56,
-        }
-    }
-}
-
 /// The screenshot overlay. Defaults are `modules/ScreenshotToolbar.qml`'s.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ScreenshotMetrics {
     /// How far a press must move before it becomes a region drag.
     pub drag_threshold: f32,
@@ -700,33 +425,10 @@ pub struct ScreenshotMetrics {
     pub label_gap: f32,
 }
 
-impl Default for ScreenshotMetrics {
-    fn default() -> Self {
-        Self {
-            drag_threshold: 8.0,
-            window_margin: 5.0,
-            capture_delay_ms: 120,
-            border: 2.0,
-            window_radius: 6.0,
-            region_radius: 3.0,
-            fill_alpha: 0.23,
-            output_fill_alpha: 0.1,
-            crosshair_arm: 10.0,
-            crosshair_width: 3.0,
-            crosshair_outline: 1.0,
-            label: 12.0,
-            label_padding: 8.0,
-            label_height: 22.0,
-            label_radius: 6.0,
-            label_gap: 6.0,
-        }
-    }
-}
-
 /// The Bluetooth and Network pages: a status card, a toolbar, the list, and
 /// a detail panel beside it. Defaults are the QML menus'.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct DevicePageMetrics {
     /// Between the loading dot and its label.
     pub gap: f32,
@@ -752,31 +454,10 @@ pub struct DevicePageMetrics {
     pub loading_ms: u64,
 }
 
-impl Default for DevicePageMetrics {
-    fn default() -> Self {
-        Self {
-            gap: 8.0,
-            row_height: 60.0,
-            expanded: 44.0,
-            field_text: 12.0,
-            field_padding: 12.0,
-            caret_width: 1.5,
-            radius: 8.0,
-            border: 1.0,
-            marquee_gap: 24.0,
-            marquee_speed: 42.0,
-            footer_height: 22.0,
-            status_ms: 3500,
-            loading_dot: 8.0,
-            loading_ms: 840,
-        }
-    }
-}
-
 /// The Audio page: volume, now playing, and the output and input lists.
 /// Defaults are `modules/AudioMenu.qml`'s Playback tab.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct AudioPageMetrics {
     /// Between controls in a row (slider and readout, media buttons).
     pub gap: f32,
@@ -803,30 +484,9 @@ pub struct AudioPageMetrics {
     pub pending_ms: u64,
 }
 
-impl Default for AudioPageMetrics {
-    fn default() -> Self {
-        Self {
-            gap: 10.0,
-            volume_min_width: 300.0,
-            volume_height: 108.0,
-            slider_height: 24.0,
-            readout_width: 56.0,
-            art: 96.0,
-            title: 15.0,
-            text: 12.0,
-            caption: 11.0,
-            line: 20.0,
-            media_button: 32.0,
-            media_icon: 14.0,
-            device_height: 60.0,
-            pending_ms: 5000,
-        }
-    }
-}
-
 /// The screenshot viewer window. Defaults are `modules/ScreenshotViewer.qml`'s.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ScreenshotViewerMetrics {
     /// Size on open, and the smallest it may be made.
     pub width: u32,
@@ -865,43 +525,9 @@ pub struct ScreenshotViewerMetrics {
     pub save_as_timeout_ms: u64,
 }
 
-impl Default for ScreenshotViewerMetrics {
-    fn default() -> Self {
-        Self {
-            width: 1200,
-            height: 820,
-            min_width: 820,
-            min_height: 560,
-            padding: 12.0,
-            spacing: 10.0,
-            gap: 8.0,
-            title: 14.0,
-            caption: 11.0,
-            button_width: 42.0,
-            button_height: 32.0,
-            button_radius: 8.0,
-            icon: 14.0,
-            row_height: 24.0,
-            swatch: 20.0,
-            swatch_border: 1.0,
-            swatch_border_selected: 2.0,
-            slider_width: 120.0,
-            readout_width: 42.0,
-            status_height: 28.0,
-            status_radius: 6.0,
-            status_ms: 2600,
-            zoom_min: 1.0,
-            zoom_max: 8.0,
-            zoom_wheel_step: 0.15,
-            zoom_slider_step: 0.1,
-            save_as_timeout_ms: 35_000,
-        }
-    }
-}
-
 /// The Equalizer page of the settings window.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct EqualizerMetrics {
     /// The name and value fields' text, and the slider labels.
     pub text: f32,
@@ -931,32 +557,9 @@ pub struct EqualizerMetrics {
     pub preset_height: f32,
 }
 
-impl Default for EqualizerMetrics {
-    fn default() -> Self {
-        Self {
-            text: 13.0,
-            caption: 11.0,
-            gap: 8.0,
-            radius: 8.0,
-            border: 1.0,
-            graph_height: 180.0,
-            graph_padding: 12.0,
-            point: 8.0,
-            point_reach: 14.0,
-            curve_steps: 96,
-            curve_width: 2.0,
-            slider_row: 28.0,
-            label_width: 56.0,
-            value_width: 76.0,
-            preset_min_width: 150.0,
-            preset_height: 56.0,
-        }
-    }
-}
-
 /// The hover menus beside the status icons.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct HoverMenuMetrics {
     /// Milliseconds the pointer must rest on an icon before its menu opens.
     pub open_ms: u64,
@@ -990,38 +593,9 @@ pub struct HoverMenuMetrics {
     pub max_devices: usize,
 }
 
-impl Default for HoverMenuMetrics {
-    fn default() -> Self {
-        Self {
-            open_ms: 350,
-            close_ms: 800,
-            width: 280.0,
-            offset: 4.0,
-            padding: 12.0,
-            radius: 12.0,
-            border: 1.0,
-            title: 14.0,
-            text: 12.0,
-            caption: 11.0,
-            icon: 16.0,
-            line_height: 1.45,
-            row_height: 28.0,
-            row_gap: 2.0,
-            section_gap: 10.0,
-            gap: 6.0,
-            close: 20.0,
-            button_height: 28.0,
-            button_radius: 6.0,
-            value_width: 38.0,
-            stat_split: 0.38,
-            max_devices: 6,
-        }
-    }
-}
-
 /// A tray item's context menu.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct TrayMenuMetrics {
     /// The narrowest and widest the panel may be. In between, it fits its
     /// widest label, as QML's did; past `max_width` labels are cut short.
@@ -1048,27 +622,9 @@ pub struct TrayMenuMetrics {
     pub close_ms: u64,
 }
 
-impl Default for TrayMenuMetrics {
-    fn default() -> Self {
-        Self {
-            width: 200.0,
-            max_width: 400.0,
-            label_inset: 8.0,
-            chevron_width: 18.0,
-            row_height: 28.0,
-            padding: 6.0,
-            radius: 6.0,
-            indent: 12.0,
-            text: 13.0,
-            max_rows: 24,
-            close_ms: 150,
-        }
-    }
-}
-
 /// Notification cards.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct ToastMetrics {
     /// Surface width; cards are slightly narrower.
     pub surface_width: u32,
@@ -1102,31 +658,9 @@ pub struct ToastMetrics {
     pub reveal_seconds: f32,
 }
 
-impl Default for ToastMetrics {
-    fn default() -> Self {
-        Self {
-            surface_width: 344,
-            margin: 12,
-            card_width: 320.0,
-            gap: 8.0,
-            header_height: 52.0,
-            body_line_height: 16.0,
-            radius: 10.0,
-            stripe_width: 3.0,
-            icon: 12.0,
-            title: 13.0,
-            body: 11.0,
-            default_seconds: 5.0,
-            max_cards: 5,
-            slide_distance: 24.0,
-            reveal_seconds: 0.18,
-        }
-    }
-}
-
 /// The settings window and its navigation rail.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct WindowMetrics {
     /// Initial window width.
     pub width: u32,
@@ -1160,32 +694,9 @@ pub struct WindowMetrics {
     pub scroll_step: f32,
 }
 
-impl Default for WindowMetrics {
-    fn default() -> Self {
-        Self {
-            width: 560,
-            height: 640,
-            min_width: 360,
-            min_height: 320,
-            nav_width: 176.0,
-            nav_header: 52.0,
-            nav_row_height: 36.0,
-            nav_row_spacing: 40.0,
-            nav_inset: 8.0,
-            nav_top_gap: 6.0,
-            nav_row_radius: 8.0,
-            nav_title_x: 18.0,
-            nav_icon_x: 10.0,
-            nav_label_x: 36.0,
-            content_padding: 24.0,
-            scroll_step: 48.0,
-        }
-    }
-}
-
 /// Sizing shared by control-centre pages.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct PageMetrics {
     /// Padding inside a card.
     pub card_padding: f32,
@@ -1264,56 +775,6 @@ pub struct PageMetrics {
     pub outline_active: f32,
 }
 
-impl Default for PageMetrics {
-    fn default() -> Self {
-        Self {
-            card_padding: 14.0,
-            card_radius: 10.0,
-            stat_height: 32.0,
-            button_height: 32.0,
-            button_radius: 8.0,
-            slider_track: 6.0,
-            slider_knob: 14.0,
-            toggle_width: 44.0,
-            toggle_height: 24.0,
-            section_gap: 24.0,
-            section_label_height: 20.0,
-            swatch: 12.0,
-            swatch_gap: 4.0,
-            preview_height: 124.0,
-            max_width: 760.0,
-            title: 22.0,
-            summary: 12.0,
-            header_gap: 4.0,
-            header_bottom: 20.0,
-            section_spacing: 22.0,
-            label_gap: 10.0,
-            grid_gap: 12.0,
-            card_min_width: 200.0,
-            stat_card_height: 112.0,
-            badge: 34.0,
-            badge_icon: 16.0,
-            badge_gap: 8.0,
-            value: 20.0,
-            meter: 6.0,
-            tile_min_width: 150.0,
-            tile_height: 76.0,
-            action_min_width: 140.0,
-            action_height: 92.0,
-            info_height: 64.0,
-            hero_height: 132.0,
-            hero_value: 40.0,
-            hero_meter: 10.0,
-            theme_min_width: 150.0,
-            theme_height: 96.0,
-            empty_height: 168.0,
-            confirm_ms: 4000,
-            outline: 1.0,
-            outline_active: 1.5,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1324,7 +785,7 @@ mod tests {
             visible: 5,
             row_height: 20.0,
             gap: 3.0,
-            ..Default::default()
+            ..crate::config::Config::test_defaults().metrics.workspaces
         };
         assert_eq!(metrics.step(), 23.0);
         // Five rows and four gaps, not five gaps.
@@ -1332,36 +793,15 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_parseable_from_empty_toml() {
-        let metrics: Metrics = toml::from_str("").expect("defaults should parse");
-        assert_eq!(metrics.workspaces.visible, 5);
-        assert_eq!(metrics.typography.icon, 20.0);
-    }
-
-    #[test]
-    fn partial_tables_keep_other_defaults() {
-        let metrics: Metrics = toml::from_str(
-            r#"
-            [workspaces]
-            visible = 7
-            row_height = 24.0
-            "#,
-        )
-        .expect("partial table should parse");
-        assert_eq!(metrics.workspaces.visible, 7);
-        assert_eq!(metrics.workspaces.row_height, 24.0);
-        // Untouched fields keep their defaults.
-        assert_eq!(metrics.workspaces.gap, 3.0);
-        assert_eq!(metrics.typography.workspace, 15.0);
+    fn a_missing_field_is_an_error() {
+        let result: Result<TrayMetrics, _> = toml::from_str("cell = 24.0\ngap = 4.0\nvertical_limit = 6\n");
+        assert!(result.is_err(), "the binary has no default to fill it with");
     }
 
     #[test]
     fn unknown_keys_are_rejected() {
-        let result: Result<Metrics, _> = toml::from_str(
-            r#"
-            [workspaces]
-            row_heigth = 24.0
-            "#,
+        let result: Result<TrayMetrics, _> = toml::from_str(
+            "cell = 24.0\ngap = 4.0\nvertical_limit = 6\nhorizontal_limit = 8\ncel = 1.0\n",
         );
         assert!(result.is_err(), "a typo must not silently do nothing");
     }

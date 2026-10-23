@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn page_is_ten_ids_containing_active() {
-        let m = crate::ui::style::WorkspacesMetrics::default();
+        let m = crate::config::Config::test_defaults().metrics.workspaces;
         let (ids, index) = Workspaces::page(1, &m);
         assert_eq!(ids, (1..=10).collect::<Vec<_>>());
         assert_eq!(index, 0);
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn window_keeps_active_two_rows_above_centre() {
-        let m = crate::ui::style::WorkspacesMetrics::default();
+        let m = crate::config::Config::test_defaults().metrics.workspaces;
         // The window starts at `index - bias`, clamped to the page bounds.
         // Row 1 is the top of the page; the window cannot scroll above it.
         assert_eq!(Workspaces::window_start(1, &m), 0.0);
@@ -342,7 +342,7 @@ mod tests {
         let m = crate::ui::style::WorkspacesMetrics {
             visible: 7,
             bias: 3,
-            ..Default::default()
+            ..crate::config::Config::test_defaults().metrics.workspaces
         };
         // Active id 6 has index 5; biased three rows above gives 2.
         assert_eq!(Workspaces::window_start(6, &m), 2.0);
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn scroll_tween_settles_on_the_target() {
         let mut tween = Tween::new(0.0);
-        tween.to(3.0, scroll_seconds(&crate::ui::style::WorkspacesMetrics::default()), Easing::OutBack);
+        tween.to(3.0, scroll_seconds(&crate::config::Config::test_defaults().metrics.workspaces), Easing::OutBack);
         for _ in 0..80 {
             tween.tick(0.016);
         }
@@ -369,7 +369,7 @@ mod tests {
         hypr.active.insert("eDP-2".into(), 1);
         hypr.active.insert("HDMI-A-1".into(), 11);
 
-        let m = crate::ui::style::WorkspacesMetrics::default();
+        let m = crate::config::Config::test_defaults().metrics.workspaces;
         let left = hypr.active.get("eDP-2").copied().unwrap_or(-1);
         let right = hypr.active.get("HDMI-A-1").copied().unwrap_or(-1);
         assert_eq!(Workspaces::page(left, &m).0, (1..=10).collect::<Vec<_>>());

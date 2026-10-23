@@ -81,14 +81,14 @@ pub struct Osd {
 }
 
 impl Osd {
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::OsdMetrics) -> Self {
         Self {
             channel: Channel::Volume,
             value: 0,
             muted: false,
             opacity: Tween::new(0.0),
             fill: Tween::new(0.0),
-            metrics: crate::ui::style::OsdMetrics::default(),
+            metrics: metrics.clone(),
             hold_remaining: 0.0,
             last_volume: None,
             last_muted: None,
@@ -303,11 +303,6 @@ impl Osd {
     }
 }
 
-impl Default for Osd {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -315,14 +310,14 @@ mod tests {
 
     #[test]
     fn starts_hidden_and_ignores_first_observation() {
-        let osd = Osd::new();
+        let osd = Osd::new(&crate::config::Config::test_defaults().metrics.osd);
         assert!(!osd.visible());
         assert_eq!(osd.last_volume, None);
     }
 
     #[test]
     fn volume_change_shows_then_fades() {
-        let mut osd = Osd::new();
+        let mut osd = Osd::new(&crate::config::Config::test_defaults().metrics.osd);
         osd.last_volume = Some(50);
         osd.last_muted = Some(false);
         osd.last_brightness = None;
@@ -345,7 +340,7 @@ mod tests {
 
     #[test]
     fn brightness_first_reading_does_not_show() {
-        let mut osd = Osd::new();
+        let mut osd = Osd::new(&crate::config::Config::test_defaults().metrics.osd);
         osd.observe_brightness(60);
         assert!(!osd.visible());
         osd.observe_brightness(70);
@@ -366,7 +361,7 @@ mod tests {
 
     #[test]
     fn fill_slides_between_readings_but_not_into_a_new_channel() {
-        let mut osd = Osd::new();
+        let mut osd = Osd::new(&crate::config::Config::test_defaults().metrics.osd);
         osd.show(Channel::Volume, 75, false);
         // Shown from hidden: no slide in from zero.
         assert!((osd.fill.value() - 0.5).abs() < 1e-3);
@@ -384,7 +379,7 @@ mod tests {
 
     #[test]
     fn volume_clamps_to_channel_maximum() {
-        let mut osd = Osd::new();
+        let mut osd = Osd::new(&crate::config::Config::test_defaults().metrics.osd);
         osd.show(Channel::Volume, 500, false);
         assert_eq!(osd.value, 150);
         osd.show(Channel::Brightness, 500, false);

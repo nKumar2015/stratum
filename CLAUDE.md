@@ -277,10 +277,21 @@ cargo clippy -p stratum-shell --all-targets
 
 Outside the devshell, set `LD_LIBRARY_PATH` to a `vulkan-loader` store path.
 
-Configuration is read from `$STRATUM_CONFIG`, else
-`$XDG_CONFIG_HOME/stratum/config.toml`, else `~/.config/stratum/config.toml`.
-The full commented schema is `tools/stratum_shell/config.example.toml`; that file
-is also the best smoke test (`STRATUM_CONFIG=... ./target/debug/stratum-shell`).
+**Every default lives in `tools/stratum_shell/config.default.toml`; the binary
+has none.** Config structs have no `Default` impls and no `#[serde(default)]`
+(only `Option` fields and a widget's `children` may be left out), and a
+config missing a key is refused. A new option is a struct field *and* a line
+in that file, or every test fails. Tests get the defaults from
+`Config::test_defaults()`. The binary finds the file at `$STRATUM_DEFAULTS`,
+else `<bin>/../share/stratum/` (the package installs it there), else, in debug
+builds, the crate directory. The user's file (`$STRATUM_CONFIG`, else
+`$XDG_CONFIG_HOME/stratum/config.toml`, else `~/.config/stratum/config.toml`)
+is merged over it: tables key by key, lists and values replaced. The Home
+Manager module does the same merge with `programs.stratum.settings` and always
+writes the whole file. A start whose user file is invalid logs the error and
+runs on the defaults alone; a reload that fails keeps the previous config.
+Reload watches the user file's link target as well as its mtime, because every
+Nix store file has the same mtime.
 
 ### The installed shell
 
@@ -361,7 +372,7 @@ ui/animation.rs      Tween, Spring, ColorSpring, Easing
 **Colours and sizing are separated on purpose.** Colours live in
 `[themes.*]`; every dimension lives in `[metrics.*]`. Widget code must not
 contain a literal colour or a literal size — add a field to `ui/style.rs`
-instead. This is what lets the user restyle and re-lay-out without touching
+and its value to `config.default.toml` instead. This is what lets the user restyle and re-lay-out without touching
 code, and they have asked for it explicitly.
 
 `Widget` has `height(width, metrics)`, `width(height, metrics)`, `paint`, `click`,

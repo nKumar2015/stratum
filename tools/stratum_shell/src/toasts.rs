@@ -92,11 +92,11 @@ impl Toasts {
         self.muted = muted;
     }
 
-    pub fn new() -> Self {
+    pub fn new(metrics: &crate::ui::style::ToastMetrics) -> Self {
         Self {
             entries: Vec::new(),
             dismissed: HashMap::new(),
-            metrics: crate::ui::style::ToastMetrics::default(),
+            metrics: metrics.clone(),
             muted: false,
             layouts: Vec::new(),
             hovered: None,
@@ -373,11 +373,6 @@ impl Toasts {
     }
 }
 
-impl Default for Toasts {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -413,7 +408,7 @@ mod tests {
     /// A stack holding one card with a fixed layout, so clicks can be tested
     /// without fonts: card 300x140, an action, and a reply row.
     fn stack_with(n: Notification) -> Toasts {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(std::slice::from_ref(&n));
         let layout = crate::ui::notification_card::test_layout(
             rect(0.0, 0.0, 300.0, 140.0),
@@ -434,25 +429,25 @@ mod tests {
 
     #[test]
     fn new_notifications_become_toasts() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(&[notification(1, 1, 3000)]);
         assert_eq!(toasts.entries.len(), 1);
     }
 
     #[test]
     fn critical_notifications_are_sticky() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(&[notification(1, 2, 3000)]);
         assert!(toasts.entries[0].remaining.is_none());
 
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(&[notification(2, 1, 0)]);
         assert!(toasts.entries[0].remaining.is_none());
     }
 
     #[test]
     fn expiry_removes_and_does_not_resurrect() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(&[notification(1, 1, 1000)]);
         // Advance past the timeout.
         let expired = toasts.tick(1.5);
@@ -475,7 +470,7 @@ mod tests {
 
     #[test]
     fn dismiss_is_final() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.sync(&[notification(1, 1, 5000)]);
         toasts.dismiss(1);
         assert!(toasts.is_empty());
@@ -485,7 +480,7 @@ mod tests {
 
     #[test]
     fn stack_is_bounded() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         let list: Vec<_> = (1..=8).map(|id| notification(id, 1, 5000)).collect();
         toasts.sync(&list);
         assert!(toasts.entries.len() <= 5);
@@ -493,7 +488,7 @@ mod tests {
 
     #[test]
     fn do_not_disturb_suppresses_new_cards() {
-        let mut toasts = Toasts::new();
+        let mut toasts = Toasts::new(&crate::config::Config::test_defaults().metrics.toasts);
         toasts.set_muted(true);
         toasts.sync(&[notification(1, 1, 5000)]);
         assert!(toasts.is_empty());
