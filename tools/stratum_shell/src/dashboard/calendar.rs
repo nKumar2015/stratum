@@ -54,6 +54,17 @@ fn cache_dir() -> Option<PathBuf> {
     crate::theme_choice::state_dir().map(|d| d.join("stratum/calendar"))
 }
 
+/// Why `urls_file` could not be read. An address put there by mistake
+/// (sops' `placeholder` rather than the secret's `path`) is a secret, so it
+/// is named as a mistake and never shown.
+fn unreadable_list(list: &Path, err: &std::io::Error) -> String {
+    if list.to_string_lossy().contains("://") {
+        "urls_file is an address; set it to the path of a file of addresses (sops: the secret's .path)".into()
+    } else {
+        format!("cannot read {}: {err}", list.display())
+    }
+}
+
 /// The addresses in a URL list: one per line, `#` comments and blank lines
 /// skipped.
 pub fn parse_urls(text: &str) -> Vec<String> {
@@ -120,7 +131,7 @@ impl CalendarFeed {
         let urls = match std::fs::read_to_string(&list) {
             Ok(text) => parse_urls(&text),
             Err(err) => {
-                let error = Some(format!("cannot read {}: {err}", list.display()));
+                let error = Some(unreadable_list(&list, &err));
                 let mut current = state.calendar.get();
                 if current.error != error || !current.configured {
                     (current.error, current.configured) = (error, true);
@@ -234,6 +245,14 @@ fn fetch_all(dir: &Path, urls: &[String], changed: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_in_place_of_the_file_is_never_shown() {
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let message = unreadable_list(Path::new("https://example.com/private-token/basic.ics"), &err);
+        assert!(!message.contains("private-token"), "{message}");
+        assert!(unreadable_list(Path::new("/run/secrets/cal"), &err).contains("/run/secrets/cal"));
+    }
 
     #[test]
     fn url_lists_skip_comments_and_blanks() {

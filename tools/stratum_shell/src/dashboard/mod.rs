@@ -262,6 +262,9 @@ pub struct Dashboard {
     occurrences: (u64, std::collections::HashMap<(NaiveDate, NaiveDate), Vec<Occurrence>>),
     /// The Focus tab's to-dos, note and timer, which outlive closing.
     focus: focus::Focus,
+    /// Playing after a play/pause press, until the player reports it: read
+    /// straight after the command, it usually still says the old status.
+    playing: crate::ui::pages::Optimistic<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -311,6 +314,7 @@ impl Dashboard {
             player: None,
             occurrences: (0, std::collections::HashMap::new()),
             focus: focus::Focus::default(),
+            playing: crate::ui::pages::Optimistic::new(),
             card: None,
             buttons: Vec::new(),
             error: None,
@@ -529,7 +533,10 @@ impl Dashboard {
                 let action = match button {
                     Button::Previous => "previous",
                     Button::Next => "next",
-                    _ => "play-pause",
+                    _ => {
+                        self.playing.set(music["status"].as_str() != Some("Playing"));
+                        "play-pause"
+                    }
                 };
                 DashboardAction::Media { player, action: action.to_string() }
             }
@@ -860,7 +867,8 @@ impl Dashboard {
             self.buttons.push((hit, Button::Seek));
         }
         y += m.bar * 2.0 + m.inner;
-        let playing = music["status"].as_str() == Some("Playing");
+        self.playing.tick(ctx.dt);
+        let playing = self.playing.view(music["status"].as_str() == Some("Playing"));
         // Shuffle and loop only for players that have them; lit while on.
         let shuffle = music["shuffle"].as_str().unwrap_or_default();
         let repeat = music["loop"].as_str().unwrap_or_default();
@@ -1170,6 +1178,9 @@ mod tests {
             DashboardAction::Media { player: "spotify".into(), action: "play-pause".into() }
         );
         assert_eq!(d.error, None);
+        assert!(d.playing.view(false), "shown playing before the player says so");
+        assert!(d.playing.view(true));
+        assert_eq!(d.playing.pending(), None, "dropped once the player agrees");
     }
 
     #[test]
