@@ -748,15 +748,9 @@ pub fn export(image: &Image, strokes: &[Stroke]) -> Result<String, String> {
     use image::ImageEncoder;
     let mut pixels = image.pixels.to_vec();
     rasterize(&mut pixels, image.width, image.height, strokes);
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let path = format!("{dir}/stratum-screenshot-viewer-{}-{stamp}.png", std::process::id());
+    let path = crate::screenshot::temp_path().ok_or("Failed to prepare annotated image")?;
     let file = std::fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
         .open(&path)
         .map_err(|_| "Failed to prepare annotated image".to_string())?;
     let encoded = image::codecs::png::PngEncoder::new(std::io::BufWriter::new(file)).write_image(

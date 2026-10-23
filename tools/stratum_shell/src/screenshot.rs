@@ -539,8 +539,8 @@ pub fn failure(summary: &str, body: &str) -> crate::actions::SystemAction {
 
 /// A fresh file in the runtime directory (the tmpfs QML used too), created
 /// exclusively so two captures cannot share it.
-fn temp_path() -> Option<String> {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+pub(crate) fn temp_path() -> Option<String> {
+    let dir = crate::paths::runtime_dir().display().to_string();
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())

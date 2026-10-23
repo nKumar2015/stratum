@@ -26,7 +26,7 @@ pub enum SwitcherAction {
 }
 
 pub struct ThemeSwitcher {
-    open: bool,
+    /// The output it is open on, `None` while closed.
     target: Option<String>,
     search: TextField,
     /// Index into the filtered list.
@@ -42,7 +42,6 @@ pub struct ThemeSwitcher {
 impl ThemeSwitcher {
     pub fn new(metrics: &crate::ui::style::ThemeSwitcherMetrics) -> Self {
         Self {
-            open: false,
             target: None,
             search: TextField::new(),
             selection: None,
@@ -58,16 +57,15 @@ impl ThemeSwitcher {
     }
 
     pub fn is_open(&self) -> bool {
-        self.open
+        self.target.is_some()
     }
 
     pub fn target(&self) -> Option<&str> {
-        self.open.then_some(self.target.as_deref()).flatten()
+        self.target.as_deref()
     }
 
     /// Open on `output` with an empty search and the current theme selected.
     pub fn open_on(&mut self, output: &str, themes: &[String], current: &str) {
-        self.open = true;
         self.target = Some(output.to_string());
         self.search.clear();
         self.selection = themes.iter().position(|t| t == current).or((!themes.is_empty()).then_some(0));
@@ -77,7 +75,6 @@ impl ThemeSwitcher {
     }
 
     pub fn close(&mut self) {
-        self.open = false;
         self.target = None;
         self.search.clear();
         self.rows.clear();
@@ -85,7 +82,7 @@ impl ThemeSwitcher {
     }
 
     pub fn toggle(&mut self, output: &str, themes: &[String], current: &str) {
-        if self.open {
+        if self.is_open() {
             self.close();
         } else {
             self.open_on(output, themes, current);
@@ -125,7 +122,7 @@ impl ThemeSwitcher {
         themes: &[String],
     ) -> SwitcherAction {
         use smithay_client_toolkit::seat::keyboard::Keysym;
-        if !self.open {
+        if !self.is_open() {
             return SwitcherAction::None;
         }
         let count = self.filtered(themes).len();
@@ -177,7 +174,7 @@ impl ThemeSwitcher {
 
     /// A click on a row applies it; a click outside the card closes.
     pub fn on_click(&mut self, point: Point, themes: &[String]) -> SwitcherAction {
-        if !self.open {
+        if !self.is_open() {
             return SwitcherAction::None;
         }
         if let Some(index) = self.rows.iter().find(|(r, _)| r.contains(point)).map(|(_, i)| *i) {
@@ -211,7 +208,7 @@ impl ThemeSwitcher {
         themes: &[String],
         current: &str,
     ) {
-        if !self.open {
+        if !self.is_open() {
             return;
         }
         let m = self.metrics.clone();
@@ -222,10 +219,7 @@ impl ThemeSwitcher {
         self.scroll_to_selection(filtered.len());
         let shown = filtered.len().min(m.max_rows.max(1));
 
-        list.push_rect(Rect {
-            color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha),
-            ..surface
-        });
+        ui::paint_scrim(list, surface, m.scrim_alpha);
 
         let line = |size: f32| typo.line(size);
         let list_h = if filtered.is_empty() {

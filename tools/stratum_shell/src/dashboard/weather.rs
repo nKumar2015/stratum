@@ -63,7 +63,7 @@ fn now() -> u64 {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    crate::theme_choice::state_dir().map(|d| d.join("stratum/weather.json"))
+    crate::paths::state_file("weather.json")
 }
 
 fn load_cache() -> Cache {
@@ -76,14 +76,7 @@ fn load_cache() -> Cache {
 fn store_cache(cache: &Cache) {
     let Some(path) = cache_path() else { return };
     let Ok(text) = serde_json::to_string(cache) else { return };
-    // Written beside and renamed, so a crash cannot leave half a file.
-    let tmp = path.with_extension("json.tmp");
-    let result = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&tmp, text))
-        .and_then(|()| std::fs::rename(&tmp, &path));
-    if let Err(err) = result {
+    if let Err(err) = crate::paths::write_atomic(&path, text) {
         tracing::warn!("could not save the weather to {}: {err}", path.display());
     }
 }

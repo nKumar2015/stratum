@@ -18,16 +18,8 @@ pub struct Saved {
     pub config_theme: String,
 }
 
-/// `$XDG_STATE_HOME`, else `~/.local/state`.
-pub fn state_dir() -> Option<PathBuf> {
-    match std::env::var("XDG_STATE_HOME") {
-        Ok(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir)),
-        _ => std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/state")),
-    }
-}
-
 fn path() -> Option<PathBuf> {
-    state_dir().map(|d| d.join("stratum/theme.json"))
+    crate::paths::state_file("theme.json")
 }
 
 pub fn load() -> Option<Saved> {
@@ -58,12 +50,7 @@ pub fn store(saved: Option<&Saved>) {
         },
         Some(saved) => {
             let text = json!({ "theme": saved.theme, "config_theme": saved.config_theme }).to_string();
-            // Written beside and renamed, so a crash cannot leave half a file.
-            let tmp = path.with_extension("json.tmp");
-            path.parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| std::fs::write(&tmp, text))
-                .and_then(|()| std::fs::rename(&tmp, &path))
+            crate::paths::write_atomic(&path, text)
         }
     };
     if let Err(err) = result {

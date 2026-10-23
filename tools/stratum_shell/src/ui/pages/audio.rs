@@ -160,7 +160,6 @@ impl AudioPage {
     }
 
     /// Returns the bottom of the page.
-    #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,

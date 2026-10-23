@@ -74,10 +74,10 @@ pub enum KeyAction {
 
 /// The menu's visibility and selection.
 pub struct PowerMenu {
-    open: bool,
     selection: usize,
-    /// Output name the menu opened on. Chosen when it opens and kept for its
-    /// lifetime, so a focus change mid-interaction cannot move it.
+    /// Output name the menu is open on, `None` while closed. Chosen when it
+    /// opens and kept for its lifetime, so a focus change mid-interaction
+    /// cannot move it.
     target: Option<String>,
     metrics: crate::ui::style::PowerMenuMetrics,
 }
@@ -85,7 +85,6 @@ pub struct PowerMenu {
 impl PowerMenu {
     pub fn new(metrics: &crate::ui::style::PowerMenuMetrics) -> Self {
         Self {
-            open: false,
             selection: 0,
             target: None,
             metrics: metrics.clone(),
@@ -97,25 +96,23 @@ impl PowerMenu {
     }
 
     pub fn is_open(&self) -> bool {
-        self.open
+        self.target.is_some()
     }
 
     /// Show on `output`, resetting the selection the way the QML menu does.
     pub fn open_on(&mut self, output: &str) {
-        self.open = true;
         self.selection = 0;
         self.target = Some(output.to_string());
     }
 
     pub fn close(&mut self) {
-        self.open = false;
         self.target = None;
     }
 
     /// Flip the menu for the given output. Opening pins the output; closing
     /// ignores it.
     pub fn toggle(&mut self, output: &str) {
-        if self.open {
+        if self.is_open() {
             self.close();
         } else {
             self.open_on(output);
@@ -124,7 +121,7 @@ impl PowerMenu {
 
     /// The output whose surface should be mapped and focused.
     pub fn target(&self) -> Option<&str> {
-        self.open.then_some(self.target.as_deref()).flatten()
+        self.target.as_deref()
     }
 
     pub fn selection(&self) -> usize {
@@ -194,7 +191,7 @@ impl PowerMenu {
 
     /// Route a click. Returns the argv to run when a tile was hit.
     pub fn on_click(&mut self, point: crate::render::display_list::Point, surface: Rect) -> Option<Vec<String>> {
-        if !self.open {
+        if !self.is_open() {
             return None;
         }
         for index in 0..OPTIONS.len() {
@@ -208,16 +205,13 @@ impl PowerMenu {
 
     /// Paint the scrim and the row of tiles.
     pub fn paint(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, surface: Rect) {
-        if !self.open {
+        if !self.is_open() {
             return;
         }
         let m = &self.metrics;
 
         // Full-screen scrim, matching the QML `#a0000000`.
-        list.push_rect(Rect {
-            color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha),
-            ..surface
-        });
+        ui::paint_scrim(list, surface, m.scrim_alpha);
 
         for (index, option) in OPTIONS.iter().enumerate() {
             let tile = self.tile_rect(surface, index);

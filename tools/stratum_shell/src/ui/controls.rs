@@ -51,7 +51,7 @@ pub fn slider(
         return None;
     }
     let (px, _) = input.pointer?;
-    Some(((px - rect.x) / rect.width.max(1.0)).clamp(0.0, 1.0))
+    Some(fraction_in(rect, px))
 }
 
 /// A switch, its top-left at `(x, y)`. Returns the new state when it is

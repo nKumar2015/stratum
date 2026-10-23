@@ -49,8 +49,24 @@ use crate::ui::sidebar::Sidebar;
 
 use std::sync::Arc;
 
-/// Fallback rail width, used before the configuration is read.
-const DEFAULT_SIDEBAR_WIDTH: u32 = 40;
+/// The paint context for one surface. A macro, not a method: it borrows only
+/// the fields it names, so the caller can still borrow the surface it paints.
+macro_rules! paint_ctx {
+    ($app:expr, $theme:expr, $output:expr, $dt:expr) => {
+        crate::ui::PaintCtx {
+            theme: $theme,
+            appearance: &$app.config.appearance,
+            metrics: &$app.config.metrics,
+            text: &mut $app.text,
+            icons: &mut $app.icons,
+            state: &$app.state,
+            themes: &$app.config.themes,
+            output_name: $output,
+            axis: $app.config.sidebar.axis(),
+            dt: $dt,
+        }
+    };
+}
 
 /// Results the lock screen's worker threads deliver to the event loop.
 enum LockEvent {
@@ -562,18 +578,7 @@ impl App {
                         // A press released before this paint still counts once.
                         pressed: self.pointer_pressed || std::mem::take(&mut self.settings_press),
                     };
-                    let mut ctx = crate::ui::PaintCtx {
-                        theme: &theme,
-                        appearance: &self.config.appearance,
-                        metrics: &self.config.metrics,
-                        text: &mut self.text,
-                        icons: &mut self.icons,
-                        state: &self.state,
-                        themes: &self.config.themes,
-                        output_name: &output_name,
-                        axis: self.config.sidebar.axis(),
-                        dt,
-                    };
+                    let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                     if let Err(err) = window.render(
                         &self.gpu,
                         self.display,
@@ -595,20 +600,7 @@ impl App {
                             server.close(id, 2);
                         }
                     }
-                    crate::actions::SystemAction::DismissAll => {
-                        if let Some(server) = &self.notifications {
-                            let ids: Vec<u32> = self
-                                .state
-                                .notifications
-                                .get()
-                                .iter()
-                                .map(|n| n.id)
-                                .collect();
-                            for id in ids {
-                                server.close(id, 2);
-                            }
-                        }
-                    }
+                    crate::actions::SystemAction::DismissAll => self.dismiss_all_notifications(),
                     crate::actions::SystemAction::InvokeNotification(id, key) => {
                         if let Some(server) = &self.notifications {
                             server.invoke(id, &key);
@@ -642,18 +634,7 @@ impl App {
                 continue;
             }
             let output_name = entry.output_name.clone();
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
+            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
             let rect = entry.logical_rect();
             let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
             self.osd.paint(&mut ctx, &mut list, rect);
@@ -676,18 +657,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 let bounds = self.toasts.paint(&mut ctx, &mut list, rect);
@@ -736,18 +706,7 @@ impl App {
                     self.power_menu.selection()
                 );
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.power_menu.paint(&mut ctx, &mut list, rect);
@@ -785,18 +744,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.polkit_dialog.paint(&mut ctx, &mut list, rect);
@@ -844,18 +792,7 @@ impl App {
             let output_name = entry.output_name.clone();
             let output_size = entry.output_logical_size;
             let clicked = std::mem::take(&mut self.hover_clicked);
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
+            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
             let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
             let (height, events) = self.hover_menus.paint(
                 &mut ctx,
@@ -929,18 +866,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.dashboard.paint(&mut ctx, &mut list, rect, &dash_snapshot, &dash_music);
@@ -975,18 +901,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.screenshot.paint(&mut ctx, &mut list, rect, &output_name, origin);
@@ -1008,18 +923,7 @@ impl App {
         if let Some(window) = &mut self.viewer_window {
             if window.configured && window.dirty {
                 let output_name = self.surfaces.first().map(|s| s.output_name.clone()).unwrap_or_default();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let mut list = crate::render::display_list::DisplayList::new(theme.bg_main);
                 self.viewer.paint(&mut ctx, &mut list, window.logical_rect());
                 if let Err(err) = window.render_list(&self.gpu, self.display, &list, &mut self.text) {
@@ -1043,18 +947,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = crate::ui::PaintCtx {
-                    theme: &theme,
-                    appearance: &self.config.appearance,
-                    metrics: &self.config.metrics,
-                    text: &mut self.text,
-                    icons: &mut self.icons,
-                    state: &self.state,
-                    themes: &self.config.themes,
-                    output_name: &output_name,
-                    axis: self.config.sidebar.axis(),
-                    dt,
-                };
+                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.theme_switcher
@@ -1149,18 +1042,7 @@ impl App {
                 continue;
             }
             let output_name = entry.output_name.clone();
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
+            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
             let rect = entry.logical_rect();
             let pointer = self
                 .pointer
@@ -1190,18 +1072,7 @@ impl App {
             // Clone the output name: the context borrows it while `entry` is
             // borrowed mutably for rendering.
             let output_name = entry.output_name.clone();
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
+            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
             entry.render_with(
                 &self.gpu,
                 self.display,
@@ -1235,18 +1106,7 @@ impl App {
                 continue;
             }
             let output_name = entry.output_name.clone();
-            let mut ctx = crate::ui::PaintCtx {
-                theme: &theme,
-                appearance: &self.config.appearance,
-                metrics: &self.config.metrics,
-                text: &mut self.text,
-                icons: &mut self.icons,
-                state: &self.state,
-                themes: &self.config.themes,
-                output_name: &output_name,
-                axis: self.config.sidebar.axis(),
-                dt,
-            };
+            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
             let mut list = crate::render::display_list::DisplayList::new(theme.bg_dark.with_alpha(1.0));
             self.lock
                 .paint(&mut ctx, &mut list, entry.logical_rect(), &self.lock_art, &time);
@@ -1901,6 +1761,16 @@ impl App {
     }
 
     /// Execute one validated IPC call and answer the client.
+    /// Dismiss every notification, as the user closing each one.
+    fn dismiss_all_notifications(&self) {
+        if let Some(server) = &self.notifications {
+            let ids: Vec<u32> = self.state.notifications.get().iter().map(|n| n.id).collect();
+            for id in ids {
+                server.close(id, 2);
+            }
+        }
+    }
+
     fn handle_ipc(&mut self, request: crate::ipc::Request) {
         let result = self.execute_ipc(&request.call);
         if result.is_err() {
@@ -1929,15 +1799,7 @@ impl App {
             ("notifications", "toggle") => {
                 self.control_center.toggle(crate::ui::control_center::Page::Notifications)
             }
-            ("notifications", "clear") => {
-                if let Some(server) = &self.notifications {
-                    let ids: Vec<u32> =
-                        self.state.notifications.get().iter().map(|n| n.id).collect();
-                    for id in ids {
-                        server.close(id, 2);
-                    }
-                }
-            }
+            ("notifications", "clear") => self.dismiss_all_notifications(),
             ("notifications", "toggleDnd") => {
                 let next = !self.state.dnd.get();
                 self.state.dnd.set(next);
@@ -2651,109 +2513,37 @@ impl App {
                     .with_output_logical_size(output_logical_size),
             );
 
-            // Power menu: a fullscreen overlay that is only mapped for the
-            // output it opened on. It is created with keyboard interactivity
-            // `None` and switched to `Exclusive` while open, so it cannot steal
-            // keys from a window when hidden.
-            let power_wl = self.compositor_state.create_surface(qh);
-            let power_layer = self.layer_shell.create_layer_surface(
-                qh,
-                power_wl,
-                Layer::Overlay,
-                Some("stratum-powermenu"),
-                Some(output),
-            );
-            power_layer.set_anchor(
-                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-            );
-            power_layer.set_exclusive_zone(-1);
-            power_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            power_layer.commit();
-            self.power_surfaces.push(
-                SurfaceEntry::new(power_layer, scale, output_name.clone())
+            // Fullscreen overlays, each mapped only on the output it opened
+            // on. They are created with keyboard interactivity `None` and
+            // switched to `Exclusive` while open, so they cannot steal keys
+            // from a window when hidden. An exclusive zone of -1 puts them
+            // over the bar's, so a screenshot can capture the bar too.
+            let fullscreen = |namespace: &str| {
+                let layer = self.layer_shell.create_layer_surface(
+                    qh,
+                    self.compositor_state.create_surface(qh),
+                    Layer::Overlay,
+                    Some(namespace),
+                    Some(output),
+                );
+                layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+                layer.set_exclusive_zone(-1);
+                layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+                layer.commit();
+                SurfaceEntry::new(layer, scale, output_name.clone())
                     .with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
-            );
-
-            // polkit dialog: the same kind of fullscreen overlay as the power
-            // menu, for the same reasons.
-            let polkit_wl = self.compositor_state.create_surface(qh);
-            let polkit_layer = self.layer_shell.create_layer_surface(
-                qh,
-                polkit_wl,
-                Layer::Overlay,
-                Some("stratum-polkit"),
-                Some(output),
-            );
-            polkit_layer.set_anchor(
-                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-            );
-            polkit_layer.set_exclusive_zone(-1);
-            polkit_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            polkit_layer.commit();
-            self.polkit_surfaces.push(
-                SurfaceEntry::new(polkit_layer, scale, output_name.clone())
-                    .with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
-            );
-
-            // Theme switcher: the same kind of fullscreen overlay again.
-            let theme_wl = self.compositor_state.create_surface(qh);
-            let theme_layer = self.layer_shell.create_layer_surface(
-                qh,
-                theme_wl,
-                Layer::Overlay,
-                Some("stratum-themes"),
-                Some(output),
-            );
-            theme_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-            theme_layer.set_exclusive_zone(-1);
-            theme_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            theme_layer.commit();
-            self.theme_surfaces.push(
-                SurfaceEntry::new(theme_layer, scale, output_name.clone())
-                    .with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
-            );
-
-            // Dashboard: another fullscreen overlay.
-            let dash_wl = self.compositor_state.create_surface(qh);
-            let dash_layer = self.layer_shell.create_layer_surface(
-                qh,
-                dash_wl,
-                Layer::Overlay,
-                Some("stratum-dashboard"),
-                Some(output),
-            );
-            dash_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-            dash_layer.set_exclusive_zone(-1);
-            dash_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            dash_layer.commit();
-            self.dashboard_surfaces.push(
-                SurfaceEntry::new(dash_layer, scale, output_name.clone())
-                    .with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
-            );
-
-            // Screenshot overlay: fullscreen over the frozen frame, and above
-            // the bar's exclusive zone so the bar can be captured too.
-            let shot_wl = self.compositor_state.create_surface(qh);
-            let shot_layer = self.layer_shell.create_layer_surface(
-                qh,
-                shot_wl,
-                Layer::Overlay,
-                Some("stratum-screenshot"),
-                Some(output),
-            );
-            shot_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-            shot_layer.set_exclusive_zone(-1);
-            shot_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            shot_layer.commit();
-            self.screenshot_surfaces.push(
-                SurfaceEntry::new(shot_layer, scale, output_name.clone())
-                    .with_output(output.clone())
-                    .with_output_logical_size(output_logical_size),
-            );
+                    .with_output_logical_size(output_logical_size)
+            };
+            let power = fullscreen("stratum-powermenu");
+            let polkit = fullscreen("stratum-polkit");
+            let themes = fullscreen("stratum-themes");
+            let dashboard = fullscreen("stratum-dashboard");
+            let screenshot = fullscreen("stratum-screenshot");
+            self.power_surfaces.push(power);
+            self.polkit_surfaces.push(polkit);
+            self.theme_surfaces.push(themes);
+            self.dashboard_surfaces.push(dashboard);
+            self.screenshot_surfaces.push(screenshot);
 
             // Hover menu: sized to its contents and moved beside the icon with
             // margins, like the tray menu. A size is set before the first
@@ -2863,19 +2653,14 @@ fn brightnessctl_available() -> bool {
 }
 
 fn read_brightnessctl() -> Option<i64> {
-    let current = std::process::Command::new("brightnessctl")
-        .arg("get")
-        .output()
-        .ok()?;
-    let max = std::process::Command::new("brightnessctl")
-        .arg("max")
-        .output()
-        .ok()?;
-    if !current.status.success() || !max.status.success() {
-        return None;
-    }
-    let current = String::from_utf8_lossy(&current.stdout).trim().parse::<i64>().ok()?;
-    let max = String::from_utf8_lossy(&max.stdout).trim().parse::<i64>().ok()?;
+    let read = |arg: &str| {
+        let out = std::process::Command::new("brightnessctl").arg(arg).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&out.stdout).trim().parse::<i64>().ok()
+    };
+    let (current, max) = (read("get")?, read("max")?);
     if max <= 0 {
         return None;
     }

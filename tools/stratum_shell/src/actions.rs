@@ -307,6 +307,23 @@ fn refresh_bluetooth(state: &SystemState) {
     state.notify();
 }
 
+/// Run `playerctl -p <player> <args>`, then show the new state without
+/// waiting for the next poll, for the player acted on rather than whichever
+/// plays.
+fn playerctl(state: &SystemState, player: &str, args: &[&str]) -> Result<serde_json::Value, String> {
+    let status = std::process::Command::new("playerctl")
+        .args(["-p", player])
+        .args(args)
+        .status()
+        .map_err(|err| format!("failed to run playerctl: {err}"))?;
+    if !status.success() {
+        return Err(format!("playerctl {} failed for {player}", args.join(" ")));
+    }
+    state.music.set(managers::music::status_for(Some(player)));
+    state.notify();
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
     let result = match action {
         SystemAction::SetVolume(percent) => managers::audio::set_volume(*percent),
@@ -480,33 +497,9 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             publish_eq(state, device, Some((&result, &format!("Deleted \u{201c}{name}\u{201d}"))));
             result
         }
-        SystemAction::Media { player, action } => {
-            // The QML shell's MusicProvider sent the same playerctl commands.
-            let status = std::process::Command::new("playerctl")
-                .args(["-p", player, action])
-                .status()
-                .map_err(|err| format!("failed to run playerctl: {err}"))?;
-            if !status.success() {
-                return Err(format!("playerctl {action} failed for {player}"));
-            }
-            // Show the new state without waiting for the next poll, for the
-            // player acted on rather than whichever plays.
-            state.music.set(managers::music::status_for(Some(player)));
-            state.notify();
-            serde_json::json!({ "ok": true })
-        }
-        SystemAction::MediaSet { player, property, value } => {
-            let status = std::process::Command::new("playerctl")
-                .args(["-p", player.as_str(), property, value.as_str()])
-                .status()
-                .map_err(|err| format!("failed to run playerctl: {err}"))?;
-            if !status.success() {
-                return Err(format!("playerctl {property} {value} failed for {player}"));
-            }
-            state.music.set(managers::music::status_for(Some(player)));
-            state.notify();
-            serde_json::json!({ "ok": true })
-        }
+        // The QML shell's MusicProvider sent the same playerctl commands.
+        SystemAction::Media { player, action } => playerctl(state, player, &[action])?,
+        SystemAction::MediaSet { player, property, value } => playerctl(state, player, &[property, value.as_str()])?,
         SystemAction::MusicRefresh(player) => {
             state.music.set(managers::music::status_for(player.as_deref()));
             state.notify();
@@ -514,17 +507,7 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         }
         SystemAction::MediaSeek { player, seconds } => {
             // `playerctl position` takes seconds, as the QML seek did.
-            let position = (*seconds).max(0).to_string();
-            let status = std::process::Command::new("playerctl")
-                .args(["-p", player.as_str(), "position", position.as_str()])
-                .status()
-                .map_err(|err| format!("failed to run playerctl: {err}"))?;
-            if !status.success() {
-                return Err(format!("playerctl seek failed for {player}"));
-            }
-            state.music.set(managers::music::status_for(Some(player)));
-            state.notify();
-            serde_json::json!({ "ok": true })
+            playerctl(state, player, &["position", &(*seconds).max(0).to_string()])?
         }
         SystemAction::Spawn(argv) => {
             let Some((program, args)) = argv.split_first() else {

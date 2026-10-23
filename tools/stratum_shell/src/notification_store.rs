@@ -28,15 +28,8 @@ pub struct Snapshot {
     pub notifications: Vec<Notification>,
 }
 
-fn state_dir() -> Option<PathBuf> {
-    match std::env::var("XDG_STATE_HOME") {
-        Ok(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir)),
-        _ => std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/state")),
-    }
-}
-
 pub fn default_path() -> Option<PathBuf> {
-    state_dir().map(|d| d.join("stratum/notifications.json"))
+    crate::paths::state_file("notifications.json")
 }
 
 /// The saved snapshot, if there is one.
@@ -172,15 +165,7 @@ impl Drop for Saver {
 /// Write atomically: a crash mid-write must not leave a truncated file that
 /// loses every notification on the next start.
 fn write(path: &Path, snapshot: &Snapshot) {
-    let result = (|| -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, format!("{}\n", to_json(snapshot)))?;
-        std::fs::rename(&tmp, path)
-    })();
-    if let Err(err) = result {
+    if let Err(err) = crate::paths::write_atomic(path, format!("{}\n", to_json(snapshot))) {
         tracing::warn!("failed to save notifications to {}: {err}", path.display());
     }
 }

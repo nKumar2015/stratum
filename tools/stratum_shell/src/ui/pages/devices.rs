@@ -177,7 +177,6 @@ impl Marquee {
         self.moving
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,

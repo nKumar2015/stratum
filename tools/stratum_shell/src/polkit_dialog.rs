@@ -257,10 +257,7 @@ impl PolkitDialog {
         let theme = ctx.theme;
         let typo = ctx.metrics.typography.clone();
 
-        list.push_rect(Rect {
-            color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha),
-            ..surface
-        });
+        ui::paint_scrim(list, surface, m.scrim_alpha);
 
         // Wrap first: the card's height follows its text.
         let inner_w = m.width - m.padding * 2.0;

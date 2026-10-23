@@ -505,7 +505,7 @@ impl Dashboard {
         }
         if let Some((rect, button)) = hit {
             // Where along the button: a seek goes there.
-            let fraction = ((point.x - rect.x) / rect.width).clamp(0.0, 1.0);
+            let fraction = crate::ui::controls::fraction_in(rect, point.x);
             return self.press(button, fraction, music);
         }
         if self.card.is_some_and(|card| !card.contains(point)) {
@@ -568,7 +568,7 @@ impl Dashboard {
         let scale = self.base.scale_for(surface.width, surface.height, self.config.screen_fraction);
         self.metrics = self.base.scaled(scale);
         let m = self.metrics.clone();
-        list.push_rect(Rect { color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha), ..surface });
+        ui::paint_scrim(list, surface, m.scrim_alpha);
 
         let width = m.width.min(surface.width - m.margin * 2.0);
         let height = m.padding * 2.0

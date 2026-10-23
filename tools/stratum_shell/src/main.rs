@@ -16,6 +16,7 @@ mod lock;
 mod memory;
 mod osd;
 mod pam;
+mod paths;
 mod polkit_dialog;
 mod screenshot;
 mod screenshot_viewer;

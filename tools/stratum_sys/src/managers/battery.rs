@@ -1,11 +1,7 @@
-use crate::managers::common::run_command_capture;
+use crate::managers::common::run_capture_optional;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-
-fn run_capture_optional(program: &str, args: &[&str]) -> String {
-    run_command_capture(program, args).unwrap_or_default()
-}
 
 fn format_duration(total_seconds: i64) -> String {
     if total_seconds <= 0 {

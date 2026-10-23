@@ -165,7 +165,7 @@ impl BluetoothPage {
     /// Ask for a device refresh when the page becomes visible. It is sent by
     /// the next paint: an action queued here can be cleared by the frame
     /// start, which left "Loading" up forever.
-    pub fn request_refresh(&mut self, _pending: &mut Vec<SystemAction>) {
+    pub fn request_refresh(&mut self) {
         self.refresh_wanted = true;
     }
 

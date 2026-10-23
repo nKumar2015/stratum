@@ -172,7 +172,7 @@ impl WifiPage {
 
     /// A rescan when the page is shown, as the QML menu did on open. Sent
     /// by the next paint.
-    pub fn request_refresh(&mut self, _pending: &mut Vec<SystemAction>) {
+    pub fn request_refresh(&mut self) {
         self.refresh_wanted = true;
     }
 

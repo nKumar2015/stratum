@@ -234,8 +234,8 @@ impl Pages {
     /// where a newly opened list asks for its data.
     pub fn on_page_shown(&mut self, page: Page) {
         match page {
-            Page::Wifi => self.wifi.request_refresh(&mut self.pending),
-            Page::Bluetooth => self.bluetooth.request_refresh(&mut self.pending),
+            Page::Wifi => self.wifi.request_refresh(),
+            Page::Bluetooth => self.bluetooth.request_refresh(),
             _ => {}
         }
     }

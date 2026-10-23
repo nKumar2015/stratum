@@ -229,8 +229,7 @@ pub fn socket_path() -> PathBuf {
             return PathBuf::from(path);
         }
     }
-    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(runtime).join("stratum-shell.sock")
+    crate::paths::runtime_dir().join("stratum-shell.sock")
 }
 
 /// A running listener. Dropping it removes the socket file.

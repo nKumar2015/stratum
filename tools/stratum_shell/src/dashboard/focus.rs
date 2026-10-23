@@ -38,7 +38,7 @@ pub struct Saved {
 }
 
 fn default_path() -> Option<PathBuf> {
-    crate::theme_choice::state_dir().map(|d| d.join("stratum/focus.json"))
+    crate::paths::state_file("focus.json")
 }
 
 /// The field that has the keyboard.
@@ -81,14 +81,9 @@ impl Focus {
     fn save(&self) {
         let Some(path) = &self.path else { return };
         let saved = Saved { todos: self.todos.clone(), note: self.note.text().to_string() };
-        let result = (|| -> std::io::Result<()> {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, format!("{}\n", serde_json::to_string(&saved)?))?;
-            std::fs::rename(&tmp, path)
-        })();
+        let result = serde_json::to_string(&saved)
+            .map_err(std::io::Error::from)
+            .and_then(|text| crate::paths::write_atomic(path, format!("{text}\n")));
         if let Err(err) = result {
             tracing::warn!("failed to save {}: {err}", path.display());
         }

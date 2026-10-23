@@ -51,7 +51,7 @@ fn next_generation() -> u64 {
 }
 
 fn cache_dir() -> Option<PathBuf> {
-    crate::theme_choice::state_dir().map(|d| d.join("stratum/calendar"))
+    crate::paths::state_file("calendar")
 }
 
 /// Every feed's address: `urls`, then those `urls_file` names, without
