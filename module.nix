@@ -66,6 +66,7 @@ in {
       # Programs the shell runs.
       ++ (with pkgs; [
         brightnessctl # brightness, and the OSD's fallback reading
+        curl # the dashboard's weather and calendar sync
         grim # screenshots
         libnotify # notify-send, for screenshot failures
         networkmanager # nmcli
