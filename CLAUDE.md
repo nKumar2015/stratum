@@ -97,10 +97,13 @@ tab `dashboard open|toggle <tab>` names. Its data comes from a sampler thread
 (`dashboard/feed.rs`, over `stratum_sys::managers::sysmon`) that keeps a
 history for the graphs, recording in the background but publishing into
 `SystemState::dashboard` only while open, so a closed dashboard never wakes
-the loop. GPUs and processes are sampled only while open: an NVML reading
-costs ~20 ms (held open, NVML would keep the dGPU awake), and processes a
-file each. The System tab's graphs are `ui/graph.rs`, which spans a fixed
-number of readings so the line scrolls rather than stretches. Weather
+the loop. GPUs are sampled only while open: an NVML reading costs ~20 ms
+(held open, NVML would keep the dGPU awake). The System tab's graphs are
+`ui/graph.rs`, which spans a fixed number of readings so the line scrolls
+rather than stretches; they fill their panel in a grid. The whole card,
+text included, scales up from `[metrics.dashboard]` to span
+`[dashboard] screen_fraction` of the output (`DashboardMetrics::scaled`),
+never down. (A process list was built and dropped at the user's request.) Weather
 (`dashboard/weather.rs`, `stratum_sys::managers::weather`) comes from
 Open-Meteo through `curl`, only while open and at most every `refresh_min`;
 the postal code's coordinates and the last forecast are cached in

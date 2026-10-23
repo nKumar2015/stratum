@@ -1,21 +1,19 @@
-//! The System tab's panels: history graphs and the busiest processes.
+//! The System tab's graphs: CPU (with the package temperature), RAM, each
+//! GPU (temperature and VRAM; sampled only while the dashboard is open, so
+//! its graph starts then) and network down and up, with storage as a bar
+//! and the NVMe temperature beneath. Load graphs span 0–100 %; the network
+//! graph scales to its busiest reading.
 //!
-//! - Graphs: CPU (with the package temperature), each GPU (temperature and
-//!   VRAM; sampled only while the dashboard is open, so its graph starts
-//!   then), RAM, network down and up, and storage as a bar with the NVMe
-//!   temperature. Load graphs span 0–100 %; the network graph scales to its
-//!   busiest reading.
-//! - Processes: the busiest by CPU share of the whole machine, so they add
-//!   up to the CPU row, with resident memory. Its title runs
-//!   `[dashboard] process_monitor` (btop in a terminal by default).
+//! The graphs fill their panel: as many columns as `graph_column` allows,
+//! and rows sharing the height that is left.
 
 use std::collections::VecDeque;
 
 use stratum_sys::managers::gpu::Load;
-use stratum_sys::managers::sysmon::{Process, Usage};
+use stratum_sys::managers::sysmon::Usage;
 
 use super::feed::Snapshot;
-use super::{load_color, Button, Dashboard};
+use super::{load_color, Dashboard};
 use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::ui::graph::{self, GraphStyle};
 use crate::ui::{self, PaintCtx};
@@ -50,23 +48,31 @@ fn celsius(t: Option<f32>) -> Option<String> {
     t.map(|t| format!("{t:.0}\u{b0}C"))
 }
 
-/// A process's CPU share: a decimal below 10 %, where it still means
-/// something.
-pub fn cpu_share(percent: f32) -> String {
-    if percent < 10.0 {
-        format!("{percent:.1}%")
-    } else {
-        format!("{percent:.0}%")
+/// `count` cells laid out in `area`: as many columns as fit `min_column`
+/// wide (at least one, at most `count`), rows sharing the height, `gap`
+/// apart, filled left to right. A last row that is short of cells shares
+/// the whole width among those it has, leaving no hole.
+pub fn grid(area: Rect, count: usize, min_column: f32, gap: f32) -> Vec<Rect> {
+    if count == 0 {
+        return Vec::new();
     }
-}
-
-/// A process's memory: MiB below a GiB.
-pub fn memory(bytes: u64) -> String {
-    if bytes < 1 << 30 {
-        format!("{} MiB", bytes >> 20)
-    } else {
-        format!("{} GiB", gib(bytes))
-    }
+    let columns = (((area.width + gap) / (min_column + gap)).floor() as usize).clamp(1, count);
+    let rows = count.div_ceil(columns);
+    let height = (area.height - gap * (rows - 1) as f32) / rows as f32;
+    (0..count)
+        .map(|i| {
+            let (row, column) = (i / columns, i % columns);
+            let across = if row == rows - 1 { count - row * columns } else { columns };
+            let width = (area.width - gap * (across - 1) as f32) / across as f32;
+            Rect {
+                x: area.x + column as f32 * (width + gap),
+                y: area.y + row as f32 * (height + gap),
+                width,
+                height,
+                ..area
+            }
+        })
+        .collect()
 }
 
 /// The parts that are known, joined with a middle dot.
@@ -87,7 +93,7 @@ struct Row<'a> {
 impl Dashboard {
     pub(super) fn paint_graphs(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, snapshot: &Snapshot) {
         let m = self.metrics.clone();
-        let mut y = Self::title(ctx, list, panel, "System", &m);
+        let y = Self::title(ctx, list, panel, "System", &m);
         let x = panel.x + m.inner;
         let w = panel.width - m.inner * 2.0;
         let Some(sample) = snapshot.sample.as_ref() else {
@@ -103,6 +109,14 @@ impl Dashboard {
             series: vec![(&history.cpu, theme.primary)],
             max: 100.0,
         }];
+        rows.push(Row {
+            glyph: "\u{f035b}",
+            label: "RAM".into(),
+            detail: format!("{} / {} GiB", gib(sample.memory.used), gib(sample.memory.total)),
+            value: format!("{}%", sample.memory.percent().round()),
+            series: vec![(&history.memory, theme.tertiary)],
+            max: 100.0,
+        });
         for (gpu, series) in sample.gpus.iter().zip(&history.gpus) {
             let value = match gpu.load {
                 Load::Percent(p) => format!("{}%", p.clamp(0, 100)),
@@ -119,14 +133,6 @@ impl Dashboard {
                 max: 100.0,
             });
         }
-        rows.push(Row {
-            glyph: "\u{f035b}",
-            label: "RAM".into(),
-            detail: format!("{} / {} GiB", gib(sample.memory.used), gib(sample.memory.total)),
-            value: format!("{}%", sample.memory.percent().round()),
-            series: vec![(&history.memory, theme.tertiary)],
-            max: 100.0,
-        });
         let busiest = history.rx.iter().chain(&history.tx).copied().fold(NETWORK_FLOOR, f32::max);
         rows.push(Row {
             glyph: "\u{f06f3}",
@@ -140,26 +146,33 @@ impl Dashboard {
             max: busiest * 1.1,
         });
 
-        for row in rows {
-            let line = Rect { x, y, width: w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
+        // Storage changes too slowly to graph: a bar along the bottom, and
+        // the graphs share what is above it.
+        let storage_y = panel.y + panel.height - m.inner - m.line - m.bar * 2.0;
+        let area = Rect { x, y, width: w, height: storage_y - m.graph_gap - y, radius: 0.0, color: Color::TRANSPARENT };
+        let cells = grid(area, rows.len(), m.graph_column, m.graph_gap);
+        for (row, cell) in rows.into_iter().zip(cells) {
+            let line = Rect { height: m.line, ..cell };
             self.paint_label(ctx, list, line, row.glyph, &row.label, &row.detail, &row.value);
-            y += m.line;
-            let area = Rect { x, y, width: w, height: m.graph, radius: m.bar * 0.5, color: theme.bg_main };
-            list.push_rect(area);
+            let graph_area = Rect {
+                y: cell.y + m.line,
+                height: (cell.height - m.line).max(m.graph),
+                radius: m.bar * 0.5,
+                color: theme.bg_main,
+                ..cell
+            };
+            list.push_rect(graph_area);
             let style = GraphStyle { capacity: self.config.history, max: row.max, line: m.graph_line, fill: m.graph_fill };
             for (values, color) in row.series {
-                graph::paint(list, area, values, color, &style);
+                graph::paint(list, graph_area, values, color, &style);
             }
-            y += m.graph + m.graph_gap;
         }
-
-        // Storage changes too slowly to graph.
+        let y = storage_y;
         let root = sample.root;
         let line = Rect { x, y, width: w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
         let detail = joined([Some(format!("{} / {} GiB", gib(root.used), gib(root.total))), celsius(sample.temperatures.storage)]);
         self.paint_label(ctx, list, line, "\u{f0a0}", "Storage", &detail, &format!("{}%", root.percent().round()));
-        y += m.line;
-        let track = Rect { x, y: y + m.bar * 0.5, width: w, height: m.bar, radius: m.bar * 0.5, color: theme.bg_hover };
+        let track = Rect { x, y: y + m.line + m.bar * 0.5, width: w, height: m.bar, radius: m.bar * 0.5, color: theme.bg_hover };
         list.push_rect(track);
         let percent = f64::from(Usage::percent(&root));
         list.push_rect(Rect { width: w * (percent.clamp(0.0, 100.0) / 100.0) as f32, color: load_color(ctx, percent), ..track });
@@ -192,72 +205,6 @@ impl Dashboard {
         let detail = ui::elide(ctx, detail, m.caption, regular, right - detail_x - m.inner);
         ui::paint_text_vcentered(ctx, list, &detail, detail_x, line, m.caption, regular, ctx.theme.text_muted);
     }
-
-    pub(super) fn paint_processes(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        panel: Rect,
-        processes: &[Process],
-    ) {
-        let m = self.metrics.clone();
-        let y0 = Self::title(ctx, list, panel, "Processes", &m);
-        let x = panel.x + m.inner;
-        let w = panel.width - m.inner * 2.0;
-        if !self.config.process_monitor.is_empty() {
-            // The whole title row opens the monitor; a glyph says so.
-            let title = Rect { x: panel.x, y: panel.y, width: panel.width, height: y0 - panel.y, radius: 0.0, color: Color::TRANSPARENT };
-            let glyph_row = Rect { y: panel.y + m.inner, height: m.line * 1.2, ..title };
-            let glyph = "\u{f08e}";
-            let gw = measure(ctx, glyph, m.text, ctx.metrics.typography.weight_regular);
-            ui::paint_text_vcentered(ctx, list, glyph, x + w - gw, glyph_row, m.text, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
-            self.buttons.push((title, Button::ProcessMonitor));
-        }
-        let regular = ctx.metrics.typography.weight_regular;
-        let columns = [w * 0.6, w * 0.18, w * 0.22];
-        let header = Rect { x, y: y0, width: w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
-        self.paint_process_row(ctx, list, header, &columns, ["Name", "CPU", "Memory"], m.caption, ctx.theme.text_muted);
-        let mut y = y0 + m.line;
-        if processes.is_empty() {
-            let row = Rect { y, ..header };
-            ui::paint_text_vcentered(ctx, list, "Measuring\u{2026}", x, row, m.caption, regular, ctx.theme.text_muted);
-            return;
-        }
-        let bottom = panel.y + panel.height - m.inner;
-        for process in processes {
-            if y + m.line > bottom {
-                break;
-            }
-            let row = Rect { y, ..header };
-            let cpu = cpu_share(process.cpu_percent);
-            let mem = memory(process.memory);
-            self.paint_process_row(ctx, list, row, &columns, [&process.name, &cpu, &mem], m.text, ctx.theme.text_main);
-            y += m.line;
-        }
-    }
-
-    /// A name column, then right-aligned numeric columns.
-    #[allow(clippy::too_many_arguments)]
-    fn paint_process_row(
-        &self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        row: Rect,
-        columns: &[f32; 3],
-        cells: [&str; 3],
-        size: f32,
-        color: Color,
-    ) {
-        let weight = ctx.metrics.typography.weight_regular;
-        let name = ui::elide(ctx, cells[0], size, weight, columns[0] - self.metrics.inner);
-        ui::paint_text_vcentered(ctx, list, &name, row.x, row, size, weight, color);
-        let mut right = row.x + columns[0];
-        for (cell, width) in cells[1..].iter().zip(&columns[1..]) {
-            right += width;
-            let cw = measure(ctx, cell, size, weight);
-            ui::paint_text_vcentered(ctx, list, cell, right - cw, row, size, weight, color);
-        }
-    }
 }
 
 fn measure(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16) -> f32 {
@@ -284,11 +231,20 @@ mod tests {
     }
 
     #[test]
-    fn process_columns_format_for_their_size() {
-        assert_eq!(cpu_share(0.44), "0.4%");
-        assert_eq!(cpu_share(12.6), "13%");
-        assert_eq!(memory(300 << 20), "300 MiB");
-        assert_eq!(memory(3 << 30), "3.0 GiB");
+    fn graphs_take_as_many_columns_as_fit() {
+        let area = Rect { x: 0.0, y: 0.0, width: 700.0, height: 300.0, radius: 0.0, color: Color::TRANSPARENT };
+        let cells = grid(area, 5, 320.0, 10.0);
+        // Two columns of 345, three rows of 93.3.
+        assert_eq!(cells.len(), 5);
+        assert_eq!((cells[1].x, cells[1].width), (355.0, 345.0));
+        assert_eq!(cells[2].y, cells[0].y + cells[0].height + 10.0);
+        assert!((cells[4].y + cells[4].height - 300.0).abs() < 0.01, "the last row reaches the bottom");
+        assert_eq!((cells[4].x, cells[4].width), (0.0, 700.0), "alone on its row, it spans it");
+        // Narrower than one column still gets one; more room than graphs
+        // gets no empty columns.
+        assert_eq!(grid(Rect { width: 100.0, ..area }, 3, 320.0, 10.0)[2].x, 0.0);
+        assert_eq!(grid(Rect { width: 2000.0, ..area }, 2, 320.0, 10.0)[1].width, 995.0);
+        assert!(grid(area, 0, 320.0, 10.0).is_empty());
     }
 
     #[test]

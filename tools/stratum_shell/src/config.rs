@@ -99,6 +99,9 @@ impl Config {
         if dashboard.sample_ms == 0 || dashboard.history < 2 {
             return Err("dashboard: sample_ms must be positive and history at least 2".into());
         }
+        if !(dashboard.screen_fraction > 0.0 && dashboard.screen_fraction <= 1.0) {
+            return Err("dashboard.screen_fraction must be above 0 and at most 1".into());
+        }
         for (i, tab) in dashboard.tabs.iter().enumerate() {
             if tab.name.trim().is_empty() {
                 return Err(format!("dashboard.tabs[{i}] has no name"));
@@ -500,11 +503,10 @@ pub struct DashboardConfig {
     /// Keep sampling while the dashboard is closed, so the graphs are full
     /// when it opens. Closed, samples are only recorded: nothing repaints.
     pub background_history: bool,
-    /// Processes the processes panel lists, busiest first. Read only while
-    /// the dashboard is open.
-    pub processes: usize,
-    /// Run when the processes panel's title is clicked; empty runs nothing.
-    pub process_monitor: Vec<String>,
+    /// The card's width as a share of the output's: everything in
+    /// `[metrics.dashboard]` scales up to reach it, never down, and never
+    /// past the screen's height.
+    pub screen_fraction: f32,
     /// The tabs, in order. The dashboard always opens on the first.
     pub tabs: Vec<DashboardTab>,
     pub weather: WeatherConfig,
@@ -575,8 +577,6 @@ pub enum PanelKind {
     Performance,
     /// The same, with history graphs, temperatures and network.
     Graphs,
-    /// The busiest processes.
-    Processes,
     Calendar,
     Music,
 }

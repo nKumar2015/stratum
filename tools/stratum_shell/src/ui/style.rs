@@ -378,9 +378,11 @@ pub struct DashboardMetrics {
     /// The tab bar above the panels, and the gap between its tabs.
     pub tab_height: f32,
     pub tab_gap: f32,
-    /// A history graph's height, its line width, the opacity of the area
-    /// under the line, and the gap between graph rows.
+    /// A history graph's least height (graphs grow to fill their panel),
+    /// the least width of a column of them, its line width, the opacity of
+    /// the area under the line, and the gap between graphs.
     pub graph: f32,
+    pub graph_column: f32,
     pub graph_line: f32,
     pub graph_fill: f32,
     pub graph_gap: f32,
@@ -403,6 +405,83 @@ pub struct DashboardMetrics {
     pub art: f32,
     /// Dimming behind the card (QML `#90000000`).
     pub scrim_alpha: f32,
+}
+
+impl DashboardMetrics {
+    /// Every length times `s`; opacities kept. Destructured whole, so a new
+    /// field cannot be left out by accident.
+    pub fn scaled(&self, s: f32) -> Self {
+        let Self {
+            margin,
+            padding,
+            gap,
+            inner,
+            radius,
+            border,
+            width,
+            panel_height,
+            tab_height,
+            tab_gap,
+            graph,
+            graph_column,
+            graph_line,
+            graph_fill,
+            graph_gap,
+            clock,
+            weather_icon,
+            weather_temp,
+            title,
+            text,
+            caption,
+            line,
+            bar,
+            cell,
+            cell_gap,
+            button,
+            art,
+            scrim_alpha,
+        } = self.clone();
+        Self {
+            margin: margin * s,
+            padding: padding * s,
+            gap: gap * s,
+            inner: inner * s,
+            radius: radius * s,
+            border: border * s,
+            width: width * s,
+            panel_height: panel_height * s,
+            tab_height: tab_height * s,
+            tab_gap: tab_gap * s,
+            graph: graph * s,
+            graph_column: graph_column * s,
+            graph_line: graph_line * s,
+            graph_fill,
+            graph_gap: graph_gap * s,
+            clock: clock * s,
+            weather_icon: weather_icon * s,
+            weather_temp: weather_temp * s,
+            title: title * s,
+            text: text * s,
+            caption: caption * s,
+            line: line * s,
+            bar: bar * s,
+            cell: cell * s,
+            cell_gap: cell_gap * s,
+            button: button * s,
+            art: art * s,
+            scrim_alpha,
+        }
+    }
+
+    /// How much to scale for a `width` × `height` surface: enough for the
+    /// card to span `fraction` of the width, no more than keeps it (with its
+    /// top margin and as much below) inside the height, and never below 1.
+    pub fn scale_for(&self, width: f32, height: f32, fraction: f32) -> f32 {
+        let card = self.padding * 2.0 + self.tab_height + self.gap + self.panel_height;
+        let across = fraction * width / self.width;
+        let down = height / (card + self.margin * 2.0);
+        across.min(down).max(1.0)
+    }
 }
 
 /// The screenshot overlay. Defaults are `modules/ScreenshotToolbar.qml`'s.

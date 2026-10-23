@@ -2070,7 +2070,6 @@ impl App {
             DashboardAction::Media { player, action } => {
                 self.actions.push(crate::actions::SystemAction::Media { player, action });
             }
-            DashboardAction::Spawn(argv) => self.actions.push(crate::actions::SystemAction::Spawn(argv)),
             DashboardAction::ToggleDnd => {
                 let next = !self.state.dnd.get();
                 self.state.dnd.set(next);

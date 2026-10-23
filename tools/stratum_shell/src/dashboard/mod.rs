@@ -47,9 +47,6 @@ pub enum DashboardAction {
     Redraw,
     /// `previous`, `play-pause`, or `next`, for the player.
     Media { player: String, action: String },
-    /// Run a command; the dashboard has closed so its window is not hidden
-    /// behind the overlay.
-    Spawn(Vec<String>),
     /// Flip do-not-disturb.
     ToggleDnd,
 }
@@ -206,6 +203,9 @@ pub struct Dashboard {
     /// from the last paint.
     tab: usize,
     tab_hits: Vec<(Rect, usize)>,
+    /// `[metrics.dashboard]` as configured, and scaled for the surface
+    /// being painted (`screen_fraction`), which is what painting reads.
+    base: crate::ui::style::DashboardMetrics,
     metrics: crate::ui::style::DashboardMetrics,
     config: DashboardConfig,
 }
@@ -218,8 +218,6 @@ enum Button {
     Previous,
     PlayPause,
     Next,
-    /// The processes panel's title.
-    ProcessMonitor,
     /// The glance strip's do-not-disturb bell.
     Dnd,
 }
@@ -238,6 +236,7 @@ impl Dashboard {
             title: Marquee::ticker(),
             tab: 0,
             tab_hits: Vec::new(),
+            base: metrics.clone(),
             metrics: metrics.clone(),
             config: config.clone(),
         }
@@ -250,12 +249,10 @@ impl Dashboard {
 
     /// Follow a reload. A tab that no longer exists falls back to the first.
     pub fn set_config(&mut self, metrics: &crate::ui::style::DashboardMetrics, config: &DashboardConfig) {
-        self.metrics = metrics.clone();
-        if self.config.tabs != config.tabs {
-            self.config = config.clone();
-            if self.tab >= self.config.tabs.len() {
-                self.tab = 0;
-            }
+        self.base = metrics.clone();
+        self.config = config.clone();
+        if self.tab >= self.config.tabs.len() {
+            self.tab = 0;
         }
     }
 
@@ -383,11 +380,6 @@ impl Dashboard {
                         action: action.to_string(),
                     }
                 }
-                Button::ProcessMonitor => {
-                    let command = self.config.process_monitor.clone();
-                    self.close();
-                    DashboardAction::Spawn(command)
-                }
                 Button::Dnd => DashboardAction::ToggleDnd,
                 other => self.navigate(other),
             };
@@ -403,6 +395,8 @@ impl Dashboard {
         if !self.open {
             return;
         }
+        let scale = self.base.scale_for(surface.width, surface.height, self.config.screen_fraction);
+        self.metrics = self.base.scaled(scale);
         let m = self.metrics.clone();
         list.push_rect(Rect { color: Color::rgba(0.0, 0.0, 0.0, m.scrim_alpha), ..surface });
 
@@ -447,10 +441,6 @@ impl Dashboard {
                     PanelKind::Weather => self.paint_weather(ctx, list, panel),
                     PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
-                    PanelKind::Processes => {
-                        let processes = snapshot.sample.as_ref().map(|s| s.processes.as_slice()).unwrap_or_default();
-                        self.paint_processes(ctx, list, panel, processes);
-                    }
                     PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
                     PanelKind::Music => self.paint_music(ctx, list, panel, music),
                 }
@@ -774,6 +764,18 @@ mod tests {
     }
 
     #[test]
+    fn the_card_scales_to_its_share_of_the_screen() {
+        let mut m = crate::config::Config::test_defaults().metrics.dashboard;
+        (m.width, m.margin, m.padding, m.tab_height, m.gap, m.panel_height) = (800.0, 10.0, 10.0, 30.0, 10.0, 400.0);
+        // Card height 460, plus margins 480.
+        assert_eq!(m.scale_for(2000.0, 2000.0, 0.6), 1.5, "1200 of 2000 wide");
+        assert_eq!(m.scale_for(4000.0, 960.0, 0.6), 2.0, "3 across, held to 2 by the height");
+        assert_eq!(m.scale_for(1000.0, 800.0, 0.6), 1.0, "never smaller than configured");
+        let scaled = m.scaled(2.0);
+        assert_eq!((scaled.width, scaled.text, scaled.scrim_alpha), (1600.0, m.text * 2.0, m.scrim_alpha));
+    }
+
+    #[test]
     fn panels_share_the_width_by_weight() {
         let row = Rect { x: 10.0, y: 0.0, width: 108.0, height: 5.0, radius: 0.0, color: Color::TRANSPARENT };
         let rects = split(row, &[1.0, 3.0], 8.0);
@@ -798,7 +800,6 @@ mod tests {
                 temperature: None,
                 vram: None,
             }],
-            processes: Vec::new(),
         };
         let rows = performance_rows(Some(&sample));
         assert_eq!(rows[0].3, "42%");

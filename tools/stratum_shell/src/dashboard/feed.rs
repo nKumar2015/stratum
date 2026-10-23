@@ -17,7 +17,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use stratum_sys::managers::gpu::Load;
-use stratum_sys::managers::sysmon::{Detail, Sample, Sampler};
+use stratum_sys::managers::sysmon::{Sample, Sampler};
 
 use crate::sys_state::SystemState;
 
@@ -82,8 +82,6 @@ pub struct Settings {
     pub sample_ms: u64,
     pub history: usize,
     pub background: bool,
-    /// Processes listed while open.
-    pub processes: usize,
     /// Fetched while open, when due.
     pub weather: crate::config::WeatherConfig,
 }
@@ -94,15 +92,8 @@ impl Settings {
             sample_ms: config.sample_ms,
             history: config.history,
             background: config.background_history,
-            processes: config.processes,
             weather: config.weather.clone(),
         }
-    }
-
-    /// What a sample reads: GPUs and processes cost milliseconds, so only
-    /// while the dashboard is open.
-    fn detail(&self, open: bool) -> Detail {
-        Detail { gpus: open, processes: if open { self.processes } else { 0 } }
     }
 }
 
@@ -185,11 +176,10 @@ impl Feed {
             if opened && !settings.background {
                 (sampler, history, last) = (Sampler::new(), History::default(), None);
             }
-            // Opening samples at once: background samples carry no GPUs. The
-            // process list needs two readings, so the second comes sooner.
+            // Opening samples at once: background samples carry no GPUs.
             let now = Instant::now();
             if now >= next || opened || last.is_none() {
-                let mut sample = sampler.sample(settings.detail(open));
+                let mut sample = sampler.sample(open);
                 history.push(&sample, settings.history);
                 // Sampled just after a background sample, CPU time may not
                 // have moved yet; show the last load rather than none.
@@ -197,8 +187,7 @@ impl Feed {
                     sample.cpu_percent = last.and_then(|s| s.cpu_percent);
                 }
                 last = Some(sample);
-                let interval = if opened { settings.sample_ms / 4 } else { settings.sample_ms };
-                next = now + Duration::from_millis(interval);
+                next = now + Duration::from_millis(settings.sample_ms);
             }
             if open {
                 state.weather_feed.refresh_if_due(state, &settings.weather);
@@ -228,7 +217,6 @@ mod tests {
             gpus: (0..gpus)
                 .map(|_| GpuReading { name: "GPU".into(), load: Load::Percent(50), temperature: None, vram: None })
                 .collect(),
-            processes: Vec::new(),
         }
     }
 
@@ -239,14 +227,6 @@ mod tests {
         assert!(history.rx.is_empty());
         history.push(&sample(Some(1.0), 0), 3);
         assert_eq!((history.rx[0], history.tx[0]), (1000.0, 10.0));
-    }
-
-    #[test]
-    fn only_an_open_dashboard_reads_gpus_and_processes() {
-        let config = crate::config::Config::test_defaults().dashboard;
-        let settings = Settings { processes: 8, ..Settings::from_config(&config) };
-        assert_eq!(settings.detail(false), Detail::default());
-        assert_eq!(settings.detail(true), Detail { gpus: true, processes: 8 });
     }
 
     #[test]
