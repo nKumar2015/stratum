@@ -198,6 +198,8 @@ pub struct App {
     config_source: crate::config::ConfigSource,
     config_stamp: Option<(std::path::PathBuf, std::time::SystemTime)>,
     last_reload_check: std::time::Instant,
+    /// The theme picked live, while it overrides the config's `theme`.
+    theme_choice: Option<crate::theme_choice::Saved>,
     /// Poke used by worker threads to wake the event loop out of its poll.
     /// Held so the ping source's channel stays open for the shell's lifetime.
     #[allow(dead_code)]
@@ -222,7 +224,7 @@ impl App {
 
         let config_source = crate::config::ConfigSource::locate().map_err(|err| err.to_string())?;
         let config_stamp = config_source.user_stamp();
-        let config = match config_source.load() {
+        let mut config = match config_source.load() {
             Ok(config) => config,
             // A broken user file must not leave the session without a bar.
             Err(err) => {
@@ -230,6 +232,12 @@ impl App {
                 config_source.load_defaults().map_err(|err| err.to_string())?
             }
         };
+        let saved_theme = crate::theme_choice::load();
+        let had_saved_theme = saved_theme.is_some();
+        let theme_choice = crate::theme_choice::apply(&mut config, saved_theme);
+        if had_saved_theme && theme_choice.is_none() {
+            crate::theme_choice::store(None);
+        }
         info!(
             "loaded configuration: {} with {}",
             config_source.defaults.display(),
@@ -346,6 +354,7 @@ impl App {
             config_source,
             config_stamp,
             last_reload_check: std::time::Instant::now(),
+            theme_choice,
             wake: None,
             ipc: None,
             should_exit: false,
@@ -2201,6 +2210,10 @@ impl App {
         if !self.config.themes.contains_key(name) {
             return false;
         }
+        let config_theme =
+            self.theme_choice.as_ref().map_or(&self.config.theme, |s| &s.config_theme).clone();
+        self.theme_choice = crate::theme_choice::pick(name, &config_theme);
+        crate::theme_choice::store(self.theme_choice.as_ref());
         let mut updated = (*self.config).clone();
         updated.theme = name.to_string();
         self.config = Arc::new(updated);
@@ -2413,8 +2426,15 @@ impl App {
         // The same loader as at startup, so the defaults and the checks are
         // identical.
         match self.config_source.load() {
-            Ok(config) => {
+            Ok(mut config) => {
                 info!("reloaded configuration");
+                // A live pick survives the reload unless the file changed its
+                // own theme since.
+                let had_saved_theme = self.theme_choice.is_some();
+                self.theme_choice = crate::theme_choice::apply(&mut config, self.theme_choice.take());
+                if had_saved_theme && self.theme_choice.is_none() {
+                    crate::theme_choice::store(None);
+                }
                 let width_changed = config.sidebar.width != self.config.sidebar.width
                     || config.sidebar.position != self.config.sidebar.position
                     || config.sidebar.inverted_corners != self.config.sidebar.inverted_corners

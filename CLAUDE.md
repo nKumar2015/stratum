@@ -102,6 +102,14 @@ Notifications persist (`notification_store.rs`) to
 overwrite each other; the Quickshell file is imported once when the native one
 does not exist. Restored notifications are marked as already toasted.
 
+A theme picked live (switcher, Display page, `theme set`) is saved to
+`$XDG_STATE_HOME/stratum/theme.json` with the config's `theme` at the time
+(`theme_choice.rs`), since the config is usually a read-only store link. It
+overrides the config across reloads and restarts until the config's own
+`theme` changes, which wins and removes the file. A dev build shares that
+file with the installed shell, so live tests that switch themes set
+`XDG_STATE_HOME` to a scratch directory.
+
 The **equalizer** is a settings page (`ui/pages/equalizer.rs`). `EqModel` is
 the pure, tested state (QML's editing rules and curve model); the blocking
 `stratum_sys` EQ calls run on the action worker (`SystemAction::Eq*`), which
