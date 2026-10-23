@@ -535,6 +535,11 @@ pub struct CalendarConfig {
     /// address itself, for a config that is a secret (a sops template).
     /// Unset, there is no sync.
     pub urls_file: Option<String>,
+    /// ICS addresses listed in the config itself (Google, Outlook, Canvas…),
+    /// combined with `urls_file`'s. Only for a config that is a secret (a
+    /// sops template filling each in with `config.sops.placeholder`): in a
+    /// Home Manager config in the Nix store, every user could read them.
+    pub urls: Option<Vec<String>>,
     pub refresh_min: u64,
     pub week_start: WeekStart,
     pub week_numbers: bool,

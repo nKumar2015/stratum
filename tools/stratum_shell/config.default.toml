@@ -103,6 +103,9 @@ days = 5                # daily forecast shown, today first
 # urls_file = "~/.config/sops-nix/secrets/calendar_ics"
 # An address in place of the path is used as is, for a config rendered as a
 # secret itself (sops.templates with config.sops.placeholder.<name>).
+# Such a config can also list several feeds, combined with urls_file's;
+# each calendar gets the next theme accent:
+# urls = ["https://calendar.google.com/…/basic.ics", "https://outlook…/calendar.ics"]
 refresh_min = 15
 week_start = "sunday"   # or "monday"
 week_numbers = true

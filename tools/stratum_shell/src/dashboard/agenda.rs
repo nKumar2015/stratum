@@ -93,7 +93,7 @@ impl Dashboard {
         let line = |y: f32| Rect { x, y, width: w, height: m.line, radius: 0.0, color: Color::TRANSPARENT };
 
         if !state.configured {
-            let text = "No calendars yet: point [dashboard.calendar] urls_file at a file of ICS addresses.";
+            let text = "No calendars yet: set [dashboard.calendar] urls_file (a file of ICS addresses) or urls.";
             for row in ui::wrap_text(ctx, text, m.caption, regular, w, 4) {
                 ui::paint_text_vcentered(ctx, list, &row, x, line(y), m.caption, regular, ctx.theme.text_muted);
                 y += m.line;

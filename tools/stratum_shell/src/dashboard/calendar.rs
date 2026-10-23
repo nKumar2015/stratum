@@ -1,5 +1,5 @@
-//! The calendar's data: ICS feeds listed in `[dashboard.calendar]
-//! urls_file`, fetched on a thread of their own only while the dashboard is
+//! The calendar's data: ICS feeds listed in `[dashboard.calendar] urls` and
+//! `urls_file`, combined, fetched on a thread of their own only while the dashboard is
 //! open, at most every `refresh_min`, and at once when the list changes.
 //!
 //! Each feed is kept as downloaded in `$XDG_STATE_HOME/stratum/calendar/`
@@ -31,7 +31,7 @@ pub struct CalendarState {
     /// Bumped whenever `events` changes, so painting can cache expansions
     /// and comparing states need not compare every event.
     pub generation: u64,
-    /// Whether `urls_file` is set at all.
+    /// Whether `urls` or `urls_file` is set at all.
     pub configured: bool,
     pub loading: bool,
     /// Why the last fetch (or part of it) failed.
@@ -52,6 +52,27 @@ fn next_generation() -> u64 {
 
 fn cache_dir() -> Option<PathBuf> {
     crate::theme_choice::state_dir().map(|d| d.join("stratum/calendar"))
+}
+
+/// Every feed's address: `urls`, then those `urls_file` names, without
+/// repeats. `None` when neither is set. Read every time: a sops secret
+/// changes under a running shell.
+fn feed_urls(config: &CalendarConfig) -> Option<Result<Vec<String>, String>> {
+    let listed: Vec<String> = config.urls.iter().flatten().map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).collect();
+    let file = config.urls_file.as_deref().filter(|s| !s.trim().is_empty());
+    if listed.is_empty() && file.is_none() {
+        return None;
+    }
+    let mut urls = listed;
+    if let Some(setting) = file {
+        match read_urls(setting) {
+            Ok(more) => urls.extend(more),
+            Err(error) => return Some(Err(error)),
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| seen.insert(u.clone()));
+    Some(Ok(urls))
 }
 
 /// The addresses `urls_file` names: the file's, or, when the setting is
@@ -117,7 +138,7 @@ impl CalendarFeed {
     /// Called with each sample while the dashboard is open.
     pub fn refresh_if_due(&self, state: &Arc<SystemState>, config: &CalendarConfig) {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(setting) = config.urls_file.as_deref().filter(|s| !s.trim().is_empty()) else {
+        let Some(urls) = feed_urls(config) else {
             if state.calendar.get().configured {
                 state.calendar.set(CalendarState::default());
                 state.notify();
@@ -128,9 +149,7 @@ impl CalendarFeed {
         if inner.in_flight {
             return;
         }
-        // Read every time: a sops secret changes under a running shell. The
-        // path is not secret; the contents are.
-        let urls = match read_urls(setting) {
+        let urls = match urls {
             Ok(urls) => urls,
             Err(error) => {
                 let error = Some(error);
@@ -247,6 +266,20 @@ fn fetch_all(dir: &Path, urls: &[String], changed: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feeds_combine_the_list_and_the_file() {
+        let mut config = crate::config::Config::test_defaults().dashboard.calendar;
+        (config.urls, config.urls_file) = (None, None);
+        assert!(feed_urls(&config).is_none(), "nothing set, no sync");
+        config.urls = Some(vec!["https://a/1.ics".into(), " ".into(), "https://b/2.ics".into()]);
+        config.urls_file = Some("https://c/3.ics".into());
+        assert_eq!(feed_urls(&config).unwrap().unwrap(), ["https://a/1.ics", "https://b/2.ics", "https://c/3.ics"]);
+        config.urls_file = Some("https://a/1.ics".into());
+        assert_eq!(feed_urls(&config).unwrap().unwrap().len(), 2, "a feed given twice is fetched once");
+        config.urls_file = Some("/nonexistent/stratum-calendar-list".into());
+        assert!(feed_urls(&config).unwrap().is_err(), "an unreadable file is reported, not skipped");
+    }
 
     #[test]
     fn urls_file_takes_a_file_or_an_address() {
