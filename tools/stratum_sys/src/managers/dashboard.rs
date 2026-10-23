@@ -1,6 +1,5 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use crate::managers::common::{command_available, run_capture_optional, run_command_capture};
 use lazy_static::lazy_static;
@@ -9,9 +8,6 @@ use std::sync::Mutex;
 
 lazy_static! {
     static ref CALENDAR_CACHE: Mutex<HashMap<(i32, u32), Value>> = Mutex::new(HashMap::new());
-    /// GPU names by DRM card; a card's name never changes, and the poll runs
-    /// every couple of seconds.
-    static ref GPU_NAMES: Mutex<HashMap<PathBuf, Option<String>>> = Mutex::new(HashMap::new());
 }
 
 pub fn current_date_parts() -> (i32, u32, u32) {
@@ -185,26 +181,6 @@ pub fn calendar_payload(year: i32, month: u32) -> Value {
     result
 }
 
-fn parse_first_int(text: &str) -> Option<i64> {
-    let mut current = String::new();
-    for ch in text.chars() {
-        if ch.is_ascii_digit() {
-            current.push(ch);
-            continue;
-        }
-
-        if !current.is_empty() {
-            return current.parse::<i64>().ok();
-        }
-    }
-
-    if current.is_empty() {
-        None
-    } else {
-        current.parse::<i64>().ok()
-    }
-}
-
 fn read_cpu_snapshot() -> Option<(u64, u64)> {
     let stat = fs::read_to_string("/proc/stat").ok()?;
     let line = stat.lines().next()?.trim();
@@ -247,118 +223,6 @@ fn cpu_usage_percent() -> i64 {
     let idle_delta = idle2.saturating_sub(idle1);
     let used = total_delta.saturating_sub(idle_delta);
     ((used * 100) / total_delta) as i64
-}
-
-/// The fields of one `lspci -mm` line: quoted strings and bare words.
-fn lspci_fields(line: &str) -> Vec<&str> {
-    let mut fields = Vec::new();
-    let mut rest = line.trim();
-    while !rest.is_empty() {
-        if let Some(quoted) = rest.strip_prefix('"') {
-            let end = quoted.find('"').unwrap_or(quoted.len());
-            fields.push(&quoted[..end]);
-            rest = quoted.get(end + 1..).unwrap_or("").trim_start();
-        } else {
-            let end = rest.find(' ').unwrap_or(rest.len());
-            fields.push(&rest[..end]);
-            rest = rest[end..].trim_start();
-        }
-    }
-    fields
-}
-
-/// The marketing name in a PCI device name: "Rembrandt [Radeon 680M]" is
-/// "Radeon 680M". A name without brackets is kept whole.
-fn short_pci_name(device: &str) -> String {
-    match (device.rfind('['), device.rfind(']')) {
-        (Some(open), Some(close)) if open < close => device[open + 1..close].trim().to_string(),
-        _ => device.trim().to_string(),
-    }
-}
-
-/// The name of the GPU behind `card` (a `/sys/class/drm/cardN` path), from
-/// lspci's PCI ID database. The kernel exposes only numeric ids.
-fn gpu_name(card: &Path) -> Option<String> {
-    let mut names = GPU_NAMES.lock().ok()?;
-    names
-        .entry(card.to_path_buf())
-        .or_insert_with(|| {
-            let device = fs::canonicalize(card.join("device")).ok()?;
-            let slot = device.file_name()?.to_str()?.to_string();
-            let line = run_capture_optional("lspci", &["-mm", "-s", &slot]);
-            // Slot, class, vendor, device.
-            let device_name = *lspci_fields(line.lines().next()?).get(3)?;
-            Some(short_pci_name(device_name)).filter(|name| !name.is_empty())
-        })
-        .clone()
-}
-
-fn drm_cards() -> Vec<PathBuf> {
-    let mut cards = fs::read_dir("/sys/class/drm")
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        // `card1`, not its connectors (`card1-HDMI-A-1`).
-                        .map(|name| name.starts_with("card") && !name.contains('-'))
-                        .unwrap_or(false)
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    cards.sort();
-    cards
-}
-
-/// Usage and the name of the GPU it was read from; the name falls back to
-/// the source when lspci does not know the card.
-fn read_gpu_usage() -> (String, String) {
-    let cards = drm_cards();
-
-    if command_available("nvidia-smi") {
-        let output = run_capture_optional(
-            "nvidia-smi",
-            &[
-                "--query-gpu=utilization.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-        );
-        if let Some(first_line) = output.lines().next() {
-            if let Some(value) = parse_first_int(first_line) {
-                let name = cards
-                    .iter()
-                    .find(|card| {
-                        fs::read_to_string(card.join("device/vendor"))
-                            .is_ok_and(|vendor| vendor.trim() == "0x10de")
-                    })
-                    .and_then(|card| gpu_name(card));
-                return (value.to_string(), name.unwrap_or_else(|| "NVIDIA".to_string()));
-            }
-        }
-    }
-
-    for card in &cards {
-        let path = card.join("device/gpu_busy_percent");
-        if let Ok(text) = fs::read_to_string(&path) {
-            if let Some(value) = parse_first_int(&text) {
-                return (value.to_string(), gpu_name(card).unwrap_or_else(|| "DRM".to_string()));
-            }
-        }
-    }
-
-    for card in &cards {
-        let path = card.join("gt_busy_percent");
-        if let Ok(text) = fs::read_to_string(&path) {
-            if let Some(value) = parse_first_int(&text) {
-                return (value.to_string(), gpu_name(card).unwrap_or_else(|| "INTEL".to_string()));
-            }
-        }
-    }
-
-    ("N/A".to_string(), "N/A".to_string())
 }
 
 fn read_meminfo_kib(key: &str) -> i64 {
@@ -407,8 +271,17 @@ fn root_storage_kib() -> (i64, i64, i64) {
 
 fn performance_payload() -> Value {
     let cpu = cpu_usage_percent().clamp(0, 100);
-    let (gpu_text, gpu_source) = read_gpu_usage();
-    let gpu_value = parse_first_int(&gpu_text).map(|value| value.clamp(0, 100));
+    let gpus = super::gpu::read_all()
+        .into_iter()
+        .map(|gpu| {
+            let (text, value) = match gpu.load {
+                super::gpu::Load::Percent(p) => (format!("{}%", p.clamp(0, 100)), p.clamp(0, 100)),
+                super::gpu::Load::Asleep => ("Asleep".to_string(), 0),
+                super::gpu::Load::Unknown => ("N/A".to_string(), 0),
+            };
+            json!({ "name": gpu.name, "text": text, "percent": value })
+        })
+        .collect::<Vec<_>>();
 
     let mem_total_kib = read_meminfo_kib("MemTotal:");
     let mem_avail_kib = read_meminfo_kib("MemAvailable:");
@@ -423,9 +296,8 @@ fn performance_payload() -> Value {
 
     json!({
         "cpu_percent": cpu,
-        "gpu_percent_text": gpu_text,
-        "gpu_percent_value": gpu_value,
-        "gpu_source": gpu_source,
+        // One per GPU present, in card order.
+        "gpus": gpus,
         "ram_used_gib": format_gib_tenths(mem_used_kib),
         "ram_total_gib": format_gib_tenths(mem_total_kib),
         "ram_percent": mem_pct,
@@ -443,31 +315,4 @@ pub fn status(year: i32, month: i32) -> Value {
         "music": super::music::status(),
         "performance": performance_payload(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lspci_fields_split_quoted_and_bare_words() {
-        let line = r#"06:00.0 "VGA compatible controller" "Advanced Micro Devices, Inc. [AMD/ATI]" "Rembrandt [Radeon 680M]" -r0a -p00 "Lenovo" "Device 3d2f""#;
-        let fields = lspci_fields(line);
-        assert_eq!(fields[0], "06:00.0");
-        assert_eq!(fields[3], "Rembrandt [Radeon 680M]");
-        assert_eq!(fields[4], "-r0a");
-        assert_eq!(fields[7], "Device 3d2f");
-    }
-
-    #[test]
-    fn short_pci_name_keeps_the_bracketed_name() {
-        assert_eq!(short_pci_name("Rembrandt [Radeon 680M]"), "Radeon 680M");
-        assert_eq!(short_pci_name("AD106M [GeForce RTX 4070 Max-Q / Mobile]"), "GeForce RTX 4070 Max-Q / Mobile");
-        assert_eq!(short_pci_name("Device 2860"), "Device 2860");
-    }
-
-    #[test]
-    fn drm_cards_skip_connectors() {
-        assert!(drm_cards().iter().all(|card| !card.to_string_lossy().contains('-')));
-    }
 }

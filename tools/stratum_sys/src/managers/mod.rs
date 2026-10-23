@@ -9,6 +9,7 @@ pub mod battery;
 pub mod bluetooth;
 pub mod common;
 pub mod dashboard;
+pub mod gpu;
 pub mod music;
 pub mod net;
 pub mod polkit;

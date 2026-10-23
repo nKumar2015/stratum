@@ -310,17 +310,25 @@ impl Dashboard {
         let x = panel.x + m.inner;
         let w = panel.width - m.inner * 2.0;
         let num = |key: &str| perf[key].as_f64().unwrap_or(0.0);
-        let gpu_text = perf["gpu_percent_text"].as_str().unwrap_or("N/A").to_string();
-        let gpu_value = perf["gpu_percent_value"].as_f64().unwrap_or(0.0);
-        let rows = [
-            ("\u{f2db}", "CPU".to_string(), String::new(), format!("{}%", num("cpu_percent").round()), num("cpu_percent")),
-            (
+        let mut rows = vec![(
+            "\u{f2db}",
+            "CPU".to_string(),
+            String::new(),
+            format!("{}%", num("cpu_percent").round()),
+            num("cpu_percent"),
+        )];
+        // A row per GPU present: a hybrid laptop shows both, integrated-only
+        // mode just the one.
+        for gpu in perf["gpus"].as_array().into_iter().flatten() {
+            rows.push((
                 "\u{f08ae}",
                 "GPU".to_string(),
-                perf["gpu_source"].as_str().unwrap_or_default().to_string(),
-                if gpu_text == "N/A" { "N/A".to_string() } else { format!("{gpu_text}%") },
-                gpu_value,
-            ),
+                gpu["name"].as_str().unwrap_or_default().to_string(),
+                gpu["text"].as_str().unwrap_or("N/A").to_string(),
+                gpu["percent"].as_f64().unwrap_or(0.0),
+            ));
+        }
+        rows.extend([
             (
                 "\u{f035b}",
                 "RAM".to_string(),
@@ -335,7 +343,7 @@ impl Dashboard {
                 format!("{}%", num("storage_percent").round()),
                 num("storage_percent"),
             ),
-        ];
+        ]);
         let style = |ctx: &PaintCtx<'_>, size: f32| crate::text::TextStyle {
             family: std::sync::Arc::from(ctx.theme.font.as_str()),
             size,
