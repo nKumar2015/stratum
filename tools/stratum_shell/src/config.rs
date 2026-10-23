@@ -33,6 +33,7 @@ pub struct Config {
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
     pub screenshot: ScreenshotConfig,
+    pub render: RenderConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
     pub metrics: crate::ui::style::Metrics,
 }
@@ -48,6 +49,7 @@ impl Default for Config {
             control_center: ControlCenterConfig::default(),
             lock: LockConfig::default(),
             screenshot: ScreenshotConfig::default(),
+            render: RenderConfig::default(),
             metrics: crate::ui::style::Metrics::default(),
         }
     }
@@ -480,6 +482,26 @@ impl ScreenshotConfig {
             colors
         }
     }
+}
+
+/// Which GPU the shell renders on. Read once at start; a reload does not move
+/// the shell to another GPU.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RenderConfig {
+    pub gpu: GpuPreference,
+}
+
+/// A GPU by vendor. `Auto` prefers an integrated GPU, then any other; a vendor
+/// that is not present falls back to `Auto`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GpuPreference {
+    #[default]
+    Auto,
+    Nvidia,
+    Radeon,
+    Intel,
 }
 
 /// The lock screen's artwork and authentication.

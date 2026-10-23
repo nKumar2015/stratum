@@ -44,6 +44,14 @@ avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
 # could never be undone. Refusals fall back to Quickshell while both run.
 pam_service = "stratum-shell"
 
+[render]
+# GPU to draw on: "auto", "nvidia", "radeon" or "intel". Only that vendor's
+# Vulkan driver is loaded, which saves memory (the NVIDIA driver alone costs
+# about 40 MiB). "auto" tries an integrated GPU first, then any other; a
+# vendor with no GPU present falls back to "auto". Read at start only.
+# VK_LOADER_DRIVERS_SELECT in the environment overrides this.
+gpu = "auto"
+
 [screenshot]            # the viewer's annotation pen
 # Drawn into the image, so they are fixed colours, not theme colours. The
 # first is selected when the viewer opens.

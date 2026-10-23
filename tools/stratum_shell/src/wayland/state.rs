@@ -219,13 +219,13 @@ impl App {
         info!("connected to Wayland");
 
         let display = display_ptr(&conn)?;
-        let gpu = pollster::block_on(Gpu::new())?;
 
         let (config, path) = Config::load().map_err(|err| err.to_string())?;
         match &path {
             Some(path) => info!("loaded configuration from {}", path.display()),
             None => info!("no configuration file found; using defaults"),
         }
+        let gpu = pollster::block_on(Gpu::new(config.render.gpu))?;
         let config_mtime = path
             .as_ref()
             .and_then(|p| std::fs::metadata(p).ok())
