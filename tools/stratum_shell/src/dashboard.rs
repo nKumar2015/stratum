@@ -351,7 +351,10 @@ impl Dashboard {
             y += m.line;
             if !detail.is_empty() {
                 let sub = Rect { y, height: m.line * 0.8, ..row };
-                ui::paint_text_vcentered(ctx, list, &detail, x + m.text * 1.6, sub, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
+                let weight = ctx.metrics.typography.weight_regular;
+                // A GPU's name can outrun the panel.
+                let detail = ui::elide(ctx, &detail, m.caption, weight, w - m.text * 1.6);
+                ui::paint_text_vcentered(ctx, list, &detail, x + m.text * 1.6, sub, m.caption, weight, ctx.theme.text_muted);
                 y += sub.height;
             }
             let track = Rect { x, y: y + m.bar * 0.5, width: w, height: m.bar, radius: m.bar * 0.5, color: ctx.theme.bg_hover };

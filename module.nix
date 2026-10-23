@@ -69,6 +69,7 @@ in {
         grim # screenshots
         libnotify # notify-send, for screenshot failures
         networkmanager # nmcli
+        pciutils # lspci, the dashboard's GPU name
         pipewire # pw-link, pw-cli
         playerctl # media controls
         pulseaudio # pactl
