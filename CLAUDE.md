@@ -61,10 +61,12 @@ against fixtures in a nested compositor; see below).
 
 The theme switcher overlay is implemented too (`theme_switcher.rs`).
 
-The Bluetooth page follows `modules/BluetoothMenu.qml`, built from the shared
-pieces in `ui/pages/devices.rs`: a status card, an icon button, a value
-strip, `Marquee` (QML `MarqueeLabel`, used only by the device and network
-detail panels) and the `Status` footer. A page learns how its own action
+Settings pages are built on the scaffold in `ui/pages/layout.rs` (header,
+sections, cards, rows, badges, pills) and scroll as a whole. The Bluetooth
+and Network pages keep the QML menus' behaviour but not their layout: the
+pieces in `ui/pages/devices.rs` give them a header with refresh/scan, a power
+card whose caption is the `Status` line, and rows that expand in place where
+QML had a side panel. A page learns how its own action
 ended by sending `SystemAction::Tracked { ticket, .. }`; the worker publishes
 the outcome under that ticket in `SystemState::action_result`. Queue actions
 from `paint`, not from `on_page_shown`: an action queued there can be cleared

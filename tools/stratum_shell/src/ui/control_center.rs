@@ -144,19 +144,10 @@ impl ControlCenter {
         self.pages.key(self.page, keysym, text, ctrl);
     }
 
-    /// Wheel scrolling. A page's own list scrolls first; once it is at its
-    /// end, or when the page has none, the page itself scrolls.
-    pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
-        let consumed = match self.page {
-            Page::Wifi => self.pages.wifi.on_scroll(point, delta),
-            Page::Bluetooth => self.pages.bluetooth.on_scroll(point, delta),
-            _ => false,
-        };
-        if !consumed {
-            // Positive deltas scroll up, as the lists take them.
-            let step = self.config.metrics.window.scroll_step;
-            self.scroll = scroll_by(self.scroll, -delta.signum() * step, self.max_scroll);
-        }
+    /// Wheel scrolling, which moves the whole page. Positive deltas scroll up.
+    pub fn on_scroll(&mut self, _point: crate::render::display_list::Point, delta: f32) {
+        let step = self.config.metrics.window.scroll_step;
+        self.scroll = scroll_by(self.scroll, -delta.signum() * step, self.max_scroll);
     }
 
     /// Paint into a normal window: no scrim and no slide, just the panel

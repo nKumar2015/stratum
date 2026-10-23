@@ -54,42 +54,32 @@ pub fn slider(
     Some(((px - rect.x) / rect.width.max(1.0)).clamp(0.0, 1.0))
 }
 
-/// Draw a labelled switch. Returns the new state when it is clicked.
-pub fn toggle(
+/// A switch, its top-left at `(x, y)`. Returns the new state when it is
+/// clicked.
+pub fn switch(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,
-    rect: Rect,
-    label: &str,
+    x: f32,
+    y: f32,
     on: bool,
     input: &InputState,
     clicked: bool,
 ) -> Option<bool> {
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        label,
-        rect.x,
-        rect,
-        ctx.metrics.typography.body,
-        ctx.metrics.typography.weight_medium,
-        ctx.theme.text_main,
-    );
-
     let page = &ctx.metrics.page;
     let width = page.toggle_width;
     let height = page.toggle_height;
     let inset = 2.0;
     let knob_size = height - inset * 2.0;
     let sw = Rect {
-        x: rect.x + rect.width - width,
-        y: rect.y + rect.height * 0.5 - height * 0.5,
+        x,
+        y,
         width,
         height,
         radius: height * 0.5,
         color: if on {
             ctx.theme.primary
         } else {
-            ctx.theme.bg_hover
+            ctx.theme.surface_highest
         },
     };
     list.push_rect(sw);

@@ -270,7 +270,9 @@ impl AudioPage {
                 let row = rect(body.x, y, body.width, m.device_height);
                 let selected = device.name == *current;
                 let glyph = if is_output { output_glyph(&device.name, &device.label) } else { MIC };
-                if paint_device(ctx, list, row, glyph, device, selected, input) && clicked && !selected && self.switching.is_none() {
+                let check = selected.then_some(SELECTED);
+                let hot = layout::list_row(ctx, list, row, glyph, &device.label, &device.name, check, selected, input);
+                if hot && clicked && !selected && self.switching.is_none() {
                     chosen = Some((device.name.clone(), is_output));
                 }
                 y += m.device_height + page.grid_gap;
@@ -506,45 +508,6 @@ fn paint_volume(
         typo.weight_bold,
         if card.muted { theme.text_muted } else { theme.text_main },
     );
-}
-
-/// A device row: a badge, the description over the node name, and a check
-/// when it is the default. Returns whether the pointer is over it.
-#[allow(clippy::too_many_arguments)]
-fn paint_device(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    row: Rect,
-    glyph: &str,
-    device: &Device,
-    selected: bool,
-    input: &InputState,
-) -> bool {
-    let page = ctx.metrics.page.clone();
-    let theme = ctx.theme.clone();
-    let hot = layout::hovered(input, row);
-    layout::card(ctx, list, row, layout::clickable(input, row, selected));
-    let pad = page.card_padding;
-    let (fg, bg) = if selected {
-        (theme.on_primary, theme.primary)
-    } else {
-        (theme.text_muted, theme.surface_highest)
-    };
-    layout::badge(ctx, list, row.x + pad, row.y + (row.height - page.badge) * 0.5, glyph, fg, bg);
-    let check = rect(row.x + row.width - pad - page.badge, row.y + (row.height - page.badge) * 0.5, page.badge, page.badge);
-    if selected {
-        ui::paint_icon_centered(ctx, list, SELECTED, check, page.badge_icon, theme.primary);
-    }
-    let text_x = row.x + pad + page.badge + pad * 0.75;
-    layout::two_lines(
-        ctx,
-        list,
-        rect(text_x, row.y, check.x - pad - text_x, row.height),
-        &device.label,
-        &device.name,
-        theme.text_muted,
-    );
-    hot
 }
 
 #[cfg(test)]

@@ -95,12 +95,21 @@ fn snapshot(objects: &Objects, include_unpaired: bool) -> Result<Value, String> 
         };
         let connected = prop_bool(device, "Connected");
         let name = prop_str(device, "Name").filter(|n| !n.is_empty()).unwrap_or_else(|| mac.clone());
+        // A connected device that reports its charge has `Battery1` too.
+        let battery = interfaces
+            .get("org.bluez.Battery1")
+            .and_then(|b| b.get("Percentage"))
+            .and_then(|v| u8::try_from(v).ok());
         let entry = json!({
             "mac": mac,
             "name": name,
             "connected": if connected { "yes" } else { "no" },
             "paired": if paired { "yes" } else { "no" },
             "trusted": if prop_bool(device, "Trusted") { "yes" } else { "no" },
+            // The freedesktop icon name BlueZ guesses from the device class
+            // ("audio-headset", "input-mouse", "phone").
+            "icon": prop_str(device, "Icon").unwrap_or_default(),
+            "battery": battery,
         });
         devices.push((connected, name, entry));
     }

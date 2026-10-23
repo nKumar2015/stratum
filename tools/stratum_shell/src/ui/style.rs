@@ -731,40 +731,23 @@ impl Default for ScreenshotMetrics {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DevicePageMetrics {
-    /// Between the blocks of the page, and between items in a row.
-    pub spacing: f32,
+    /// Between the loading dot and its label.
     pub gap: f32,
-    /// The status card: padding, headline size, and its line of values.
-    pub card_padding: f32,
-    pub headline: f32,
-    pub strip: f32,
-    pub strip_line: f32,
-    /// Square icon buttons (disconnect, refresh, scan, close).
-    pub icon_button: f32,
-    pub icon: f32,
-    pub radius: f32,
-    pub border: f32,
-    /// List rows: height, gap, padding, name size, and its value line.
+    /// A device or network row, and what an expanded row adds below it.
     pub row_height: f32,
-    pub row_gap: f32,
-    pub row_padding: f32,
-    pub row_title: f32,
-    pub row_strip: f32,
-    /// The detail panel's width, padding, and its action buttons.
-    pub panel_width: f32,
-    pub panel_padding: f32,
-    pub panel_button: f32,
-    /// The panel's password field: text size, padding, caret width.
+    pub expanded: f32,
+    /// The password field: text size, padding, caret width, corner radius
+    /// and border.
     pub field_text: f32,
     pub field_padding: f32,
     pub caret_width: f32,
-    /// The scrolling name in the panel (QML `MarqueeLabel`): its size, the
-    /// gap before it repeats, and its speed in px/s.
-    pub marquee: f32,
+    pub radius: f32,
+    pub border: f32,
+    /// A scrolling title (QML `MarqueeLabel`): the gap before it repeats,
+    /// and its speed in px/s.
     pub marquee_gap: f32,
     pub marquee_speed: f32,
-    /// The status line at the bottom, and how long a result stays there.
-    pub footer: f32,
+    /// The Audio page's status line, and how long a result stays shown.
     pub footer_height: f32,
     pub status_ms: u64,
     /// The loading dot's size and its pulse period.
@@ -775,31 +758,16 @@ pub struct DevicePageMetrics {
 impl Default for DevicePageMetrics {
     fn default() -> Self {
         Self {
-            spacing: 10.0,
             gap: 8.0,
-            card_padding: 10.0,
-            headline: 14.0,
-            strip: 11.0,
-            strip_line: 18.0,
-            icon_button: 30.0,
-            icon: 14.0,
-            radius: 6.0,
-            border: 1.0,
-            row_height: 56.0,
-            row_gap: 6.0,
-            row_padding: 8.0,
-            row_title: 13.0,
-            row_strip: 10.0,
-            panel_width: 250.0,
-            panel_padding: 10.0,
-            panel_button: 30.0,
+            row_height: 60.0,
+            expanded: 44.0,
             field_text: 12.0,
-            field_padding: 8.0,
+            field_padding: 12.0,
             caret_width: 1.5,
-            marquee: 14.0,
+            radius: 8.0,
+            border: 1.0,
             marquee_gap: 24.0,
             marquee_speed: 42.0,
-            footer: 11.0,
             footer_height: 22.0,
             status_ms: 3500,
             loading_dot: 8.0,

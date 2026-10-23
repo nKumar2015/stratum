@@ -1,111 +1,145 @@
 //! Pieces shared by the Bluetooth and Network pages.
 //!
-//! Both follow the QML menus' layout: a status card for the active device, a
-//! toolbar, the list with a detail panel beside it, and a status line. The
-//! QML `MarqueeLabel`, `TripleStatusStrip`, `StatusMessageFooter` and
-//! `CompactIconButton` live here as immediate-mode helpers.
+//! Both are built the same way on [`layout`]: a header with refresh (and
+//! scan) at its right, a power card whose caption doubles as the status
+//! line (QML `StatusMessageFooter`), then full-width rows that expand in
+//! place to show their actions. The QML menus put those actions in a side
+//! panel, which left no room for the list in a tiled window.
+//!
+//! The QML `MarqueeLabel` lives here too, for the Audio page and the
+//! dashboard.
 
 use std::sync::Arc;
 
-use crate::render::display_list::{Color, DisplayList, Point, Rect};
+use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::text::TextStyle;
+use crate::ui::controls;
+use crate::ui::pages::layout::{self, rect, Card};
 use crate::ui::{self, InputState, PaintCtx};
 
-pub fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-    Rect { x, y, width: width.max(0.0), height: height.max(0.0), radius: 0.0, color: Color::TRANSPARENT }
+/// What the header's buttons asked for.
+pub struct HeaderClick {
+    pub body: Rect,
+    /// The index of the glyph button clicked.
+    pub button: Option<usize>,
 }
 
-fn hovered(input: &InputState, rect: Rect) -> bool {
-    input.pointer.is_some_and(|(x, y)| rect.contains(Point::new(x, y)))
-}
-
-/// A raised block with the theme's border (the QML cards and list rows).
-pub fn card(ctx: &PaintCtx<'_>, list: &mut DisplayList, rect: Rect, fill: Color, border: Color) {
-    let m = &ctx.metrics.device_page;
-    crate::ui::text_field::paint_frame(list, Rect { radius: m.radius, ..rect }, m.border, border, fill);
-}
-
-/// A square button with a glyph. Returns true when clicked while enabled.
+/// The page header with round glyph buttons at its right, `(glyph,
+/// enabled)`. While `loading` holds a phase, a pulsing "Loading" sits
+/// before the buttons.
 #[allow(clippy::too_many_arguments)]
-pub fn icon_button(
+pub fn header(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,
-    rect: Rect,
-    glyph: &str,
-    color: Color,
-    enabled: bool,
+    area: Rect,
+    title: &str,
+    summary: &str,
+    buttons: &[(&str, bool)],
+    loading: Option<f32>,
     input: &InputState,
     clicked: bool,
-) -> bool {
-    let m = &ctx.metrics.device_page;
-    let hot = enabled && hovered(input, rect);
-    let fill = if !enabled {
-        ctx.theme.bg_dark
-    } else if hot {
-        ctx.theme.bg_hover
-    } else {
-        ctx.theme.bg_widget
-    };
-    list.push_rect(Rect { radius: m.radius, color: fill, ..rect });
-    let color = if enabled { color } else { ctx.theme.text_muted };
-    ui::paint_text_centered(ctx, list, glyph, rect, m.icon, color);
-    hot && clicked
-}
-
-/// A labelled button that can be disabled. Returns true when clicked while
-/// enabled.
-#[allow(clippy::too_many_arguments)]
-pub fn text_button(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    rect: Rect,
-    label: &str,
-    enabled: bool,
-    input: &InputState,
-    clicked: bool,
-) -> bool {
-    let m = &ctx.metrics.device_page;
-    let hot = enabled && hovered(input, rect);
-    let fill = if !enabled {
-        ctx.theme.bg_dark
-    } else if hot {
-        ctx.theme.bg_hover
-    } else {
-        ctx.theme.bg_widget
-    };
-    card(ctx, list, rect, fill, ctx.theme.border_inactive);
-    let color = if enabled { ctx.theme.text_main } else { ctx.theme.text_muted };
-    ui::paint_text_centered_weighted(ctx, list, label, rect, m.strip, ctx.metrics.typography.weight_bold, color);
-    hot && clicked
-}
-
-/// `Label value · Label value · …` on one line (QML `TripleStatusStrip`),
-/// labels in `label_color`, each value in its own colour. Clipped to `rect`.
-pub fn strip(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    rect: Rect,
-    items: &[(&str, &str, Color)],
-    size: f32,
-    label_color: Color,
-) {
-    let space = ctx.measure(" ", size);
-    let dot = " · ";
-    let mut x = rect.x;
-    list.push_clip(rect);
-    for (i, (label, value, color)) in items.iter().enumerate() {
-        if i > 0 {
-            ui::paint_text_vcentered(ctx, list, dot, x, rect, size, 400, ctx.theme.text_muted);
-            x += ctx.measure(dot, size);
-        }
-        if !label.is_empty() {
-            ui::paint_text_vcentered(ctx, list, label, x, rect, size, 400, label_color);
-            x += ctx.measure(label, size) + space;
-        }
-        ui::paint_text_vcentered(ctx, list, value, x, rect, size, 400, *color);
-        x += ctx.measure(value, size);
+) -> HeaderClick {
+    let m = ctx.metrics.page.clone();
+    let gap = m.grid_gap * 0.5;
+    let buttons_w = buttons.len() as f32 * (m.badge + gap);
+    let loading_w = if loading.is_some() { loading_width(ctx) + m.grid_gap } else { 0.0 };
+    let (head, body) = layout::header(
+        ctx,
+        list,
+        Rect {
+            width: area.width - buttons_w - loading_w,
+            ..area
+        },
+        title,
+        summary,
+    );
+    let y = head.y + (head.height - m.badge) * 0.5;
+    let mut x = area.x + area.width - buttons_w + gap;
+    if let Some(phase) = loading {
+        paint_loading(ctx, list, rect(x - loading_w, y, loading_w - m.grid_gap, m.badge), phase);
     }
-    list.pop_clip();
+    let mut button = None;
+    for (i, (glyph, enabled)) in buttons.iter().enumerate() {
+        if layout::icon_button(ctx, list, x, y, glyph, false, ctx.theme.primary, input, clicked && *enabled) {
+            button = Some(i);
+        }
+        x += m.badge + gap;
+    }
+    HeaderClick {
+        body: Rect { width: area.width, ..body },
+        button,
+    }
+}
+
+/// The radio's card: a badge, a title over a caption, and a switch. A click
+/// anywhere on it flips the switch while `enabled`. Returns the new state.
+#[allow(clippy::too_many_arguments)]
+pub fn power_card(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    cell: Rect,
+    glyph: &str,
+    title: &str,
+    caption: &str,
+    caption_color: Color,
+    on: bool,
+    enabled: bool,
+    input: &InputState,
+    clicked: bool,
+) -> Option<bool> {
+    let m = ctx.metrics.page.clone();
+    let theme = ctx.theme.clone();
+    let hot = enabled && layout::hovered(input, cell);
+    layout::card(ctx, list, cell, if hot { Card::Hover } else { Card::Plain });
+    let pad = m.card_padding;
+    let (fg, bg) = if on {
+        (theme.on_primary, theme.primary)
+    } else {
+        (theme.text_muted, theme.surface_highest)
+    };
+    layout::badge(ctx, list, cell.x + pad, cell.y + (cell.height - m.badge) * 0.5, glyph, fg, bg);
+    let switch_x = cell.x + cell.width - pad - m.toggle_width;
+    let switch_y = cell.y + (cell.height - m.toggle_height) * 0.5;
+    controls::switch(ctx, list, switch_x, switch_y, on, input, false);
+    let text_x = cell.x + pad + m.badge + pad * 0.75;
+    layout::two_lines(ctx, list, rect(text_x, cell.y, switch_x - pad - text_x, cell.height), title, caption, caption_color);
+    (hot && clicked).then_some(!on)
+}
+
+/// The line under an expanded row's title: a caption at the left and pills
+/// at the right, inside `area`. Returns the pill clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn row_actions(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    area: Rect,
+    caption: &str,
+    labels: &[&str],
+    enabled: bool,
+    input: &InputState,
+    clicked: bool,
+) -> Option<usize> {
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let y = area.y + (area.height - m.badge) * 0.5;
+    let (left, hit) = layout::text_buttons(ctx, list, area.x + area.width, y, labels, enabled, input, clicked);
+    let caption = ui::elide(ctx, caption, typo.caption, typo.weight_regular, left - m.grid_gap - area.x);
+    ui::paint_text_vcentered(ctx, list, &caption, area.x, area, typo.caption, typo.weight_regular, ctx.theme.text_muted);
+    hit
+}
+
+/// Where a row's expansion goes: below its top `height`, inset like its text.
+pub fn expansion(ctx: &PaintCtx<'_>, row: Rect, height: f32) -> Rect {
+    let m = &ctx.metrics.page;
+    let x = row.x + m.card_padding + m.badge + m.card_padding * 0.75;
+    rect(x, row.y + height, row.x + row.width - m.card_padding - x, row.height - height - m.card_padding)
+}
+
+/// A card for an empty list.
+pub fn empty_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, body: Rect, y: f32, title: &str, caption: &str) -> f32 {
+    let height = ctx.metrics.page.info_height;
+    layout::info_card(ctx, list, rect(body.x, y, body.width, height), title, caption);
+    y + height
 }
 
 /// The scrolling name in a detail panel (QML `MarqueeLabel`), and the
@@ -222,28 +256,38 @@ impl Status {
     }
 
     pub fn paint(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect) {
-        if self.text.is_empty() {
+        let Some((text, error)) = self.message() else {
             return;
-        }
-        let m = &ctx.metrics.device_page;
-        let color = if self.error { ctx.theme.error } else { ctx.theme.text_muted };
-        list.push_clip(rect);
-        ui::paint_text_vcentered(ctx, list, &self.text, rect.x, rect, m.footer, 400, color);
-        list.pop_clip();
+        };
+        let typo = ctx.metrics.typography.clone();
+        let color = if error { ctx.theme.error } else { ctx.theme.text_muted };
+        let text = ui::elide(ctx, text, typo.caption, typo.weight_regular, rect.width);
+        ui::paint_text_vcentered(ctx, list, &text, rect.x, rect, typo.caption, typo.weight_regular, color);
+    }
+
+    /// The message showing, and whether it is an error.
+    pub fn message(&self) -> Option<(&str, bool)> {
+        (!self.text.is_empty()).then_some((self.text.as_str(), self.error))
     }
 }
 
-/// A pulsing dot and "Loading", while a refresh is in flight. `phase` is
-/// seconds since it started.
-pub fn loading(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, phase: f32) -> f32 {
+const LOADING: &str = "Loading";
+
+fn loading_width(ctx: &mut PaintCtx<'_>) -> f32 {
     let m = ctx.metrics.device_page.clone();
+    m.loading_dot + m.gap + ctx.measure(LOADING, ctx.metrics.typography.caption)
+}
+
+/// A pulsing dot and "Loading" at the right of `rect`, while a refresh is
+/// in flight. `phase` is seconds since it started.
+fn paint_loading(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, phase: f32) {
+    let m = ctx.metrics.device_page.clone();
+    let typo = ctx.metrics.typography.clone();
     let period = (m.loading_ms as f32 / 1000.0).max(0.1);
     // 0.3 → 1 → 0.3 once a period, as the QML animation did.
     let t = (phase % period) / period;
     let alpha = 0.3 + 0.7 * (1.0 - (2.0 * t - 1.0).abs());
-    let label = "Loading";
-    let width = m.loading_dot + m.gap + ctx.measure(label, m.strip);
-    let x = rect.x + rect.width - width;
+    let x = rect.x + rect.width - loading_width(ctx);
     list.push_rect(Rect {
         x,
         y: rect.y + (rect.height - m.loading_dot) * 0.5,
@@ -252,8 +296,8 @@ pub fn loading(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, phase
         radius: m.loading_dot * 0.5,
         color: ctx.theme.primary.with_alpha(alpha),
     });
-    ui::paint_text_vcentered(ctx, list, label, x + m.loading_dot + m.gap, rect, m.strip, 400, ctx.theme.text_muted);
-    width
+    let label_x = x + m.loading_dot + m.gap;
+    ui::paint_text_vcentered(ctx, list, LOADING, label_x, rect, typo.caption, typo.weight_regular, ctx.theme.text_muted);
 }
 
 #[cfg(test)]

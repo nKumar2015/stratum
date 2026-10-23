@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::actions::SystemAction;
 use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::ui::pages::layout::{self, Card};
-use crate::ui::pages::{devices, Optimistic, Page};
+use crate::ui::pages::{Optimistic, Page};
 use crate::ui::{self, InputState, PaintCtx};
 
 pub struct OverviewPage {
@@ -379,13 +379,13 @@ fn paint_music(
         (if status == "Playing" { "\u{f04c}" } else { "\u{f04b}" }, "play-pause"),
         ("\u{f04e}", "next"),
     ];
-    let size = audio_m.media_button;
+    let size = m.badge;
     let controls_w = size * 3.0 + audio_m.gap * 2.0;
     let mut bx = cell.x + cell.width - pad - controls_w;
     let by = cell.y + (cell.height - size) * 0.5;
     for (glyph, action) in buttons {
-        let button = layout::rect(bx, by, size, size);
-        if devices::icon_button(ctx, list, button, glyph, theme.text_main, active, input, clicked) {
+        let on = status == "Playing" && action == "play-pause";
+        if layout::icon_button(ctx, list, bx, by, glyph, on, theme.primary, input, clicked && active) {
             pending.push(SystemAction::Media { player: player.clone(), action: action.into() });
         }
         bx += size + audio_m.gap;

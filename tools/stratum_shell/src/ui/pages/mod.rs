@@ -309,10 +309,11 @@ impl Pages {
             }
             Page::Equalizer => self.equalizer.paint(ctx, list, area, input, clicked, pending),
             Page::Bluetooth => {
-                self.bluetooth
-                    .paint(ctx, list, area, input, clicked, pending)
+                return self.bluetooth.paint(ctx, list, area, input, clicked, pending);
             }
-            Page::Wifi => self.wifi.paint(ctx, list, area, input, clicked, pending),
+            Page::Wifi => {
+                return self.wifi.paint(ctx, list, area, input, clicked, pending);
+            }
             Page::Battery => {
                 return self.battery.paint(ctx, list, area, input, clicked, pending);
             }

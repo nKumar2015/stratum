@@ -1,17 +1,16 @@
-//! Network page: matching `modules/WifiMenu.qml`.
+//! Network page: the behaviour of `modules/WifiMenu.qml`.
 //!
-//! - The radio switch ("Working…" while it changes).
-//! - A card for the active connection: SSID, state, signal bars, security,
-//!   IP and gateway, with disconnect and forget buttons.
-//! - Refresh (a rescan), the network count, and "Loading" while it runs.
-//! - The networks, strongest first: SSID, signal, security and state. A click
-//!   selects one, and a second click deselects it.
-//! - The selected network's panel: its SSID (scrolling when it does not fit),
-//!   state, signal, security, a password field for a secured network that is
-//!   not saved (or whose saved password just failed), and Connect/Disconnect.
-//!   Return in the field connects.
-//! - A status line: "Connecting to …" while an action runs, then its result,
-//!   with QML's wording.
+//! - Refresh (a rescan) in the header, with "Loading" while it runs.
+//! - The radio card and its switch ("Working…" while it changes). Its
+//!   caption is the status line: "Connecting to …" while an action runs,
+//!   then its result, with QML's wording.
+//! - The active connection: SSID, signal, security, IP and gateway, with
+//!   Disconnect and Forget.
+//! - The other networks, strongest first, with signal, security and whether
+//!   they are saved. A click expands a row: a password field for a secured
+//!   network that is not saved (or whose saved password just failed), and
+//!   Connect (Forget too, for a saved one). Return in the field connects. A
+//!   second click folds it. (QML showed these in a side panel.)
 //!
 //! One action at a time, as in QML. The active connection and the saved
 //! networks come from `SystemState::wifi_details`, which actions refresh.
@@ -19,28 +18,40 @@
 use serde_json::Value;
 
 use crate::actions::SystemAction;
-use crate::render::display_list::{DisplayList, Point, Rect};
-use crate::ui::controls;
-use crate::ui::pages::devices::{self, rect, Marquee, Status};
-use crate::ui::pages::{heading, Optimistic};
+use crate::render::display_list::{DisplayList, Rect};
+use crate::ui::pages::bluetooth::{COLLAPSE, EXPAND};
+use crate::ui::pages::devices::{self, Status};
+use crate::ui::pages::layout::{self, rect, Card};
+use crate::ui::pages::Optimistic;
 use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
-use crate::ui::{self, InputState, PaintCtx};
+use crate::ui::{InputState, PaintCtx};
 
-/// QML's thresholds for `▮▮▮▯`.
+const WIFI: &str = "\u{f05a9}";
+const WIFI_OFF: &str = "\u{f05aa}";
+const REFRESH: &str = "\u{f0450}";
+
+/// QML's signal thresholds, for four bars.
 const SIGNAL_STRONG: i64 = 75;
 const SIGNAL_GOOD: i64 = 50;
 const SIGNAL_FAIR: i64 = 25;
 
-/// Four bars, filled by signal strength.
-pub fn signal_bars(signal: i64) -> String {
-    let level = match signal {
+/// Bars lit, out of four.
+pub fn signal_level(signal: i64) -> usize {
+    match signal {
         s if s >= SIGNAL_STRONG => 4,
         s if s >= SIGNAL_GOOD => 3,
         s if s >= SIGNAL_FAIR => 2,
         s if s > 0 => 1,
         _ => 0,
-    };
-    (0..4).map(|i| if i < level { '▮' } else { '▯' }).collect()
+    }
+}
+
+/// A Wi-Fi glyph with `signal`'s bars, padlocked when `secure`.
+fn signal_glyph(signal: i64, secure: bool) -> &'static str {
+    const OPEN: [&str; 5] = ["\u{f092f}", "\u{f091f}", "\u{f0922}", "\u{f0925}", "\u{f0928}"];
+    const LOCKED: [&str; 5] = ["\u{f092c}", "\u{f0921}", "\u{f0924}", "\u{f0927}", "\u{f092a}"];
+    let level = signal_level(signal);
+    if secure { LOCKED[level] } else { OPEN[level] }
 }
 
 /// Whether a network asks for a password, by its `nmcli` security field.
@@ -55,6 +66,12 @@ struct Network {
     signal: i64,
     security: String,
     in_use: bool,
+}
+
+impl Network {
+    fn security_label(&self) -> &str {
+        if is_secure(&self.security) { &self.security } else { "Open" }
+    }
 }
 
 /// One row per SSID, as QML listed them: `nmcli` reports every access point,
@@ -98,14 +115,22 @@ enum Job {
     Forget(String),
 }
 
+/// What a click in the page asked for.
+enum Request {
+    /// With the password Return submitted, if that is what asked.
+    Connect(Network, Option<crate::pam::Secret>),
+    Disconnect,
+    Forget(String),
+}
+
 pub struct WifiPage {
     enabled: Optimistic<bool>,
+    /// The expanded row, by SSID.
     selected: Option<String>,
     job: Option<(u64, Job)>,
     refresh: Option<(u64, f32)>,
     refresh_wanted: bool,
     status: Status,
-    marquee: Marquee,
     password: TextField,
     /// The password field has the keyboard.
     typing: bool,
@@ -115,7 +140,6 @@ pub struct WifiPage {
     /// Return was pressed in the field, with this password; the next paint
     /// connects.
     submit: Option<crate::pam::Secret>,
-    scroll: usize,
 }
 
 impl WifiPage {
@@ -127,12 +151,10 @@ impl WifiPage {
             refresh: None,
             refresh_wanted: true,
             status: Status::default(),
-            marquee: Marquee::default(),
             password: TextField::new(),
             typing: false,
             retry_password: false,
             submit: None,
-            scroll: 0,
         }
     }
 
@@ -145,7 +167,7 @@ impl WifiPage {
     }
 
     pub fn animating(&self) -> bool {
-        self.refresh.is_some() || self.marquee.moving()
+        self.refresh.is_some()
     }
 
     /// A rescan when the page is shown, as the QML menu did on open. Sent
@@ -212,9 +234,7 @@ impl WifiPage {
             }
             (Some(error), _) => self.status.result(error, true, status_ms),
             (None, Job::Connect { ssid, .. }) => {
-                self.retry_password = false;
-                self.password.clear();
-                self.typing = false;
+                self.deselect();
                 self.status.result(format!("Connected to {ssid}."), false, status_ms);
             }
             (None, Job::Forget(ssid)) => self.status.result(format!("Forgot network {ssid}."), false, status_ms),
@@ -222,18 +242,7 @@ impl WifiPage {
         }
     }
 
-    /// Wheel scrolling over the list. Returns true when consumed.
-    pub fn on_scroll(&mut self, _point: Point, delta: f32) -> bool {
-        let step: i64 = if delta > 0.0 { -1 } else { 1 };
-        let next = (self.scroll as i64 + step).max(0) as usize;
-        if next == self.scroll {
-            return false;
-        }
-        self.scroll = next;
-        true
-    }
-
-    #[allow(clippy::too_many_arguments)]
+    /// Returns the bottom of the page.
     pub fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -242,8 +251,7 @@ impl WifiPage {
         input: &InputState,
         clicked: bool,
         pending: &mut Vec<SystemAction>,
-    ) {
-        let area = heading(ctx, list, area, "Network");
+    ) -> f32 {
         if self.refresh_wanted {
             self.refresh_wanted = false;
             self.refresh(pending);
@@ -266,248 +274,189 @@ impl WifiPage {
         let active_device = active["device"].as_str().unwrap_or("").to_string();
         let active_ssid = active["ssid"].as_str().unwrap_or("").to_string();
         let active_net = all.iter().find(|n| n.in_use).cloned();
+        let others: Vec<&Network> = all.iter().filter(|n| !n.in_use).collect();
         let busy = self.job.is_some();
 
-        // Radio switch.
-        let mut y = area.y;
-        let working = matches!(self.job, Some((_, Job::Radio(_))));
-        let label = if working { "Working…" } else { "Wi-Fi" };
-        if let Some(next) =
-            controls::toggle(ctx, list, rect(area.x, y, area.width, page.button_height), label, enabled, input, clicked && !busy)
-        {
+        let area = layout::column(area, page.max_width);
+        let summary = match (enabled, active_ssid.is_empty()) {
+            (false, _) => "Wi-Fi is off".to_string(),
+            (true, true) => "Not connected".to_string(),
+            (true, false) => format!("Connected to {active_ssid}"),
+        };
+        let loading = self.refresh.map(|(_, phase)| phase);
+        let buttons = [(REFRESH, self.refresh.is_none())];
+        let head = devices::header(ctx, list, area, "Network", &summary, &buttons, loading, input, clicked);
+        if head.button.is_some() {
+            self.refresh(pending);
+        }
+        let body = head.body;
+
+        // The radio.
+        let (caption, error) = match self.status.message() {
+            Some((text, error)) => (text.to_string(), error),
+            None if matches!(self.job, Some((_, Job::Radio(_)))) => ("Working…".to_string(), false),
+            None if !enabled => ("Off".to_string(), false),
+            None if active_ssid.is_empty() => ("On".to_string(), false),
+            None => (format!("On \u{b7} {active_ssid}"), false),
+        };
+        let caption_color = if error { theme.error } else { theme.text_muted };
+        let card = rect(body.x, body.y, body.width, page.tile_height);
+        let glyph = if enabled { WIFI } else { WIFI_OFF };
+        if let Some(next) = devices::power_card(ctx, list, card, glyph, "Wi-Fi", &caption, caption_color, enabled, !busy, input, clicked) {
             self.enabled.set(next);
             self.start(Job::Radio(next), SystemAction::WifiToggle(next), pending);
         }
-        y += page.button_height + m.spacing;
+        let mut y = card.y + card.height + page.section_spacing;
+        let mut request = None;
 
         // The active connection.
-        let card_h = m.card_padding * 2.0 + m.strip_line * 3.0;
-        let card_rect = rect(area.x, y, area.width, card_h);
-        devices::card(ctx, list, card_rect, theme.bg_widget, theme.border_inactive);
-        let buttons_w = m.icon_button * 2.0 + m.gap;
-        let inner = rect(
-            card_rect.x + m.card_padding,
-            card_rect.y + m.card_padding,
-            card_rect.width - m.card_padding * 3.0 - buttons_w,
-            card_h - m.card_padding * 2.0,
-        );
-        let headline = if active_ssid.is_empty() { "Not connected".to_string() } else { format!("Connected to {active_ssid}") };
-        let line = |i: f32| rect(inner.x, inner.y + i * m.strip_line, inner.width, m.strip_line);
-        list.push_clip(line(0.0));
-        ui::paint_text_vcentered(ctx, list, &headline, inner.x, line(0.0), m.headline, ctx.metrics.typography.weight_bold, theme.text_main);
-        list.pop_clip();
-        let na = "N/A".to_string();
-        let state_text = active["state"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| if enabled { "idle".into() } else { "wifi disabled".into() });
-        let (signal_text, signal_color) = match &active_net {
-            Some(n) => (signal_bars(n.signal), if n.signal >= SIGNAL_GOOD { theme.success } else { theme.warning }),
-            None => (na.clone(), theme.warning),
-        };
-        let security = active_net.as_ref().map(|n| n.security.clone()).filter(|s| !s.is_empty()).unwrap_or(na.clone());
-        devices::strip(
-            ctx,
-            list,
-            line(1.0),
-            &[("State", &state_text, theme.tertiary), ("Signal", &signal_text, signal_color), ("Security", &security, theme.tertiary)],
-            m.strip,
-            theme.secondary,
-        );
-        let value = |k: &str| active[k].as_str().filter(|s| !s.is_empty()).unwrap_or("N/A").to_string();
-        let (ip, gateway) = (value("ip"), value("gateway"));
-        devices::strip(
-            ctx,
-            list,
-            line(2.0),
-            &[("IP", &ip, theme.tertiary), ("Gateway", &gateway, theme.tertiary)],
-            m.strip,
-            theme.secondary,
-        );
-        let bx = card_rect.x + card_rect.width - m.card_padding - buttons_w;
-        let by = card_rect.y + (card_h - m.icon_button) * 0.5;
-        if devices::icon_button(ctx, list, rect(bx, by, m.icon_button, m.icon_button), "󰖪", theme.text_main, !active_device.is_empty() && !busy, input, clicked) {
-            self.start(Job::Disconnect(active_ssid.clone()), SystemAction::WifiDisconnect(active_device.clone()), pending);
+        if !active_ssid.is_empty() {
+            y = layout::section(ctx, list, body, y, "Connection");
+            let row = rect(body.x, y, body.width, m.row_height + m.expanded);
+            layout::card(ctx, list, row, Card::Active);
+            let (signal, security) = match &active_net {
+                Some(n) => (n.signal, n.security_label().to_string()),
+                None => (0, "Unknown".to_string()),
+            };
+            let caption = format!("Connected \u{b7} Signal {signal}% \u{b7} {security}");
+            let glyph = signal_glyph(signal, is_secure(&security));
+            let top = rect(row.x, row.y, row.width, m.row_height);
+            layout::row_content(ctx, list, top, glyph, &active_ssid, &caption, None, true);
+            let value = |k: &str| active[k].as_str().filter(|s| !s.is_empty()).unwrap_or("N/A").to_string();
+            let detail = format!("IP {} \u{b7} Gateway {}", value("ip"), value("gateway"));
+            let line = devices::expansion(ctx, row, m.row_height);
+            let can_disconnect = !busy && !active_device.is_empty();
+            match devices::row_actions(ctx, list, line, &detail, &["Forget", "Disconnect"], can_disconnect, input, clicked) {
+                Some(0) => request = Some(Request::Forget(active_ssid.clone())),
+                Some(_) => request = Some(Request::Disconnect),
+                None => {}
+            }
+            y = row.y + row.height + page.section_spacing;
         }
-        let forget = rect(bx + m.icon_button + m.gap, by, m.icon_button, m.icon_button);
-        if devices::icon_button(ctx, list, forget, "󰆴", theme.text_main, !active_ssid.is_empty() && !busy, input, clicked) {
-            self.start(Job::Forget(active_ssid.clone()), SystemAction::WifiForget(active_ssid.clone()), pending);
-        }
-        y += card_h + m.spacing;
 
-        // Toolbar.
-        let bar = rect(area.x, y, area.width, m.icon_button);
-        if devices::icon_button(ctx, list, rect(bar.x, bar.y, m.icon_button, m.icon_button), "󰑐", theme.text_main, self.refresh.is_none(), input, clicked) {
-            self.refresh(pending);
-        }
-        let mut right = bar.x + bar.width;
-        if let Some((_, phase)) = self.refresh {
-            right -= devices::loading(ctx, list, bar, phase) + m.gap * 2.0;
-        }
-        let count = format!("{} networks", all.len());
-        let count_w = ctx.measure(&count, m.strip);
-        ui::paint_text_vcentered(ctx, list, &count, right - count_w, bar, m.strip, 400, theme.text_muted);
-        y += m.icon_button + m.spacing;
-
-        // The list, and the selected network's panel.
-        let footer_top = area.y + area.height - m.footer_height;
-        let body = rect(area.x, y, area.width, footer_top - m.spacing - y);
-        let selected = self.selected.as_ref().and_then(|s| all.iter().find(|n| &n.ssid == s)).cloned();
-        if self.selected.is_some() && selected.is_none() {
+        // Every other network.
+        if self.selected.as_ref().is_some_and(|s| !others.iter().any(|n| &n.ssid == s)) {
             self.deselect();
         }
-        let list_w = if selected.is_some() { body.width - m.panel_width - m.spacing } else { body.width };
-        let list_rect = rect(body.x, body.y, list_w, body.height);
-        if all.is_empty() {
-            let note = if enabled { "No networks found" } else { "Wi-Fi is off" };
-            let line = rect(list_rect.x, list_rect.y, list_rect.width, m.row_height);
-            ui::paint_text_vcentered(ctx, list, note, line.x, line, m.row_title, 400, theme.text_muted);
-        }
-        let pitch = m.row_height + m.row_gap;
-        let visible = ((list_rect.height + m.row_gap) / pitch).floor().max(1.0) as usize;
-        self.scroll = self.scroll.min(all.len().saturating_sub(visible));
-        list.push_clip(list_rect);
-        let mut clicked_row = None;
-        for (i, net) in all.iter().skip(self.scroll).take(visible).enumerate() {
-            let row = rect(list_rect.x, list_rect.y + i as f32 * pitch, list_rect.width, m.row_height);
-            let is_selected = self.selected.as_deref() == Some(net.ssid.as_str());
-            let fill = if is_selected { theme.bg_hover } else { theme.bg_widget };
-            let border = if net.in_use { theme.border_active } else { theme.border_inactive };
-            devices::card(ctx, list, row, fill, border);
-            let text_w = row.width - m.row_padding * 2.0;
-            let title = rect(row.x + m.row_padding, row.y + m.row_padding, text_w, (m.row_height - m.row_padding * 2.0) * 0.55);
-            list.push_clip(title);
-            ui::paint_text_vcentered(ctx, list, &net.ssid, title.x, title, m.row_title, ctx.metrics.typography.weight_bold, theme.text_main);
-            list.pop_clip();
-            let state_line = rect(title.x, title.y + title.height, text_w, row.y + row.height - m.row_padding - title.y - title.height);
-            let bars = signal_bars(net.signal);
-            let security = if is_secure(&net.security) { net.security.as_str() } else { "Open" };
-            devices::strip(
-                ctx,
-                list,
-                state_line,
-                &[
-                    ("Signal", &bars, if net.signal >= SIGNAL_GOOD { theme.success } else { theme.warning }),
-                    ("Security", security, theme.tertiary),
-                    (
-                        "State",
-                        if net.in_use { "Connected" } else { "Disconnected" },
-                        if net.in_use { theme.success } else { theme.error },
-                    ),
-                ],
-                m.row_strip,
-                theme.secondary,
-            );
-            if clicked && input.pointer.is_some_and(|(x, y)| row.contains(Point::new(x, y)) && list_rect.contains(Point::new(x, y))) {
-                clicked_row = Some((net.ssid.clone(), is_selected));
+        let label = if others.is_empty() { "Networks".to_string() } else { format!("Networks \u{b7} {}", others.len()) };
+        y = layout::section(ctx, list, body, y, &label);
+        let bottom = if others.is_empty() {
+            match enabled {
+                true => devices::empty_card(ctx, list, body, y, "No networks found", "Refresh to scan again"),
+                false => devices::empty_card(ctx, list, body, y, "Wi-Fi is off", "Turn it on to see networks"),
             }
-        }
-        list.pop_clip();
-        if let Some((ssid, was_selected)) = clicked_row {
-            self.deselect();
-            if !was_selected {
-                self.selected = Some(ssid);
-            }
-        }
-
-        if let Some(net) = selected.filter(|n| self.selected.as_deref() == Some(n.ssid.as_str())) {
-            let panel = rect(body.x + list_w + m.spacing, body.y, m.panel_width, body.height);
-            let known = known.iter().any(|k| k == &net.ssid);
-            self.paint_panel(ctx, list, panel, &net, known, &active_device, busy, input, clicked, pending);
         } else {
-            self.marquee = Marquee::default();
+            let mut toggle_row = None;
+            for net in &others {
+                let expanded = self.selected.as_deref() == Some(net.ssid.as_str());
+                let height = if expanded { m.row_height + m.expanded } else { m.row_height };
+                let row = rect(body.x, y, body.width, height);
+                let top = rect(row.x, row.y, row.width, m.row_height);
+                let hot = layout::hovered(input, top);
+                layout::card(ctx, list, row, if hot { Card::Hover } else { Card::Plain });
+                let saved = known.iter().any(|k| k == &net.ssid);
+                let caption = match saved {
+                    true => format!("Saved \u{b7} {} \u{b7} {}%", net.security_label(), net.signal),
+                    false => format!("{} \u{b7} {}%", net.security_label(), net.signal),
+                };
+                let glyph = signal_glyph(net.signal, is_secure(&net.security));
+                let trailing = if expanded { COLLAPSE } else { EXPAND };
+                layout::row_content(ctx, list, top, glyph, &net.ssid, &caption, Some(trailing), false);
+                if clicked && hot {
+                    toggle_row = Some(net.ssid.clone());
+                }
+                if expanded {
+                    let line = devices::expansion(ctx, row, m.row_height);
+                    if let Some(r) = self.paint_expansion(ctx, list, line, net, saved, busy, input, clicked) {
+                        request = Some(r);
+                    }
+                }
+                y += height + page.grid_gap;
+            }
+            if let Some(ssid) = toggle_row {
+                let was_selected = self.selected.as_ref() == Some(&ssid);
+                self.deselect();
+                if !was_selected {
+                    self.selected = Some(ssid);
+                }
+            }
+            y - page.grid_gap
+        };
+
+        match request {
+            Some(Request::Disconnect) => {
+                self.start(Job::Disconnect(active_ssid.clone()), SystemAction::WifiDisconnect(active_device), pending);
+            }
+            Some(Request::Forget(ssid)) => self.start(Job::Forget(ssid.clone()), SystemAction::WifiForget(ssid), pending),
+            Some(Request::Connect(net, submitted)) => self.connect(net, submitted, &known, pending),
+            None => {}
         }
-
-        self.status.paint(ctx, list, rect(area.x, footer_top, area.width, m.footer_height));
+        bottom
     }
 
-    fn deselect(&mut self) {
-        self.selected = None;
-        self.password.clear();
-        self.typing = false;
-        self.retry_password = false;
-        self.submit = None;
-    }
-
-    /// QML `SelectedNetworkPanel`.
+    /// An expanded network's line: the password field when one is needed,
+    /// and its buttons.
     #[allow(clippy::too_many_arguments)]
-    fn paint_panel(
+    fn paint_expansion(
         &mut self,
         ctx: &mut PaintCtx<'_>,
         list: &mut DisplayList,
-        panel: Rect,
+        line: Rect,
         net: &Network,
-        known: bool,
-        active_device: &str,
+        saved: bool,
         busy: bool,
         input: &InputState,
         clicked: bool,
-        pending: &mut Vec<SystemAction>,
-    ) {
+    ) -> Option<Request> {
         let m = ctx.metrics.device_page.clone();
+        let page = ctx.metrics.page.clone();
         let theme = ctx.theme.clone();
-        devices::card(ctx, list, panel, theme.bg_widget, theme.border_inactive);
-        let x = panel.x + m.panel_padding;
-        let w = panel.width - m.panel_padding * 2.0;
-        let mut y = panel.y + m.panel_padding;
-
-        let title = rect(x, y, w - m.icon_button - m.gap, m.icon_button);
-        ui::paint_text_vcentered(ctx, list, "Selected Network", x, title, m.strip, ctx.metrics.typography.weight_bold, theme.text_muted);
-        if devices::icon_button(ctx, list, rect(x + w - m.icon_button, y, m.icon_button, m.icon_button), "󰅖", theme.error, true, input, clicked) {
-            self.deselect();
-            return;
-        }
-        y += m.icon_button + m.gap;
-
-        self.marquee.paint(ctx, list, rect(x, y, w, m.strip_line + m.gap), &net.ssid, m.marquee, theme.text_main);
-        y += m.strip_line + m.gap * 2.0;
-
-        let (state, state_color) = if net.in_use { ("Connected", theme.success) } else { ("Disconnected", theme.error) };
-        devices::strip(ctx, list, rect(x, y, w, m.strip_line), &[("", state, state_color)], m.strip, theme.tertiary);
-        y += m.strip_line;
-        let bars = signal_bars(net.signal);
-        let bars_color = if net.signal >= SIGNAL_GOOD { theme.success } else { theme.warning };
-        devices::strip(ctx, list, rect(x, y, w, m.strip_line), &[("Signal", &bars, bars_color)], m.strip, theme.secondary);
-        y += m.strip_line;
-        let security = if net.security.is_empty() { "Open" } else { net.security.as_str() };
-        devices::strip(ctx, list, rect(x, y, w, m.strip_line), &[("Security", security, theme.tertiary)], m.strip, theme.secondary);
-        y += m.strip_line + m.gap;
-
-        // A password, for a secured network that is not saved or whose saved
-        // password just failed.
-        let secure = is_secure(&net.security);
-        let ask = secure && !net.in_use && (!known || self.retry_password);
-        if ask {
-            let field = rect(x, y, w, m.panel_button);
-            let border = if self.typing { theme.border_active } else { theme.border_inactive };
-            crate::ui::text_field::paint_frame(list, Rect { radius: m.radius, ..field }, m.border, border, theme.bg_dark);
-            let style = FieldStyle {
-                text: m.field_text,
-                padding: m.field_padding,
-                caret_width: m.caret_width,
-                masked: true,
-                placeholder: Some("Enter password"),
+        let ask = self.asks_password(net, saved);
+        // Return is acted on in the frame it arrives, or not at all.
+        let submitted = self.submit.take().filter(|_| !busy && ask);
+        if !ask {
+            let labels: &[&str] = if saved { &["Forget", "Connect"] } else { &["Connect"] };
+            let detail = format!("Signal {}% \u{b7} {}", net.signal, net.security_label());
+            return match devices::row_actions(ctx, list, line, &detail, labels, !busy, input, clicked) {
+                Some(0) if saved => Some(Request::Forget(net.ssid.clone())),
+                Some(_) => Some(Request::Connect(net.clone(), None)),
+                None => None,
             };
-            self.password.paint(ctx, list, field, style, !self.typing);
-            if clicked {
-                self.typing = input.pointer.is_some_and(|(px, py)| field.contains(Point::new(px, py)));
-            }
-            y += m.panel_button + m.gap;
         }
 
-        let label = if net.in_use { "Disconnect" } else { "Connect" };
-        let enabled = !busy && (!net.in_use || !active_device.is_empty());
-        let pressed = devices::text_button(ctx, list, rect(x, y, w, m.panel_button), label, enabled, input, clicked);
-        let submitted = self.submit.take().filter(|_| !busy && !net.in_use && ask);
-        if !pressed && submitted.is_none() {
-            return;
+        let y = line.y + (line.height - page.badge) * 0.5;
+        let (left, hit) = layout::text_buttons(ctx, list, line.x + line.width, y, &["Connect"], !busy, input, clicked);
+        let field = rect(line.x, y, left - page.grid_gap - line.x, page.badge);
+        let border = if self.typing { theme.primary } else { theme.outline };
+        crate::ui::text_field::paint_frame(list, Rect { radius: m.radius, ..field }, m.border, border, theme.surface);
+        let style = FieldStyle {
+            text: m.field_text,
+            padding: m.field_padding,
+            caret_width: m.caret_width,
+            masked: true,
+            placeholder: Some("Enter password"),
+        };
+        self.password.paint(ctx, list, field, style, !self.typing);
+        if clicked {
+            self.typing = layout::hovered(input, field);
         }
-        if net.in_use {
-            self.start(Job::Disconnect(net.ssid.clone()), SystemAction::WifiDisconnect(active_device.to_string()), pending);
-            return;
+        match (hit, submitted) {
+            (_, Some(secret)) => Some(Request::Connect(net.clone(), Some(secret))),
+            (Some(_), None) => Some(Request::Connect(net.clone(), None)),
+            (None, None) => None,
         }
-        let password = if ask {
+    }
+
+    /// A secured network that is not saved, or whose saved password failed.
+    fn asks_password(&self, net: &Network, saved: bool) -> bool {
+        is_secure(&net.security) && (!saved || self.retry_password)
+    }
+
+    /// Connect to `net`, with the password Return `submitted`, else the one
+    /// in the field.
+    fn connect(&mut self, net: Network, submitted: Option<crate::pam::Secret>, known: &[String], pending: &mut Vec<SystemAction>) {
+        let saved = known.iter().any(|k| k == &net.ssid);
+        let password = if self.asks_password(&net, saved) {
             // Return moved the text out of the field; the button reads it.
             let typed = match &submitted {
                 Some(secret) => secret.expose().trim().to_string(),
@@ -522,8 +471,16 @@ impl WifiPage {
         } else {
             None
         };
-        let job = Job::Connect { ssid: net.ssid.clone(), known_secure: known && secure };
-        self.start(job, SystemAction::WifiConnect { ssid: net.ssid.clone(), password }, pending);
+        let job = Job::Connect { ssid: net.ssid.clone(), known_secure: saved && is_secure(&net.security) };
+        self.start(job, SystemAction::WifiConnect { ssid: net.ssid, password }, pending);
+    }
+
+    fn deselect(&mut self) {
+        self.selected = None;
+        self.password.clear();
+        self.typing = false;
+        self.retry_password = false;
+        self.submit = None;
     }
 }
 
@@ -538,12 +495,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn signal_bars_follow_the_qml_thresholds() {
-        assert_eq!(signal_bars(80), "▮▮▮▮");
-        assert_eq!(signal_bars(50), "▮▮▮▯");
-        assert_eq!(signal_bars(30), "▮▮▯▯");
-        assert_eq!(signal_bars(5), "▮▯▯▯");
-        assert_eq!(signal_bars(0), "▯▯▯▯");
+    fn signal_levels_follow_the_qml_thresholds() {
+        assert_eq!(signal_level(80), 4);
+        assert_eq!(signal_level(50), 3);
+        assert_eq!(signal_level(30), 2);
+        assert_eq!(signal_level(5), 1);
+        assert_eq!(signal_level(0), 0);
+        assert_ne!(signal_glyph(80, true), signal_glyph(80, false), "a secured network shows a lock");
     }
 
     #[test]

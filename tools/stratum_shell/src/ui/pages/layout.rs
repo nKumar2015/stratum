@@ -7,7 +7,8 @@
 //! `[metrics.page] max_width` and is centred beyond that.
 //!
 //! Elevation comes from the theme's surface ramp: the page sits on `surface`,
-//! cards on `surface_high`, and a hovered card on `surface_highest`.
+//! cards on `surface_high`, a hovered card halfway to `surface_highest`, and
+//! badges and buttons on `surface_highest`.
 //!
 //! The geometry functions are pure, so the layout maths is tested without a
 //! renderer.
@@ -160,7 +161,9 @@ pub fn card(ctx: &PaintCtx<'_>, list: &mut DisplayList, rect: Rect, style: Card)
     let rect = Rect { radius: m.card_radius, ..rect };
     let (fill, border, width) = match style {
         Card::Plain => (theme.surface_high, theme.outline, m.outline),
-        Card::Hover => (theme.surface_highest, theme.outline, m.outline),
+        // Half a step up the ramp: badges and pills sit on `surface_highest`
+        // and must stay visible on a hovered card.
+        Card::Hover => (mix(theme.surface_high, theme.surface_highest, 0.5), theme.outline, m.outline),
         Card::Active => (
             mix(theme.surface_high, theme.primary, 0.16),
             theme.primary,
@@ -234,14 +237,16 @@ pub fn text_button_width(ctx: &mut PaintCtx<'_>, label: &str) -> f32 {
     ctx.measure(label, size) + ctx.metrics.page.card_padding * 2.0
 }
 
-/// A pill with a label, badge-high, its top-left at `(x, y)`. Returns
-/// whether it was clicked.
+/// A pill with a label, badge-high, its top-left at `(x, y)`. A disabled
+/// one is drawn faded and ignores clicks. Returns whether it was clicked.
+#[allow(clippy::too_many_arguments)]
 pub fn text_button(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,
     x: f32,
     y: f32,
     label: &str,
+    enabled: bool,
     input: &InputState,
     clicked: bool,
 ) -> bool {
@@ -249,8 +254,12 @@ pub fn text_button(
     let typo = ctx.metrics.typography.clone();
     let theme = ctx.theme.clone();
     let area = rect(x, y, text_button_width(ctx, label), m.badge);
-    let hot = hovered(input, area);
-    let fill = if hot { mix(theme.surface_highest, theme.text_main, 0.08) } else { theme.surface_highest };
+    let hot = enabled && hovered(input, area);
+    let fill = match (enabled, hot) {
+        (false, _) => theme.surface_high,
+        (true, true) => mix(theme.surface_highest, theme.text_main, 0.08),
+        (true, false) => theme.surface_highest,
+    };
     list.push_rect(Rect {
         radius: m.badge * 0.5,
         color: fill,
@@ -263,9 +272,93 @@ pub fn text_button(
         area,
         typo.caption,
         typo.weight_bold,
-        if hot { theme.text_main } else { theme.text_muted },
+        match (enabled, hot) {
+            (false, _) => mix(theme.text_muted, theme.surface_high, 0.5),
+            (true, true) => theme.text_main,
+            (true, false) => theme.text_muted,
+        },
     );
     hot && clicked
+}
+
+/// Pills laid out right to left, ending at `right`. Returns the x of the
+/// leftmost, and the index of the one clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn text_buttons(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    right: f32,
+    y: f32,
+    labels: &[&str],
+    enabled: bool,
+    input: &InputState,
+    clicked: bool,
+) -> (f32, Option<usize>) {
+    let gap = ctx.metrics.page.grid_gap * 0.5;
+    let mut x = right;
+    let mut hit = None;
+    for (i, label) in labels.iter().enumerate().rev() {
+        x -= text_button_width(ctx, label);
+        if text_button(ctx, list, x, y, label, enabled, input, clicked) {
+            hit = Some(i);
+        }
+        x -= gap;
+    }
+    (x + gap, hit)
+}
+
+/// A full-width list row: a badge, a title over a caption, and an optional
+/// glyph at the right (a check, a chevron). `active` tints it. Returns
+/// whether the pointer is over it.
+#[allow(clippy::too_many_arguments)]
+pub fn list_row(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    row: Rect,
+    glyph: &str,
+    title: &str,
+    caption: &str,
+    trailing: Option<&str>,
+    active: bool,
+    input: &InputState,
+) -> bool {
+    let hot = hovered(input, row);
+    card(ctx, list, row, clickable(input, row, active));
+    row_content(ctx, list, row, glyph, title, caption, trailing, active);
+    hot
+}
+
+/// What [`list_row`] draws on its card, for a row that paints its own card
+/// (one that expands below this line).
+#[allow(clippy::too_many_arguments)]
+pub fn row_content(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    row: Rect,
+    glyph: &str,
+    title: &str,
+    caption: &str,
+    trailing: Option<&str>,
+    active: bool,
+) {
+    let m = ctx.metrics.page.clone();
+    let theme = ctx.theme.clone();
+    let pad = m.card_padding;
+    let (fg, bg) = if active {
+        (theme.on_primary, theme.primary)
+    } else {
+        (theme.text_muted, theme.surface_highest)
+    };
+    let top = row.y + (row.height - m.badge) * 0.5;
+    badge(ctx, list, row.x + pad, top, glyph, fg, bg);
+    let end = rect(row.x + row.width - pad - m.badge, top, m.badge, m.badge);
+    if let Some(glyph) = trailing {
+        let color = if active { theme.primary } else { theme.text_muted };
+        ui::paint_icon_centered(ctx, list, glyph, end, m.badge_icon, color);
+    }
+    let text_x = row.x + pad + m.badge + pad * 0.75;
+    let text_end = if trailing.is_some() { end.x - pad } else { row.x + row.width - pad };
+    two_lines(ctx, list, rect(text_x, row.y, text_end - text_x, row.height), title, caption, theme.text_muted);
 }
 
 /// A clickable tile: a badge, a title and a caption beside it. `on` tints

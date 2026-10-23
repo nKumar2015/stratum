@@ -61,7 +61,7 @@ impl NotificationsPage {
         let button_y = head.y + (head.height - m.badge) * 0.5;
         let mut x = area.x + area.width - buttons_w;
         if !notifications.is_empty() {
-            if layout::text_button(ctx, list, x, button_y, CLEAR, input, clicked) {
+            if layout::text_button(ctx, list, x, button_y, CLEAR, true, input, clicked) {
                 pending.push(SystemAction::DismissAll);
             }
             x += clear_w;
