@@ -1,6 +1,6 @@
 //! Stratum's native desktop shell.
 //!
-//! The replacement for the Quickshell/QML implementation. One process owns the
+//! It replaced the Quickshell/QML shell. One process owns the
 //! Wayland connection, renders with wgpu on Vulkan, and hosts the system
 //! managers (`stratum_sys`) directly.
 

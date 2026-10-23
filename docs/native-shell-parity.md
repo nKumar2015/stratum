@@ -1,7 +1,7 @@
 # Native shell parity checklist
 
 The native Rust shell must preserve the **features, data, and interactions** of
-the Quickshell implementation. Visual style is intentionally changing
+the Quickshell implementation it replaced. Visual style is intentionally changing
 (vectorheart), so this checklist tracks behaviour, not pixels.
 
 Mark a row `verified` only after exercising it against real devices/services in
@@ -37,7 +37,7 @@ the switch; they remain in the git history before that removal.
 | Wi-Fi hover menu | popup overlay | Compact SSID/signal, quick connect | verified (Hyprland, 2026-10-23, by the user on the installed shell) — active connections with IP, gateway, device, signal and bars, as the QML menu showed (it had no connect action either). Seen with real connections |
 | Battery hover menu | popup overlay | Percentage, state, projected time, power-profile selection (low-power/balanced/performance) | verified (Hyprland, 2026-10-23, by the user on the installed shell, profiles included) — state and percentage, screen-on time, projected time or status, rate, Saver/Normal/Performance. Seen with real data; profile clicks not exercised (they write the real platform profile) |
 | Dashboard menu | popup overlay | Calendar grid with month navigation and a ±3-month sliding window, music panel, performance panel; `watch`/`unwatch` lifecycle so the daemon only streams the visible month | verified (Hyprland, 2026-10-23, by the user on the installed shell) — `dashboard open/close/toggle` over IPC; performance (CPU, GPU + source, RAM, storage, load-coloured bars), calendar («« « Today » »», arrows too, today marked, resets to this month on close), now playing (art, title, artist, album, position, progress, controls; "No active player" without one). Polled every 2 s only while open. Since 2026-10-23 the panels sit on tabs (Today, Calendar, System; `dashboard open|toggle [tab]`, keys 1–9 and Ctrl+Tab, seen in headless sway), and a sampler records CPU, memory and disk in the background for graphs but publishes only while open. The System tab shows history graphs (CPU, RAM, each GPU, network) filling the tab in a grid, with CPU/GPU/NVMe temperatures and VRAM (seen in headless sway). The card scales to `screen_fraction` of the output's width, text included (seen at 2560×1440 and 1280×800). Calendar sync from ICS feeds: an agenda on Today and beside the month grid (week numbers, event dots, a click picks the day), and the next event in the glance strip (seen in headless sway with fixture feeds over `file://`: zoned, UTC, all-day, weekly with an exception across a DST change, yearly, and a failing feed; not yet with the user's real calendar). Now playing seeks on a click along its bar, has shuffle and loop for players that support them, and a chip to switch players when several run (seen in headless sway with two mpv players on a private bus; the clicks only unit-tested). Today adds a glance strip (time, date, uptime, CPU/RAM, battery, Bluetooth device charge, a do-not-disturb bell) and weather by postal code from Open-Meteo, cached between runs (seen in headless sway with a real forecast, a cached one after restart, and an unknown code; device charge and the bell click only unit-tested). The calendar is computed locally, so navigation is instant without the ±3-month cache. Seen in headless sway with real data; media controls not clicked live. A title too long for the panel scrolls as QML's ticker did (42 px/s, 24 px gap, no separator) and is centred when it fits; seen in headless sway with a stand-in `playerctl`. A Focus tab (2026-10-23) keeps to-dos and a note in `$XDG_STATE_HOME/stratum/focus.json` and runs a countdown, stopwatch or Pomodoro timer that keeps going while closed, shows in the glance strip, and notifies at its end; `stratum-cli todo add` and `timer start|pause|toggle|stop` reach it (seen in headless sway on a private bus: CLI to-dos, clicking into the note, typing, check-off, pause, the end toast; Pomodoro phase changes only unit-tested). Keys act where their panel shows (Shift+arrows a year, T today, Space play/pause or the timer, D do-not-disturb, Tab between fields) and the tab bar lists them (seen in headless sway, keyboard only) |
-| Theme switcher | fullscreen overlay, exclusive keyboard | Search filter, up/down/enter/escape navigation, applies theme immediately | verified (Hyprland, 2026-10-22, through this branch's `stratum-cli`; the installed one still predates the native socket) — `theme open/close/toggle` over IPC; search, wrapping arrows, Return, Escape, click outside to close, hover to select, click to apply. All exercised in headless sway (keyboard via wtype, pointer via a virtual pointer); not yet on Hyprland. The list scrolls past `max_rows`, which the QML list did not |
+| Theme switcher | fullscreen overlay, exclusive keyboard | Search filter, up/down/enter/escape navigation, applies theme immediately | verified (Hyprland, 2026-10-22, through `stratum-cli`) — `theme open/close/toggle` over IPC; search, wrapping arrows, Return, Escape, click outside to close, hover to select, click to apply. All exercised in headless sway (keyboard via wtype, pointer via a virtual pointer); not yet on Hyprland. The list scrolls past `max_rows`, which the QML list did not |
 
 ## Overlays & notifications
 
@@ -78,7 +78,9 @@ natively. Only a lock the shell refuses to take answers
 `{"code":"unsupported"}`; the `qs ipc` fallback was removed at the switch.
 
 **`stratum-cli`** — verified end-to-end against the native shell: every
-target's functions were answered by the native pid.
+target's functions were answered by it. The screenshot viewer's
+`screenshot-post` and `portal-save-file` helpers moved into the shell on
+2026-10-23, so the CLI is a socket client only.
 
 **External keybinds** — `SUPER+T` (`theme open`) and `SUPER+N`
 (`notifications toggle`) still work: the CLI contract and output JSON are
@@ -86,13 +88,13 @@ unchanged.
 
 ## Behaviours easy to miss
 
-These are details the QML implements that a feature-level read of the surface
-list would not reveal. Each one is a likely regression source.
+These are details the QML shell implemented that a feature-level read of the
+surface list would not reveal. Each one is a likely regression source.
 
-- **Notification snapshot round-trip** — notifications survive a shell restart
-  via `stratum-cli notifications-snapshot`, including their action maps.
+- **Notification snapshot round-trip** — notifications survive a shell restart,
+  including their action maps (`notification_store.rs`).
 - **Audio optimistic selection** — a device the user just picked stays selected
-  for 5s even if the daemon's next snapshot disagrees; a matching snapshot
+  for 5s even if the next snapshot disagrees; a matching snapshot
   clears the guard early.
 - **Headphone detection heuristic** — output is treated as headphones when the
   sink name or description matches bluez/headphone/headset/buds/airpods/earbud.
@@ -106,9 +108,9 @@ list would not reveal. Each one is a likely regression source.
   a short grace period, so the pointer may cross gaps without dismissing them.
 - **Popup monitor routing** — menus open on the monitor that was focused when
   the interaction started, not whichever is focused when they render.
-- **Calendar ±3-month window** — the dashboard keeps adjacent months warm so
-  navigation is instant; only the centre month refreshes metrics on a timer.
+- **Instant month navigation** — QML kept a ±3-month window warm for this; the
+  native grid is computed locally, so every month is instant.
 - **Radio-busy handling** — Wi-Fi and Bluetooth operations can take seconds;
   the UI shows progress and remains responsive.
 - **Screenshot temp files** — annotated exports are written to a temp path and
-  cleaned up by the CLI after the chosen action completes.
+  removed by the shell after the chosen action completes.

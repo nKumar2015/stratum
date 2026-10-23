@@ -34,7 +34,7 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 /// How long a client may take to send its request and read our answer.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The functions each target exposes. This mirrors `IpcModule.qml` exactly.
+/// The functions each target exposes.
 pub fn functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open", "close", "toggle"]),
@@ -42,10 +42,9 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),
         "screenshot" => Some(&["start"]),
-        // Native only: the QML shell had no settings window to open.
         "settings" => Some(&["open", "close", "toggle"]),
         "theme" => Some(&["open", "close", "toggle", "set"]),
-        // Native only: the dashboard's Focus tab.
+        // The dashboard's Focus tab.
         "todo" => Some(&["add"]),
         "timer" => Some(&["start", "pause", "toggle", "stop"]),
         _ => None,

@@ -22,9 +22,9 @@ or "QML did" refer to the git history before that removal.
   beat Quickshell. Measured baselines: Quickshell's closure is ~1.1 GiB,
   qtdeclarative alone ~692 MiB. Our stripped release binary was ~7.1 MB early
   on, grew to ~16 MB as the system managers were embedded, and was ~13.1 MB
-  on 2026-10-22; after the dashboard overhaul it is 14.30 MB (2026-10-23;
-  the dashboard module is ~171 KB of that, jiff and chrono ~90 KB, and
-  naga, zbus and wgpu remain the largest pieces).
+  on 2026-10-22; after the dashboard overhaul and a cleanup pass it is
+  14.26 MB (2026-10-23; chrono is ~71 KB of that, jiff ~16 KB, and naga,
+  zbus and wgpu remain the largest pieces). The CLI is 0.41 MB.
   Before adding a dependency, check its default features:
   resvg's defaults alone cost 1.9 MB. To find what is big, relink with
   `CARGO_PROFILE_RELEASE_STRIP=false` and sum `nm -S -C` sizes by crate.
@@ -43,11 +43,11 @@ or "QML did" refer to the git history before that removal.
 ```
 tools/stratum_sys/     library: system managers (audio, wifi, bluetooth,
                        battery, music, sysmon, gpu, weather, calendar,
-                       polkit), host-agnostic,
-                       publishes snapshots through `Publisher`
-tools/stratum_cli/     CLI; its IPC targets are the contract external keybinds
-                       use, plus screenshot-post and portal-save-file, which
-                       the screenshot viewer runs
+                       polkit), host-agnostic; queries return JSON
+                       snapshots, and the audio monitor and polkit agent
+                       publish theirs through `Publisher`
+tools/stratum_cli/     CLI, a socket client only; its IPC targets are the
+                       contract external keybinds use
 tools/stratum_shell/   the native shell
 module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 docs/native-shell-parity.md
@@ -87,8 +87,9 @@ logical position, so picking works without Hyprland except for windows. A
 capture runs `grim` after the overlay is hidden, and the PNG is decoded on that
 worker. The viewer is a second xdg toplevel. Its strokes are stored in image
 pixels and rasterised on the CPU (`screenshot_viewer::rasterize`) for
-annotated exports. Actions shell out to `stratum-cli screenshot-post` and
-`portal-save-file`, the QML contract. Every surface sets a cursor shape on
+annotated exports. Copy runs `wl-copy`; Save and Save to copy the file in
+Rust (`screenshot_viewer::post`); Save As asks the desktop portal's
+FileChooser over zbus (`portal_save_as`). Every surface sets a cursor shape on
 enter: once one surface sets the crosshair, compositors keep it across
 surfaces. Live tests must set `HOME` to a scratch directory, because Save
 writes to `~/Pictures/Screenshots`.
@@ -197,13 +198,13 @@ shortcut itself stays in the compositor. Keyboard support comes from SCTK's
 tracked for future text entry.
 
 The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
-with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
-names. `stratum-cli` talks only to it; the `qs ipc` fallback was removed at
-the switch. Every QML target and function is served natively
-(`ipc::tests::every_qml_function_is_served_natively`). Only a lock the shell
-refuses to take answers `unsupported`, and the CLI reports it: there is no
-other locker behind it, so a refused lock means no lock. A new function needs
-an arm in `App::execute_ipc` and in `ipc::is_supported`.
+with `$STRATUM_SOCKET`); its targets and function names are the QML
+`IpcHandler`s', so keybinds written for Quickshell kept working.
+`stratum-cli` talks only to it. Only a lock the shell refuses to take answers
+`unsupported`, and the CLI reports it: there is no other locker behind it, so
+a refused lock means no lock. A new function needs an entry in
+`ipc::functions`, an arm in `App::execute_ipc`, and one in the CLI's
+`ipc_functions`.
 
 The **lock screen** (`lock.rs`, `pam.rs`, `wayland/lock_surface.rs`) uses
 `ext-session-lock-v1` and checks the password with PAM on a worker thread.
@@ -408,7 +409,7 @@ ui/widgets/          one module per bar widget
 ui/pages/            one module per control-centre page
 ui/control_center.rs window chrome only (nav rail + page frame)
 ui/controls.rs       shared immediate-mode primitives
-ui/animation.rs      Tween, Spring, ColorSpring, Easing
+ui/animation.rs      Tween, Easing
 ```
 
 **Colours and sizing are separated on purpose.** Colours live in

@@ -151,7 +151,7 @@ pub struct NotificationServer {
     sink: NotificationSink,
     /// The session connection once `serve` has acquired the name. Dismissals
     /// initiated by the shell use it to emit `NotificationClosed`, which is how
-    /// clients (and the QML shell during migration) learn a notification is
+    /// clients learn a notification is
     /// gone. It is a blocking connection so `close` can be called from the UI
     /// thread.
     connection: Mutex<Option<zbus::blocking::Connection>>,
@@ -223,8 +223,8 @@ impl NotificationServer {
     /// Close a notification and emit the D-Bus signal.
     ///
     /// The signal matters even though we initiated the close: a client that
-    /// tracks its own notifications (libnotify, the QML shell during the
-    /// migration) only frees its state when it arrives.
+    /// tracks its own notifications (libnotify) only frees its state when it
+    /// arrives.
     ///
     /// Closing an id that is not live does nothing. Clients commonly call
     /// `CloseNotification` after an action already closed the notification

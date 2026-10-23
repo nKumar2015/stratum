@@ -2,8 +2,9 @@
 //!
 //! Every subsystem the shell needs to observe or control lives here: audio
 //! (PulseAudio/PipeWire, including the native parametric EQ), Bluetooth,
-//! Wi-Fi/NetworkManager, battery, media (MPRIS), dashboard metrics, and the
-//! polkit authentication agent.
+//! Wi-Fi/NetworkManager, battery, media (MPRIS), dashboard metrics (CPU,
+//! memory, disks, GPUs), weather, calendar feeds, and the polkit
+//! authentication agent.
 //!
 //! The crate is deliberately host-agnostic. It does not own an event loop, a
 //! socket, or a specific UI. Managers that need to report changes call a
