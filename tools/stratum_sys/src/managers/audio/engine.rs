@@ -2,8 +2,7 @@ use super::{config, native_eq, parser, pulse};
 use tracing::{info, warn};
 
 use crate::managers::common::{command_available, run_command_capture};
-use lazy_static::lazy_static;
-use pulsectl::controllers::AppControl;
+use pulsectl::controllers::{AppControl, DeviceControl};
 use serde_json::{json, Value};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -17,11 +16,9 @@ pub(crate) struct EqApplyResult {
     pub(crate) status: String,
 }
 
-lazy_static! {
-    static ref EQ_TARGET_SINK: Mutex<Option<String>> = Mutex::new(None);
-    static ref GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
-    pub(crate) static ref DEVICE_CACHE: Mutex<Option<Value>> = Mutex::new(None);
-}
+static EQ_TARGET_SINK: Mutex<Option<String>> = Mutex::new(None);
+static GLOBAL_EQ_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static DEVICE_CACHE: Mutex<Option<Value>> = Mutex::new(None);
 
 static PW_CLI_AVAILABLE: OnceLock<bool> = OnceLock::new();
 
@@ -120,7 +117,7 @@ fn apply_eq_bands_pipewire(
 
     let current_default = pulse::default_sink_name().unwrap_or_default();
     if current_default.trim() != config::EQ_VIRTUAL_INPUT_SINK {
-        let _ = run_command_capture("pactl", &["set-default-sink", config::EQ_VIRTUAL_INPUT_SINK]);
+        let _ = pulse::with_sink(|ctrl| ctrl.set_default_device(config::EQ_VIRTUAL_INPUT_SINK));
     }
     move_active_streams_to_eq(config::EQ_VIRTUAL_INPUT_SINK);
 
@@ -366,36 +363,14 @@ fn builds_filter_graph_string(filter_specs: &[String]) -> String {
     )
 }
 
+/// The limits a parametric curve must stay within.
 pub(crate) fn eq_capabilities_json() -> Value {
-    let wpctl_available = command_available("wpctl");
-    let pw_cli_avail = pw_cli_available();
-    let pactl_available = command_available("pactl");
-    let native_pw = native_eq::is_available();
-    let has_engine = native_pw || pw_cli_avail;
-
-    let wpctl_status_ok = if wpctl_available {
-        run_command_capture("wpctl", &["status"]).is_ok()
-    } else {
-        false
-    };
-
     json!({
-        "engine": "pipewire-wireplumber",
-        "tools": {
-            "pactl": pactl_available,
-            "wpctl": wpctl_available,
-            "pw_cli": pw_cli_avail,
-            "native_pipewire": native_pw,
-            "wpctl_status_ok": wpctl_status_ok,
-        },
         "parametric": {
-            "supported": has_engine,
-            "apply_mode": if native_pw { "native-pipewire" } else if pw_cli_avail { "pipewire-filter-chain" } else { "dry-run" },
             "max_bands": config::EQ_MAX_BANDS,
             "gain_range_db": [config::EQ_MIN_GAIN_DB, config::EQ_MAX_GAIN_DB],
             "freq_range_hz": [config::EQ_MIN_FREQ_HZ, config::EQ_MAX_FREQ_HZ],
             "q_range": [config::EQ_MIN_Q, config::EQ_MAX_Q],
-            "supported_filter_types": config::EQ_SUPPORTED_FILTER_TYPES,
         }
     })
 }

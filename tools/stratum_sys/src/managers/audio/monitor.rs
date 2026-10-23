@@ -1,7 +1,6 @@
 use super::{engine, parser};
 
 use crate::Publisher;
-use lazy_static::lazy_static;
 use pipewire::keys;
 use pipewire::registry::GlobalObject;
 use pipewire::types::ObjectType;
@@ -10,15 +9,13 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
-lazy_static! {
-    pub static ref LAST_SYNCED_STATE: Mutex<(String, Instant)> =
-        Mutex::new((String::new(), Instant::now()));
-    pub static ref IS_RESTORING: Mutex<bool> = Mutex::new(false);
-}
+pub(crate) static LAST_SYNCED_STATE: LazyLock<Mutex<(String, Instant)>> =
+    LazyLock::new(|| Mutex::new((String::new(), Instant::now())));
+pub(crate) static IS_RESTORING: Mutex<bool> = Mutex::new(false);
 
 pub(crate) async fn run_monitor(publisher: Publisher) {
     if let Some(snapshot) = fetch_current_status() {

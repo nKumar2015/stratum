@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use serde_json::{json, Value};
 
 pub fn emit(msg: &str) {
@@ -8,10 +6,6 @@ pub fn emit(msg: &str) {
 
 pub fn emit_json(value: Value) {
     emit(&value.to_string());
-}
-
-pub fn debug(msg: &str) {
-    eprintln!("__DEBUG__|{}", msg);
 }
 
 pub fn fail(msg: &str) -> ! {
@@ -39,26 +33,4 @@ pub fn emit_help(command: &str, usage: &str, subcommands: &[&str]) {
     }
 
     emit(&lines.join("\n"));
-}
-
-pub fn run_command_capture(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to run {}: {}", program, e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit code {}", output.status)
-        };
-        return Err(format!("{} failed: {}", program, detail));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

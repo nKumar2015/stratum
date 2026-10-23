@@ -1,7 +1,6 @@
 # Stratum CLI Command Reference
 
-The binary name is `stratum-cli`. Keybinds use it to reach the native shell,
-and the shell itself runs its screenshot helpers through it.
+The binary name is `stratum-cli`. Keybinds use it to reach the native shell.
 
 ## Help
 
@@ -29,21 +28,3 @@ socket, `$XDG_RUNTIME_DIR/stratum-shell.sock` (override with
 | `todo` | `add <text>` |
 | `timer` | `start [25m\|90s\|1h30m\|pomodoro\|stopwatch]`, `pause`, `toggle`, `stop` |
 
-`stratum-cli theme list` also prints the built-in theme names without asking
-the shell.
-
-## `portal-save-file`
-
-- Opens the XDG desktop portal's Save File dialog and returns the chosen URI.
-- Invocation: `portal-save-file [title] [default_name]`
-
-## `screenshot-post`
-
-- Post-capture actions for the screenshot viewer.
-- Subcommands:
-  - `copy <image_path>`: copy the image to the clipboard.
-  - `save <image_path>`: save to `~/Pictures/Screenshots` with a generated name.
-  - `save-to <image_path> <target_path>`: copy to a target path.
-  - `save-as <image_path> <target_path>`: copy to a target path.
-  - `copy-text <text>`: copy text to the clipboard.
-- Side effects: writes files for the save actions.

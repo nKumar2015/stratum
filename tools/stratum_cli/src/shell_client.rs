@@ -20,7 +20,7 @@ pub fn shell_socket_path() -> PathBuf {
 
 /// One request/response exchange with the native shell.
 ///
-/// The shell answers with `{"ok":true,"pid":...}` on success or
+/// The shell answers with `{"ok":true}` on success or
 /// `{"ok":false,"code":"...","error":"..."}` on failure. A `code` of
 /// `unsupported` is a request the shell will not serve, such as a lock it
 /// cannot safely take.

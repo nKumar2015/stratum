@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
-use zvariant::{OwnedObjectPath, OwnedValue, Value as Variant};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value as Variant};
 
 use crate::managers::common::{run_command_capture, with_timeout};
 

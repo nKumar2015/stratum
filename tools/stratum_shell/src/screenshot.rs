@@ -525,20 +525,15 @@ pub fn capture(capture: &Capture) -> Result<String, String> {
     Ok(path)
 }
 
-/// Report a failure as a notification, through whichever server owns the
-/// name (QML added it to its own centre; during the migration that is the
-/// same server).
-pub fn notify_failure(summary: &str, body: &str) {
-    let child = std::process::Command::new("notify-send")
-        .args(["-a", "Screenshot", "-u", "critical", "-c", "screenshot", summary, body])
-        .stdin(std::process::Stdio::null())
-        .spawn();
-    match child {
-        // Reaped off the UI thread.
-        Ok(mut child) => {
-            std::thread::spawn(move || child.wait());
-        }
-        Err(err) => tracing::warn!("screenshot: {summary}: {body} (notify-send: {err})"),
+/// A failure, reported as a critical notification.
+pub fn failure(summary: &str, body: &str) -> crate::actions::SystemAction {
+    tracing::warn!("screenshot: {summary}: {body}");
+    crate::actions::SystemAction::Notify {
+        app: "Screenshot",
+        icon: "",
+        urgency: 2,
+        summary: summary.into(),
+        body: body.into(),
     }
 }
 

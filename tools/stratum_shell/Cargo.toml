@@ -49,6 +49,6 @@ futures-lite = { version = "2", default-features = false }
 serde_json = { workspace = true }
 toml = "1.1"
 # FFI types for the PAM binding (malloc'd conversation replies, getpwuid_r).
-libc = "0.2"
+libc = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

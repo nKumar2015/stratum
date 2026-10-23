@@ -905,7 +905,13 @@ impl App {
         let now = std::time::Instant::now();
         if let Some(ended) = self.dashboard.tick_timer(now) {
             let (summary, body) = ended.message();
-            self.actions.push(crate::actions::SystemAction::Notify { summary, body });
+            self.actions.push(crate::actions::SystemAction::Notify {
+                app: "Stratum",
+                icon: "alarm-symbolic",
+                urgency: 1,
+                summary,
+                body,
+            });
         }
         if self.dashboard.is_open() && (state_changed || self.dashboard.animating() || self.dashboard.timer_changed(now)) {
             self.mark_dashboard_dirty();
@@ -1288,7 +1294,7 @@ impl App {
                 // than what is shown, so give up, as QML did.
                 if self.screenshot.is_open() {
                     self.screenshot.close();
-                    crate::screenshot::notify_failure("Start failed", &error);
+                    self.actions.push(crate::screenshot::failure("Start failed", &error));
                 }
             }
             ScreenshotEvent::Captured { path, mode, image } => {
@@ -1298,11 +1304,11 @@ impl App {
             }
             ScreenshotEvent::CaptureFailed { error } => {
                 self.screenshot.capture_failed();
-                crate::screenshot::notify_failure("Capture failed", &error);
+                self.actions.push(crate::screenshot::failure("Capture failed", &error));
             }
             ScreenshotEvent::Posted(result) => {
                 if let Err(error) = &result {
-                    crate::screenshot::notify_failure("Viewer action failed", error);
+                    self.actions.push(crate::screenshot::failure("Viewer action failed", error));
                 }
                 self.viewer.finished(result);
             }

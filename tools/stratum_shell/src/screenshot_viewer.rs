@@ -12,10 +12,10 @@
 //!   leaves the canvas more than it must. The left button draws.
 //! - Ctrl+Z undoes the last stroke, the clear button removes them all, and
 //!   Escape or closing the window closes the viewer.
-//! - Actions go through `stratum-cli screenshot-post` and Save As through
-//!   `stratum-cli portal-save-file`, exactly as QML ran them. With strokes, the
-//!   image is first composed at full resolution into a temporary file, which
-//!   is removed once the action has finished.
+//! - Copy goes through `wl-copy`, and Save As asks the desktop portal's
+//!   FileChooser. With strokes, the image is first composed at full
+//!   resolution into a temporary file, which is removed once the action has
+//!   finished.
 //! - The result shows in a banner for `status_ms`; a failed action is also
 //!   reported as a notification.
 //!
@@ -50,7 +50,7 @@ pub struct Image {
     pub pixels: Arc<[u8]>,
 }
 
-/// What `stratum-cli screenshot-post` is asked to do.
+/// What to do with the capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PostAction {
     Copy,
@@ -59,14 +59,6 @@ pub enum PostAction {
 }
 
 impl PostAction {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PostAction::Copy => "copy",
-            PostAction::Save => "save",
-            PostAction::SaveTo => "save-to",
-        }
-    }
-
     fn done(self) -> &'static str {
         match self {
             PostAction::Copy => "Copied to clipboard",
@@ -780,77 +772,151 @@ pub fn export(image: &Image, strokes: &[Stroke]) -> Result<String, String> {
     Ok(path)
 }
 
-/// Read a `stratum-cli` JSON answer: the payload when `ok`, else its error.
-fn cli_json(output: &[u8]) -> Result<serde_json::Value, String> {
-    let text = String::from_utf8_lossy(output);
-    let value: serde_json::Value =
-        serde_json::from_str(text.trim()).map_err(|_| "Action failed: invalid response".to_string())?;
-    if value["ok"].as_bool() == Some(true) {
-        Ok(value)
-    } else {
-        Err(value["error"].as_str().unwrap_or("Action failed").to_string())
+/// Copy `image` to the clipboard, save it to `~/Pictures/Screenshots`, or
+/// save it to `target`. Runs on a worker thread.
+pub fn post(action: PostAction, image: &str, target: Option<&str>) -> Result<PostAction, String> {
+    let image = std::path::Path::new(image);
+    match action {
+        PostAction::Copy => copy_to_clipboard(image)?,
+        PostAction::Save => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let dir = std::path::Path::new(&home).join("Pictures/Screenshots");
+            save_copy(image, &unique_path(&dir.join(save_name())))?;
+        }
+        PostAction::SaveTo => {
+            let target = target.map(local_path).filter(|t| !t.is_empty()).ok_or("missing destination path")?;
+            let mut path = std::path::PathBuf::from(&target);
+            // A directory gets a generated name, which must not overwrite.
+            let generated = target.ends_with('/') || path.is_dir();
+            if generated {
+                path = std::path::Path::new(target.trim_end_matches('/')).join(save_name());
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("png") {
+                path.set_extension("png");
+            }
+            if generated {
+                path = unique_path(&path);
+            }
+            save_copy(image, &path)?;
+        }
     }
+    Ok(action)
 }
 
-/// `stratum-cli screenshot-post <action> <image> [target]`.
-pub fn post(action: PostAction, image: &str, target: Option<&str>) -> Result<PostAction, String> {
-    let mut command = std::process::Command::new("stratum-cli");
-    command.args(["screenshot-post", action.as_str(), image]);
-    if let Some(target) = target {
-        command.arg(target);
+/// `Screenshot-<local time>.png`.
+fn save_name() -> String {
+    chrono::Local::now().format("Screenshot-%Y%m%d-%H%M%S.png").to_string()
+}
+
+/// `path`, or the first free `<stem>-<n>.png` beside it.
+fn unique_path(path: &std::path::Path) -> std::path::PathBuf {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Screenshot");
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    std::iter::once(path.to_path_buf())
+        .chain((1..10_000).map(|n| parent.join(format!("{stem}-{n}.png"))))
+        .find(|candidate| !candidate.exists())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+fn save_copy(image: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
     }
-    let output = command
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|err| format!("Action failed: {err}"))?;
-    if output.stdout.iter().all(u8::is_ascii_whitespace) {
-        return Err("Action failed: empty response".into());
+    std::fs::copy(image, target).map_err(|err| format!("failed to save screenshot: {err}"))?;
+    Ok(())
+}
+
+fn copy_to_clipboard(image: &std::path::Path) -> Result<(), String> {
+    use std::io::Write;
+    let bytes = std::fs::read(image).map_err(|err| format!("failed to read image file: {err}"))?;
+    let mut child = std::process::Command::new("wl-copy")
+        .args(["--type", "image/png"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("failed to run wl-copy: {err}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(&bytes).map_err(|err| format!("wl-copy stdin failed: {err}"))?;
     }
-    cli_json(&output.stdout).map(|_| action)
+    // wl-copy forks to serve the selection; this waits for the parent only.
+    match child.wait() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("wl-copy failed: {status}")),
+        Err(err) => Err(format!("wl-copy failed: {err}")),
+    }
 }
 
 /// Ask the portal where to save. `Ok(None)` is a cancel.
 pub fn portal_save_as(timeout: std::time::Duration) -> Result<Option<String>, String> {
-    let name = chrono::Local::now().format("Screenshot-%Y%m%d-%H%M%S.png").to_string();
-    let mut child = std::process::Command::new("stratum-cli")
-        .args(["portal-save-file", "Save Screenshot As", &name])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
         .map_err(|err| format!("Save As failed: {err}"))?;
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("Save As failed: portal request timed out".into());
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
-            Err(err) => return Err(format!("Save As failed: {err}")),
+    let chosen = runtime.block_on(async {
+        tokio::time::timeout(timeout, portal_save_file("Save Screenshot As", &save_name())).await
+    });
+    let uri = chosen
+        .map_err(|_| "Save As failed: portal request timed out".to_string())?
+        .map_err(|err| format!("Save As failed: {err}"))?;
+    match uri.map(|uri| local_path(&uri)) {
+        Some(path) if path.is_empty() => Err("Save As failed: invalid destination".into()),
+        chosen => Ok(chosen),
+    }
+}
+
+/// The desktop portal's Save File dialog: the chosen URI, or `None` when it
+/// was cancelled.
+async fn portal_save_file(title: &str, name: &str) -> Result<Option<String>, String> {
+    use futures_lite::StreamExt;
+    use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
+    const PORTAL: &str = "org.freedesktop.portal.Desktop";
+    let error = |err: zbus::Error| err.to_string();
+
+    let conn = zbus::Connection::session().await.map_err(error)?;
+    // Subscribe before asking, on the path the request will have, or a quick
+    // answer can arrive before anyone listens for it.
+    let token = format!(
+        "stratum{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros())
+            .unwrap_or(0)
+    );
+    let sender = conn
+        .unique_name()
+        .map(|name| name.trim_start_matches(':').replace('.', "_"))
+        .unwrap_or_default();
+    let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+    let request = zbus::Proxy::new(&conn, PORTAL, path, "org.freedesktop.portal.Request")
+        .await
+        .map_err(error)?;
+    let mut responses = request.receive_signal("Response").await.map_err(error)?;
+
+    let options = std::collections::HashMap::from([
+        ("handle_token", Value::from(token.as_str())),
+        ("modal", Value::from(true)),
+        ("current_name", Value::from(name)),
+    ]);
+    let chooser =
+        zbus::Proxy::new(&conn, PORTAL, "/org/freedesktop/portal/desktop", "org.freedesktop.portal.FileChooser")
+            .await
+            .map_err(error)?;
+    let _: OwnedObjectPath = chooser.call("SaveFile", &("", title, options)).await.map_err(error)?;
+
+    let message = responses.next().await.ok_or("the portal dropped the request")?;
+    let (code, results): (u32, std::collections::HashMap<String, OwnedValue>) =
+        message.body().deserialize().map_err(error)?;
+    match code {
+        0 => {
+            let uris = results
+                .get("uris")
+                .and_then(|uris| uris.try_clone().ok())
+                .and_then(|uris| Vec::<String>::try_from(uris).ok())
+                .unwrap_or_default();
+            uris.into_iter().next().map(Some).ok_or_else(|| "the portal returned no file".into())
         }
-    }
-    let mut out = Vec::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut out);
-    }
-    if out.iter().all(u8::is_ascii_whitespace) {
-        return Err("Save As failed: no response from portal".into());
-    }
-    let payload = cli_json(&out).map_err(|e| format!("Save As failed: {e}"))?;
-    match payload["status"].as_str() {
-        Some("cancel") => Ok(None),
-        Some("ok") => {
-            let path = local_path(payload["uri"].as_str().unwrap_or_default());
-            if path.is_empty() {
-                Err("Save As failed: invalid destination".into())
-            } else {
-                Ok(Some(path))
-            }
-        }
-        _ => Err("Save As failed: unexpected response".into()),
+        // Cancelled, or ended some other way without a choice.
+        1 | 2 => Ok(None),
+        code => Err(format!("unexpected portal response {code}")),
     }
 }
 
@@ -952,6 +1018,29 @@ mod tests {
         assert_eq!(at(10, 5), &[255, 0, 0, 255], "on the line");
         assert_eq!(at(10, 0), &[0, 0, 0, 0], "outside its width");
         assert_eq!(at(10, 4)[0], 255, "within half the width");
+    }
+
+    #[test]
+    fn save_to_names_directories_and_adds_the_extension() {
+        let dir = std::env::temp_dir().join(format!("stratum-viewer-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("capture.png");
+        std::fs::write(&source, b"png").unwrap();
+        let source = source.to_str().unwrap();
+
+        let named = dir.join("named");
+        post(PostAction::SaveTo, source, Some(named.to_str().unwrap())).unwrap();
+        assert_eq!(std::fs::read(dir.join("named.png")).unwrap(), b"png");
+
+        // A directory gets a generated name, and a second save never
+        // overwrites the first.
+        let into = format!("file://{}/", dir.join("shots").display());
+        std::fs::create_dir_all(dir.join("shots")).unwrap();
+        post(PostAction::SaveTo, source, Some(&into)).unwrap();
+        post(PostAction::SaveTo, source, Some(&into)).unwrap();
+        assert_eq!(std::fs::read_dir(dir.join("shots")).unwrap().count(), 2);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

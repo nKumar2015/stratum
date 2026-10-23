@@ -116,8 +116,8 @@ pub enum SystemAction {
     /// Hide the tray menu.
     TrayMenuClose,
     /// Post a desktop notification, through whichever server holds the
-    /// session's (this shell's own, usually).
-    Notify { summary: String, body: String },
+    /// session's (this shell's own, usually). `urgency` is the spec's 0–2.
+    Notify { app: &'static str, icon: &'static str, urgency: u8, summary: String, body: String },
 }
 
 /// What `SystemAction::BluetoothDevice` does.
@@ -536,17 +536,17 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
                 .map_err(|err| format!("failed to spawn {program}: {err}"))?;
             serde_json::json!({ "ok": true })
         }
-        SystemAction::Notify { summary, body } => {
+        SystemAction::Notify { app, icon, urgency, summary, body } => {
             // Over the bus even to this shell's own server, so DND, the
             // toast and the notification centre treat it like any other.
             let bus = zbus::blocking::Connection::session().map_err(|err| format!("no session bus: {err}"))?;
-            let hints = std::collections::HashMap::from([("urgency", zbus::zvariant::Value::U8(1))]);
+            let hints = std::collections::HashMap::from([("urgency", zbus::zvariant::Value::U8(*urgency))]);
             bus.call_method(
                 Some("org.freedesktop.Notifications"),
                 "/org/freedesktop/Notifications",
                 Some("org.freedesktop.Notifications"),
                 "Notify",
-                &("Stratum", 0u32, "alarm-symbolic", summary, body, Vec::<&str>::new(), hints, -1i32),
+                &(*app, 0u32, *icon, summary, body, Vec::<&str>::new(), hints, -1i32),
             )
             .map_err(|err| format!("notify failed: {err}"))?;
             serde_json::json!({ "ok": true })

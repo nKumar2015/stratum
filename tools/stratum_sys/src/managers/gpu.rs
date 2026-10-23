@@ -15,16 +15,13 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-
-use lazy_static::lazy_static;
+use std::sync::{LazyLock, Mutex};
 
 use crate::managers::common::run_capture_optional;
 
-lazy_static! {
-    /// GPU names by DRM card; a card's name never changes.
-    static ref GPU_NAMES: Mutex<HashMap<PathBuf, Option<String>>> = Mutex::new(HashMap::new());
-}
+/// GPU names by DRM card; a card's name never changes.
+static GPU_NAMES: LazyLock<Mutex<HashMap<PathBuf, Option<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// One GPU's load, temperature and memory.
 #[derive(Clone, Debug, PartialEq)]

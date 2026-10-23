@@ -1,21 +1,17 @@
-mod commands;
 mod common;
 mod shell_client;
 
 use std::env;
 
 use serde_json::json;
-use commands::{portal_save_file, screenshot_post, theme};
 use common::{emit_help, emit_json, fail, is_help_flag};
 
-const ROOT_COMMANDS: [&str; 11] = [
+const ROOT_COMMANDS: [&str; 9] = [
     "dashboard",
     "lockscreen",
     "notifications",
-    "portal-save-file",
     "powermenu",
     "screenshot",
-    "screenshot-post",
     "settings",
     "theme",
     "timer",
@@ -30,20 +26,6 @@ fn print_help() {
     );
 }
 
-fn print_theme_help() {
-    emit_help(
-        "theme",
-        "stratum-cli theme <list|open|close|toggle|set> [args]",
-        &[
-            "list",
-            "open",
-            "close",
-            "toggle",
-            "set <themeName>",
-        ],
-    );
-}
-
 fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open [tab]", "close", "toggle [tab]"]),
@@ -52,7 +34,7 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
         "powermenu" => Some(&["toggle"]),
         "screenshot" => Some(&["start"]),
         "settings" => Some(&["open [page]", "close", "toggle [page]"]),
-        "theme" => Some(&["open", "close", "toggle", "set"]),
+        "theme" => Some(&["open", "close", "toggle", "set <themeName>"]),
         "todo" => Some(&["add <text>"]),
         "timer" => Some(&["start [25m|90s|1h30m|pomodoro|stopwatch]", "pause", "toggle", "stop"]),
         _ => None,
@@ -76,7 +58,7 @@ fn print_ipc_target_help(target: &str) {
     emit_help(target, &usage, functions);
 }
 
-fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, String> {
+fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<(), String> {
     let Some(functions) = ipc_functions(target) else {
         return Err(format!("unknown target: {}", target));
     };
@@ -93,10 +75,7 @@ fn run_ipc_call(target: &str, function: &str, args: &[String]) -> Result<i64, St
     // The only call the shell answers `unsupported` is a lock it will not
     // take (no usable PAM service), which is reported as it is.
     match shell_client::shell_call(target, function, args) {
-        Ok(response) if response["ok"].as_bool() == Some(true) => {
-            let pid = response["pid"].as_i64().unwrap_or(std::process::id() as i64);
-            Ok(pid)
-        }
+        Ok(response) if response["ok"].as_bool() == Some(true) => Ok(()),
         Ok(response) => {
             let detail = response["error"]
                 .as_str()
@@ -118,61 +97,16 @@ fn dispatch_ipc_target(target: &str, args: &[String]) -> bool {
         return true;
     }
 
-    let pid = run_ipc_call(target, function, args.get(1..).unwrap_or(&[])).unwrap_or_else(|e| fail(&e));
+    run_ipc_call(target, function, args.get(1..).unwrap_or(&[])).unwrap_or_else(|e| fail(&e));
 
     emit_json(json!({
         "ok": true,
         "command": "ipc",
         "target": target,
         "function": function,
-        "pid": pid,
     }));
 
     true
-}
-
-fn dispatch(command: &str, args: &[String]) -> bool {
-    if command == "theme" {
-        let first = args.first().map(String::as_str).unwrap_or("");
-
-        if first.is_empty() {
-            print_theme_help();
-            return true;
-        }
-
-        if is_help_flag(first) {
-            print_theme_help();
-            return true;
-        }
-
-        if matches!(first, "list") {
-            theme::handle(args);
-            return true;
-        }
-
-        if matches!(first, "open" | "close" | "toggle" | "set") {
-            return dispatch_ipc_target("theme", args);
-        }
-
-        print_theme_help();
-        return true;
-    }
-
-    if dispatch_ipc_target(command, args) {
-        return true;
-    }
-
-    match command {
-        "portal-save-file" => {
-            portal_save_file::handle(args);
-            true
-        }
-        "screenshot-post" => {
-            screenshot_post::handle(args);
-            true
-        }
-        _ => false,
-    }
 }
 
 fn main() {
@@ -191,13 +125,13 @@ fn main() {
 
         let requested = args.remove(0);
         let help_args = vec!["--help".to_string()];
-        if !dispatch(&requested, &help_args) {
+        if !dispatch_ipc_target(&requested, &help_args) {
             fail(&format!("unknown command: {}", requested));
         }
         return;
     }
 
-    if !dispatch(&command, &args) {
+    if !dispatch_ipc_target(&command, &args) {
         fail(&format!("unknown command: {}", command));
     }
 }
