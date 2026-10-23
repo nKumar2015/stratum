@@ -241,6 +241,15 @@ impl SurfaceRenderer {
             .map_err(|err| format!("failed to create Vulkan surface: {err}"))?;
 
         let caps = surface.get_capabilities(&gpu.adapter);
+        // An adapter that cannot present to this surface reports no formats
+        // (an NVIDIA device under a compositor rendering with pixman, for
+        // one). That is an error for this surface, not a reason to abort.
+        let (Some(&first_format), Some(&first_alpha)) = (caps.formats.first(), caps.alpha_modes.first()) else {
+            return Err(format!(
+                "{} cannot present to this surface (no formats or alpha modes)",
+                gpu.adapter.get_info().name
+            ));
+        };
         // Our shader emits sRGB-encoded colour values (matching the QML
         // implementation). Prefer a plain 8-bit UNORM format, which stores
         // those bytes unchanged; an *Srgb format would encode them again and
@@ -250,7 +259,7 @@ impl SurfaceRenderer {
             .iter()
             .copied()
             .find(|f| matches!(f, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm))
-            .unwrap_or(caps.formats[0]);
+            .unwrap_or(first_format);
 
         // Overlays (OSD, toasts) are cleared to transparent every frame, so the
         // surface must actually honour the alpha channel. `Auto` often resolves
@@ -265,7 +274,7 @@ impl SurfaceRenderer {
         let alpha_mode = order
             .into_iter()
             .find(|mode| caps.alpha_modes.contains(mode))
-            .unwrap_or(caps.alpha_modes[0]);
+            .unwrap_or(first_alpha);
 
         // Not Fifo. On Wayland, Fifo makes a present wait for the surface's
         // frame callback, and a surface the compositor is not showing (an
