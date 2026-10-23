@@ -77,13 +77,15 @@ impl History {
 }
 
 /// How the sampler runs, from `[dashboard]`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub sample_ms: u64,
     pub history: usize,
     pub background: bool,
     /// Processes listed while open.
     pub processes: usize,
+    /// Fetched while open, when due.
+    pub weather: crate::config::WeatherConfig,
 }
 
 impl Settings {
@@ -93,6 +95,7 @@ impl Settings {
             history: config.history,
             background: config.background_history,
             processes: config.processes,
+            weather: config.weather.clone(),
         }
     }
 
@@ -138,7 +141,7 @@ impl Feed {
     /// Called every frame, and so on every config reload.
     pub fn configure(&self, settings: Settings) {
         let mut state = self.lock();
-        if state.settings != Some(settings) {
+        if state.settings.as_ref() != Some(&settings) {
             state.settings = Some(settings);
             self.wake.notify_all();
         }
@@ -153,7 +156,7 @@ impl Feed {
             .ok();
     }
 
-    fn run(&self, state: &SystemState) {
+    fn run(&self, state: &Arc<SystemState>) {
         let mut sampler = Sampler::new();
         let mut history = History::default();
         let mut last: Option<Sample> = None;
@@ -162,11 +165,10 @@ impl Feed {
         loop {
             // Sleep until a sample is due or the dashboard opens.
             let settings = loop {
-                let settings = guard.settings;
-                let active = settings.is_some_and(|s| guard.open || s.background);
+                let active = guard.settings.as_ref().is_some_and(|s| guard.open || s.background);
                 let now = Instant::now();
-                if let Some(settings) = settings.filter(|_| guard.opened || (active && now >= next)) {
-                    break settings;
+                if let Some(settings) = guard.settings.as_ref().filter(|_| guard.opened || (active && now >= next)) {
+                    break settings.clone();
                 }
                 guard = if active {
                     self.wake.wait_timeout(guard, next - now).map_or_else(|p| p.into_inner().0, |r| r.0)
@@ -199,6 +201,7 @@ impl Feed {
                 next = now + Duration::from_millis(interval);
             }
             if open {
+                state.weather_feed.refresh_if_due(state, &settings.weather);
                 state.music.set(stratum_sys::managers::music::status());
                 state.dashboard.set(Snapshot { sample: last.clone(), history: history.clone() });
                 state.notify();
@@ -221,6 +224,7 @@ mod tests {
             root: Usage::default(),
             network: cpu.map(|_| Rates { rx: 1000.0, tx: 10.0 }),
             temperatures: Default::default(),
+            uptime: None,
             gpus: (0..gpus)
                 .map(|_| GpuReading { name: "GPU".into(), load: Load::Percent(50), temperature: None, vram: None })
                 .collect(),
@@ -239,7 +243,8 @@ mod tests {
 
     #[test]
     fn only_an_open_dashboard_reads_gpus_and_processes() {
-        let settings = Settings { sample_ms: 2000, history: 90, background: true, processes: 8 };
+        let config = crate::config::Config::test_defaults().dashboard;
+        let settings = Settings { processes: 8, ..Settings::from_config(&config) };
         assert_eq!(settings.detail(false), Detail::default());
         assert_eq!(settings.detail(true), Detail { gpus: true, processes: 8 });
     }

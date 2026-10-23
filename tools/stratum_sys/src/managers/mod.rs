@@ -14,4 +14,5 @@ pub mod music;
 pub mod net;
 pub mod polkit;
 pub mod sysmon;
+pub mod weather;
 pub mod wifi;

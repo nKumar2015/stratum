@@ -91,7 +91,7 @@ enter: once one surface sets the crosshair, compositors keep it across
 surfaces. Live tests must set `HOME` to a scratch directory, because Save
 writes to `~/Pictures/Screenshots`.
 
-The **dashboard** (`dashboard/`) is a fullscreen overlay of tabs, each a row
+The **dashboard** (`dashboard/`) is a fullscreen overlay of tabs, each rows
 of panels, from `[[dashboard.tabs]]`; it always opens on the first, or on the
 tab `dashboard open|toggle <tab>` names. Its data comes from a sampler thread
 (`dashboard/feed.rs`, over `stratum_sys::managers::sysmon`) that keeps a
@@ -100,7 +100,11 @@ history for the graphs, recording in the background but publishing into
 the loop. GPUs and processes are sampled only while open: an NVML reading
 costs ~20 ms (held open, NVML would keep the dGPU awake), and processes a
 file each. The System tab's graphs are `ui/graph.rs`, which spans a fixed
-number of readings so the line scrolls rather than stretches. The sampler also refreshes
+number of readings so the line scrolls rather than stretches. Weather
+(`dashboard/weather.rs`, `stratum_sys::managers::weather`) comes from
+Open-Meteo through `curl`, only while open and at most every `refresh_min`;
+the postal code's coordinates and the last forecast are cached in
+`$XDG_STATE_HOME/stratum/weather.json`, so live tests set `XDG_STATE_HOME`. The sampler also refreshes
 `SystemState::music` while open. The calendar grid is computed locally. Media
 controls run `playerctl` on the action worker. The overhaul has phases still
 to come (graphs, weather, calendar sync, to-dos); the plan is in memory.

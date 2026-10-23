@@ -28,6 +28,8 @@ pub struct Sample {
     /// first.
     pub network: Option<Rates>,
     pub temperatures: Temperatures,
+    /// Seconds since boot.
+    pub uptime: Option<u64>,
     /// One per GPU present, in card order; empty unless asked for.
     pub gpus: Vec<GpuReading>,
     /// The busiest processes, most CPU first; empty unless asked for, and on
@@ -144,6 +146,10 @@ impl Sampler {
             root: statvfs("/").unwrap_or_default(),
             network: self.network(),
             temperatures: self.temperatures(),
+            uptime: fs::read_to_string("/proc/uptime")
+                .ok()
+                .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+                .map(|s| s as u64),
             gpus: if detail.gpus { gpu::read_all() } else { Vec::new() },
             processes,
         }

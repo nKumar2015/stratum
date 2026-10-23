@@ -30,7 +30,7 @@ pub(crate) const EXPAND: &str = "\u{f0140}";
 pub(crate) const COLLAPSE: &str = "\u{f0143}";
 
 /// A glyph for BlueZ's guess at what a device is (its freedesktop icon name).
-fn device_glyph(icon: &str) -> &'static str {
+pub(crate) fn device_glyph(icon: &str) -> &'static str {
     match icon {
         "audio-headset" | "audio-headphones" => "\u{f02cb}",
         "audio-card" | "audio-speakers" => "\u{f04c3}",

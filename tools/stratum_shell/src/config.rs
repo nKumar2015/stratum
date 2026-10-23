@@ -106,12 +106,23 @@ impl Config {
             if dashboard.tab_index(&tab.name) != Some(i) {
                 return Err(format!("dashboard.tabs: `{}` is named twice", tab.name));
             }
-            if tab.panels.is_empty() {
-                return Err(format!("dashboard tab `{}` has no panels", tab.name));
+            let positive = |w: f32| !w.is_nan() && w > 0.0;
+            if tab.rows.is_empty() || tab.rows.iter().any(|r| r.panels.is_empty()) {
+                return Err(format!("dashboard tab `{}` has a row without panels, or no rows", tab.name));
             }
-            if tab.panels.iter().any(|p| p.weight.is_nan() || p.weight <= 0.0) {
-                return Err(format!("dashboard tab `{}`: every panel weight must be positive", tab.name));
+            if !tab.rows.iter().all(|r| positive(r.weight) && r.panels.iter().all(|p| positive(p.weight))) {
+                return Err(format!("dashboard tab `{}`: every row and panel weight must be positive", tab.name));
             }
+        }
+        let weather = &dashboard.weather;
+        if weather.latitude.is_some() != weather.longitude.is_some() {
+            return Err("dashboard.weather: set both latitude and longitude, or neither".into());
+        }
+        if weather.latitude.is_none() && weather.zip.trim().is_empty() {
+            return Err("dashboard.weather: zip is empty and no coordinates are set".into());
+        }
+        if weather.refresh_min == 0 || !(1..=48).contains(&weather.hours) || !(1..=16).contains(&weather.days) {
+            return Err("dashboard.weather: refresh_min must be positive, hours 1-48 and days 1-16".into());
         }
         Ok(())
     }
@@ -496,6 +507,26 @@ pub struct DashboardConfig {
     pub process_monitor: Vec<String>,
     /// The tabs, in order. The dashboard always opens on the first.
     pub tabs: Vec<DashboardTab>,
+    pub weather: WeatherConfig,
+}
+
+/// Where and how to forecast. Fetched only while the dashboard is open, at
+/// most every `refresh_min`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WeatherConfig {
+    /// A postal code, looked up once in `country` (ISO 3166 alpha-2:
+    /// postal codes repeat across countries).
+    pub zip: String,
+    pub country: String,
+    /// Set both to skip the postal code lookup.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub units: stratum_sys::managers::weather::Units,
+    pub refresh_min: u64,
+    /// Hours and days forecast.
+    pub hours: usize,
+    pub days: usize,
 }
 
 impl DashboardConfig {
@@ -512,6 +543,15 @@ pub struct DashboardTab {
     pub name: String,
     /// A Nerd Font glyph before the name.
     pub icon: String,
+    /// Top to bottom.
+    pub rows: Vec<DashboardRow>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DashboardRow {
+    /// Share of the tab's height, relative to the other rows' weights.
+    pub weight: f32,
     /// Side by side, left to right.
     pub panels: Vec<DashboardPanel>,
 }
@@ -527,6 +567,10 @@ pub struct DashboardPanel {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelKind {
+    /// Time, date, uptime, battery, device batteries and do-not-disturb.
+    Glance,
+    /// Now, the next hours and the next days.
+    Weather,
     /// Load bars for CPU, GPUs, RAM and storage.
     Performance,
     /// The same, with history graphs, temperatures and network.

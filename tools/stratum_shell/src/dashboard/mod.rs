@@ -24,6 +24,8 @@
 
 pub mod feed;
 mod system;
+mod today;
+pub mod weather;
 
 use chrono::Datelike;
 use serde_json::Value;
@@ -48,6 +50,8 @@ pub enum DashboardAction {
     /// Run a command; the dashboard has closed so its window is not hidden
     /// behind the overlay.
     Spawn(Vec<String>),
+    /// Flip do-not-disturb.
+    ToggleDnd,
 }
 
 /// One cell of the month grid.
@@ -153,6 +157,17 @@ fn split(row: Rect, weights: &[f32], gap: f32) -> Vec<Rect> {
         .collect()
 }
 
+/// `body` cut into stacked rows, `gap` apart, sharing its height by
+/// `weights`.
+fn split_down(body: Rect, weights: &[f32], gap: f32) -> Vec<Rect> {
+    // The same cut, across the transposed rect.
+    let across = Rect { x: body.y, y: body.x, width: body.height, height: body.width, ..body };
+    split(across, weights, gap)
+        .into_iter()
+        .map(|r| Rect { x: body.x, y: r.x, width: body.width, height: r.width, ..body })
+        .collect()
+}
+
 fn today() -> (i32, u32, u32) {
     let now = chrono::Local::now();
     (now.year(), now.month(), now.day())
@@ -205,6 +220,8 @@ enum Button {
     Next,
     /// The processes panel's title.
     ProcessMonitor,
+    /// The glance strip's do-not-disturb bell.
+    Dnd,
 }
 
 impl Dashboard {
@@ -297,7 +314,7 @@ impl Dashboard {
     }
 
     fn shows(&self, kind: PanelKind) -> bool {
-        self.config.tabs.get(self.tab).is_some_and(|t| t.panels.iter().any(|p| p.kind == kind))
+        self.config.tabs.get(self.tab).is_some_and(|t| t.rows.iter().flat_map(|r| &r.panels).any(|p| p.kind == kind))
     }
 
     pub fn key(&mut self, keysym: smithay_client_toolkit::seat::keyboard::Keysym, modifiers: Modifiers) -> DashboardAction {
@@ -371,6 +388,7 @@ impl Dashboard {
                     self.close();
                     DashboardAction::Spawn(command)
                 }
+                Button::Dnd => DashboardAction::ToggleDnd,
                 other => self.navigate(other),
             };
         }
@@ -418,19 +436,24 @@ impl Dashboard {
             self.card = Some(card);
             return;
         };
-        let row = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.panel_height, radius: m.radius, color: Color::TRANSPARENT };
-        let weights: Vec<f32> = tab.panels.iter().map(|p| p.weight).collect();
-        for (spec, panel) in tab.panels.iter().zip(split(row, &weights, m.gap)) {
-            text_field::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
-            match spec.kind {
-                PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
-                PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
-                PanelKind::Processes => {
-                    let processes = snapshot.sample.as_ref().map(|s| s.processes.as_slice()).unwrap_or_default();
-                    self.paint_processes(ctx, list, panel, processes);
+        let body = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.panel_height, radius: m.radius, color: Color::TRANSPARENT };
+        let row_weights: Vec<f32> = tab.rows.iter().map(|r| r.weight).collect();
+        for (spec, row) in tab.rows.iter().zip(split_down(body, &row_weights, m.gap)) {
+            let weights: Vec<f32> = spec.panels.iter().map(|p| p.weight).collect();
+            for (panel_spec, panel) in spec.panels.iter().zip(split(row, &weights, m.gap)) {
+                text_field::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
+                match panel_spec.kind {
+                    PanelKind::Glance => self.paint_glance(ctx, list, panel, snapshot.sample.as_ref()),
+                    PanelKind::Weather => self.paint_weather(ctx, list, panel),
+                    PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
+                    PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
+                    PanelKind::Processes => {
+                        let processes = snapshot.sample.as_ref().map(|s| s.processes.as_slice()).unwrap_or_default();
+                        self.paint_processes(ctx, list, panel, processes);
+                    }
+                    PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
+                    PanelKind::Music => self.paint_music(ctx, list, panel, music),
                 }
-                PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
-                PanelKind::Music => self.paint_music(ctx, list, panel, music),
             }
         }
         self.card = Some(card);
@@ -768,6 +791,7 @@ mod tests {
             root: Usage { used: 1 << 30, total: 2 << 30 },
             network: None,
             temperatures: Default::default(),
+            uptime: None,
             gpus: vec![stratum_sys::managers::gpu::GpuReading {
                 name: "Radeon".into(),
                 load: Load::Asleep,

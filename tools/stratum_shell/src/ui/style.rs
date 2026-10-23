@@ -384,6 +384,11 @@ pub struct DashboardMetrics {
     pub graph_line: f32,
     pub graph_fill: f32,
     pub graph_gap: f32,
+    /// The glance strip's time, and the weather panel's current glyph and
+    /// temperature.
+    pub clock: f32,
+    pub weather_icon: f32,
+    pub weather_temp: f32,
     pub title: f32,
     pub text: f32,
     pub caption: f32,

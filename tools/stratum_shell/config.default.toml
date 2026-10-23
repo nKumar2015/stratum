@@ -79,30 +79,46 @@ processes = 12          # listed by the processes panel, busiest first
 # Run when the processes panel's title is clicked; [] runs nothing.
 process_monitor = ["kitty", "btop"]
 
-# Tabs, in order; it always opens on the first. Each tab's panels sit side by
-# side, sharing its width by weight. Panel kinds: performance (load bars),
-# graphs (history, temperatures, network), processes, calendar, music.
+# Weather from Open-Meteo, fetched only while the dashboard is open. The
+# postal code is looked up once; the zip and coordinates go to Open-Meteo.
+[dashboard.weather]
+zip = "20001"           # Washington, DC
+country = "US"          # ISO code: postal codes repeat across countries
+# latitude = 38.8951    # set both to skip the postal code lookup
+# longitude = -77.0364
+units = "imperial"      # °F and mph; "metric" for °C and km/h
+refresh_min = 30
+hours = 6               # hourly forecast shown
+days = 5                # daily forecast shown, today first
+
+# Tabs, in order; it always opens on the first. A tab is rows of panels:
+# rows share its height by weight, a row's panels its width. Panel kinds:
+# glance (time, date, batteries, do-not-disturb), weather, performance (load
+# bars), graphs (history, temperatures, network), processes, calendar, music.
 [[dashboard.tabs]]
 name = "Today"
 icon = "\U000F056E"
-panels = [
-    { kind = "performance", weight = 240.0 },
-    { kind = "calendar", weight = 290.0 },
-    { kind = "music", weight = 250.0 },
+rows = [
+    { weight = 1.0, panels = [{ kind = "glance", weight = 1.0 }] },
+    { weight = 5.5, panels = [
+        { kind = "weather", weight = 1.0 },
+        { kind = "calendar", weight = 1.15 },
+        { kind = "music", weight = 1.0 },
+    ] },
 ]
 
 [[dashboard.tabs]]
 name = "Calendar"
 icon = "\U000F00ED"
-panels = [{ kind = "calendar", weight = 1.0 }]
+rows = [{ weight = 1.0, panels = [{ kind = "calendar", weight = 1.0 }] }]
 
 [[dashboard.tabs]]
 name = "System"
 icon = "\U000F04C5"
-panels = [
+rows = [{ weight = 1.0, panels = [
     { kind = "graphs", weight = 3.0 },
     { kind = "processes", weight = 2.0 },
-]
+] }]
 
 [sidebar]
 position = "left"       # "left" or "right"
@@ -405,13 +421,16 @@ inner = 12.0            # inside a panel
 radius = 10.0
 border = 1.0
 width = 812.0           # the card, on every tab
-panel_height = 340.0
+panel_height = 400.0    # every row of a tab, and the gaps between them
 tab_height = 30.0       # the tab bar
 tab_gap = 6.0
 graph = 22.0            # a history graph's height
 graph_line = 1.5        # its line
 graph_fill = 0.18       # opacity of the area under the line
 graph_gap = 8.0         # between graph rows
+clock = 26.0            # the glance strip's time
+weather_icon = 34.0     # the current conditions' glyph
+weather_temp = 28.0     # and temperature
 title = 15.0
 text = 13.0
 caption = 11.0

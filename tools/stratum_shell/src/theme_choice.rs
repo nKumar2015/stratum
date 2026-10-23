@@ -18,7 +18,8 @@ pub struct Saved {
     pub config_theme: String,
 }
 
-fn state_dir() -> Option<PathBuf> {
+/// `$XDG_STATE_HOME`, else `~/.local/state`.
+pub fn state_dir() -> Option<PathBuf> {
     match std::env::var("XDG_STATE_HOME") {
         Ok(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir)),
         _ => std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/state")),

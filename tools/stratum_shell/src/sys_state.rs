@@ -85,6 +85,9 @@ pub struct SystemState {
     pub dashboard: Cell<crate::dashboard::feed::Snapshot>,
     /// Tells that sampler whether the dashboard is open and how to sample.
     pub dashboard_feed: Arc<crate::dashboard::feed::Feed>,
+    /// The forecast, fetched while the dashboard is open.
+    pub weather: Cell<crate::dashboard::weather::WeatherState>,
+    pub weather_feed: Arc<crate::dashboard::weather::WeatherFeed>,
     pub polkit: Cell<serde_json::Value>,
     /// The equalizer for the current output: its presets, the active one, the
     /// backend's limits, and the result of the last EQ action
@@ -130,6 +133,8 @@ impl SystemState {
             music: Cell::new(serde_json::Value::Null),
             dashboard: Cell::default(),
             dashboard_feed: Arc::default(),
+            weather: Cell::default(),
+            weather_feed: Arc::default(),
             polkit: Cell::new(serde_json::Value::Null),
             eq: Cell::new(serde_json::Value::Null),
             hypr: Cell::new(crate::hyprland::HyprState::default()),
@@ -181,6 +186,7 @@ impl SystemState {
             | self.battery.take_dirty()
             | self.music.take_dirty()
             | self.dashboard.take_dirty()
+            | self.weather.take_dirty()
             | self.polkit.take_dirty()
             | self.eq.take_dirty()
             | self.hypr.take_dirty()

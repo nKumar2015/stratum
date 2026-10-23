@@ -70,6 +70,11 @@ fn glyph(reading: Option<Reading<'_>>) -> &'static str {
     }
 }
 
+/// The glyph for a `battery::status` snapshot, as the bar draws it.
+pub(crate) fn snapshot_glyph(snapshot: &serde_json::Value) -> &'static str {
+    glyph(Reading::from_snapshot(snapshot))
+}
+
 fn tone(reading: Option<Reading<'_>>) -> Tone {
     match reading {
         None => Tone::Unknown,
