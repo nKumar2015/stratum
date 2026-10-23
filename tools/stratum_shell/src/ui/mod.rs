@@ -156,6 +156,11 @@ pub struct ClickCtx<'a> {
 
 /// A bar widget.
 pub trait Widget {
+    /// Read what the size depends on, before `height`/`width` are asked:
+    /// those see only metrics, and a widget sized by its data (the tray, by
+    /// its items) would otherwise lay out with last frame's.
+    fn sync(&mut self, _ctx: &PaintCtx<'_>) {}
+
     /// Intrinsic height in a vertical bar at the given width. `None` means
     /// "fill available".
     fn height(&self, width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {

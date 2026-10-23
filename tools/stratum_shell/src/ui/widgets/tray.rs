@@ -16,13 +16,23 @@ pub struct Tray {
     /// so a single list would hold whichever output painted last and make the
     /// other monitor's icons unclickable.
     cells: HashMap<String, Vec<(Rect, crate::tray::TrayItem)>>,
+    /// Items to lay out, read in `sync`: the strip is as long as they are,
+    /// so they push the widgets beside it rather than draw over them.
+    items: usize,
 }
 
 impl Tray {
     pub fn new() -> Self {
         Self {
             cells: HashMap::new(),
+            items: 0,
         }
+    }
+
+    /// The strip's length for `items` icons, at most `limit` of them.
+    fn length(items: usize, limit: usize, tray: &crate::ui::style::TrayMetrics) -> f32 {
+        let shown = items.min(limit) as f32;
+        (shown * tray.cell + (shown - 1.0).max(0.0) * tray.gap).max(0.0)
     }
 }
 
@@ -33,12 +43,16 @@ impl Default for Tray {
 }
 
 impl Widget for Tray {
-    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
-        Some(metrics.tray.cell)
+    fn sync(&mut self, ctx: &PaintCtx<'_>) {
+        self.items = ctx.state.tray.get().len();
     }
 
-    fn width(&self, height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
-        Some((height.max(metrics.tray.cell) + metrics.tray.gap) * 1.4)
+    fn height(&self, _width: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(Self::length(self.items, metrics.tray.vertical_limit, &metrics.tray))
+    }
+
+    fn width(&self, _height: f32, metrics: &crate::ui::style::Metrics) -> Option<f32> {
+        Some(Self::length(self.items, metrics.tray.horizontal_limit, &metrics.tray))
     }
 
     fn paint(
@@ -179,5 +193,19 @@ impl Tray {
             .unwrap_or('?')
             .to_string();
         ui::paint_text_centered(ctx, list, &label, cell, ctx.metrics.typography.tray, color);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_strip_is_as_long_as_its_icons() {
+        let tray = crate::ui::style::TrayMetrics { cell: 24.0, gap: 4.0, vertical_limit: 3, horizontal_limit: 8 };
+        assert_eq!(Tray::length(0, 3, &tray), 0.0, "no icons take no room");
+        assert_eq!(Tray::length(1, 3, &tray), 24.0);
+        assert_eq!(Tray::length(2, 3, &tray), 52.0);
+        assert_eq!(Tray::length(9, 3, &tray), 80.0, "held to the limit");
     }
 }

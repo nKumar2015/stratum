@@ -174,6 +174,7 @@ impl Sidebar {
         // First pass: intrinsic heights. Widgets returning `None` are flexible
         // and share whatever vertical space is left, like QML's
         // `Layout.fillHeight`.
+        self.widgets.iter_mut().for_each(|widget| widget.sync(ctx));
         let heights: Vec<Option<f32>> = self
             .widgets
             .iter()
@@ -218,6 +219,7 @@ impl Sidebar {
         let left = surface.x + self.padding;
         let right = surface.x + surface.width - self.padding;
 
+        self.widgets.iter_mut().for_each(|widget| widget.sync(ctx));
         let widths: Vec<Option<f32>> = self
             .widgets
             .iter()
