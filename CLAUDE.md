@@ -29,8 +29,10 @@ implementation with its own renderer, layout, and theming.
   placement, animation, styling — without the footprint.
 - **Hard switch at the end.** Quickshell stops being used. `stratumd` may be
   removed or absorbed as long as its features survive.
-- **Parallel migration** until parity is reached. Both shells run side by side
-  today, which means name collisions on D-Bus (see below).
+- **The switch happened on 2026-10-22.** The native shell is installed from
+  this flake's Home Manager module and runs as the systemd user unit
+  `stratum-shell`; Quickshell and stratumd are no longer installed or started.
+  The QML tree and stratumd stay in the repo until a soak period ends.
 
 ### Naming and layout
 
@@ -38,12 +40,14 @@ implementation with its own renderer, layout, and theming.
 tools/stratum_sys/     library: system managers (audio, wifi, bluetooth,
                        battery, music, dashboard, polkit), host-agnostic,
                        publishes snapshots through `Publisher`
-tools/stratumd/        transitional daemon serving the QML shell; to be retired
+tools/stratumd/        the daemon that served the QML shell; retired, to delete
 tools/stratum_cli/     CLI; its commands are the contract external keybinds use
+                       (audio, battery, bluetooth, net, wifi and dashboard need
+                       stratumd and are to delete with it)
 tools/stratum_shell/   the native shell
 sidebar/ modules/ globals/ components/ themes/ shell.qml
-                       the Quickshell implementation — reference only, deleted
-                       at cutover
+                       the Quickshell implementation — reference only, to delete
+module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 docs/native-shell-parity.md
                        behavioural acceptance checklist; mark a row `verified`
                        only after exercising it in the running native shell
@@ -152,12 +156,12 @@ tracked for future text entry.
 
 The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
 with `$STRATUM_SOCKET`) and mirrors the QML `IpcHandler` targets and function
-names. `stratum-cli` tries it first and falls back to `qs ipc` for functions the
-native shell reports as `unsupported`, so keybinds work during the parallel
-migration. Every QML target and function is now served natively
+names. `stratum-cli` talks only to it; the `qs ipc` fallback was removed at
+the switch. Every QML target and function is served natively
 (`ipc::tests::every_qml_function_is_served_natively`). Only a lock the shell
-refuses to take still answers `unsupported`. A new function needs an arm in
-`App::execute_ipc` and in `ipc::is_supported`.
+refuses to take answers `unsupported`, and the CLI reports it: there is no
+other locker behind it, so a refused lock means no lock. A new function needs
+an arm in `App::execute_ipc` and in `ipc::is_supported`.
 
 The **lock screen** (`lock.rs`, `pam.rs`, `wayland/lock_surface.rs`) uses
 `ext-session-lock-v1` and checks the password with PAM on a worker thread.
@@ -167,7 +171,10 @@ Safety rules it depends on — keep them:
   service that exists in `/etc/pam.d` (PAM silently falls back to `other`,
   which denies everyone on NixOS), and `pam::check_service` dlopens every
   absolute `auth`/`account` module first. If either fails, the shell refuses
-  and answers `unsupported`, so the CLI falls back to Quickshell.
+  and answers `unsupported`, which the CLI reports. With Quickshell gone that
+  means the screen does not lock, so the installed build must link the
+  system's glibc (see below) and `/etc/pam.d/stratum-shell` must exist (the
+  user's NixOS config defines it).
 - **The glibc trap.** This repo's `flake.lock` nixpkgs is older than the
   system's, so a devshell build links glibc 2.42 while the system's PAM modules
   need 2.43. Such a build *must* refuse to lock against the real
@@ -275,23 +282,43 @@ Configuration is read from `$STRATUM_CONFIG`, else
 The full commented schema is `tools/stratum_shell/config.example.toml`; that file
 is also the best smoke test (`STRATUM_CONFIG=... ./target/debug/stratum-shell`).
 
-**Stop the shell with `pkill -x stratum-shell`.** Do not leave it running between
-sessions — the user starts it themselves when they want to test.
+### The installed shell
 
-### Testing surfaces that Quickshell owns
+The user's session runs the installed shell as `stratum-shell.service`
+(`systemctl --user status|restart stratum-shell`, logs in
+`journalctl --user -u stratum-shell`). It is built from GitHub `main` through
+`~/nixos-config` (host `legion`), whose `stratum` input follows the system's
+nixpkgs; without that the shell links an older glibc and the lock refuses.
+A change reaches the session by pushing to `main`, `nix flake update stratum`
+in `~/nixos-config`, and the user's `nixos-rebuild switch`. Ask before
+pushing.
 
-Quickshell currently owns `org.freedesktop.Notifications` and
-`org.kde.StatusNotifierWatcher`. To exercise those in the native shell without
-stopping Quickshell, run on a private bus:
+A devshell build cannot replace it for real use: it renders on the NVIDIA GPU
+(the devshell's glibc cannot load RADV) and refuses to lock. To try a change
+in the session, build against the system nixpkgs
+(`nix build .#stratum-shell --override-input nixpkgs path:<system nixpkgs>
+--no-write-lock-file`; the path is `nix registry list`'s `system flake:nixpkgs`),
+`systemctl --user stop stratum-shell`, and run that binary; start the unit
+again afterwards. Never leave the user without a bar or a lock.
+
+### Running a dev build beside the installed shell
+
+The installed shell owns `org.freedesktop.Notifications`,
+`org.kde.StatusNotifierWatcher`, the polkit agent and the IPC socket. A second
+shell needs `[behavior] tray = false`, `notifications = false`,
+`polkit = false` and its own `STRATUM_SOCKET`. To exercise notifications or the
+tray in a dev build, use a private bus instead:
 
 ```sh
 eval $(dbus-launch --sh-syntax)
 DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-  STRATUM_CONFIG=/tmp/notify-config.toml ./target/debug/stratum-shell &
+  STRATUM_SOCKET=/run/user/$UID/stratum-dev.sock \
+  STRATUM_CONFIG=/tmp/dev-config.toml ./target/debug/stratum-shell &
 notify-send -a App "Summary" "Body"
 ```
 
-A minimal config for that has `[behavior] tray = true` and `notifications = true`.
+Stop a dev shell by its PID, not `pkill -x stratum-shell`, which also stops
+the installed one (systemd does not restart it after `SIGTERM`).
 
 ## Architecture of the native shell
 
