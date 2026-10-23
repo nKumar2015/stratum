@@ -294,7 +294,7 @@ fn purge_eq_output_links() {
             if (current_source == "effect_output.stratum_eq:output_FL" || current_source == "effect_output.stratum_eq:output_FR") && trimmed.starts_with("|-> ") {
                 let target_port = trimmed.replacen("|-> ", "", 1).trim().to_string();
                 info!("purging incorrect EQ link: {} -> {}", current_source, target_port);
-                let _ = Command::new("pw-link").args(&["-d", &current_source, &target_port]).status();
+                let _ = Command::new("pw-link").args(["-d", &current_source, &target_port]).status();
             }
         } else if !trimmed.is_empty() {
             current_source = trimmed.trim_end_matches(':').to_string();

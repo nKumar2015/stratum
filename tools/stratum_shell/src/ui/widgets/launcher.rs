@@ -46,15 +46,9 @@ mod tests {
     use crate::render::display_list::{Color, Point};
 
     fn ctx(point: Point) -> ClickCtx<'static> {
-        // `ClickCtx` borrows input, which the launcher does not read.
-        static INPUT: std::sync::OnceLock<InputState> = std::sync::OnceLock::new();
         ClickCtx {
             point,
             output_name: "test",
-            input: INPUT.get_or_init(|| InputState {
-                pointer: None,
-                pressed: false,
-            }),
             button: crate::ui::MouseButton::Left,
         }
     }

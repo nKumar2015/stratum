@@ -9,8 +9,6 @@
 //! few places the shell can afford to be lazy because it only ever asks for a
 //! handful of names.
 
-#![allow(dead_code)] // Icon rendering is wired in M3 (tray, notifications).
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -226,7 +224,7 @@ fn sorted_directories(dirs: &[String], want: u32) -> Vec<String> {
             let digits: String = first.chars().take_while(|c| c.is_ascii_digit()).collect();
             let size = digits.parse::<u32>().ok();
             let score = match size {
-                Some(s) => (s as i64 - want as i64).unsigned_abs() as u64,
+                Some(s) => (s as i64 - want as i64).unsigned_abs(),
                 // Named buckets still work, just after exact-size ones.
                 None => u64::MAX / 2,
             };

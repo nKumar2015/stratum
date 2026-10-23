@@ -289,13 +289,11 @@ pub struct ThemeConfig {
     // colour above, so a theme only sets the ones it cares about. This is the
     // vocabulary loaf-fm uses and makes multi-surface theming coherent.
     pub surface_lowest: Option<String>,
-    pub surface_low: Option<String>,
     pub surface: Option<String>,
     pub surface_high: Option<String>,
     pub surface_highest: Option<String>,
     pub outline: Option<String>,
     pub on_primary: Option<String>,
-    pub on_surface: Option<String>,
 }
 
 impl ThemeConfig {
@@ -324,13 +322,11 @@ impl ThemeConfig {
             border_inactive: c("border_inactive", &self.border_inactive)?,
             font: self.font.clone(),
             surface_lowest: alias("surface_lowest", &self.surface_lowest, &self.bg_dark)?,
-            surface_low: alias("surface_low", &self.surface_low, &self.bg_main)?,
             surface: alias("surface", &self.surface, &self.bg_main)?,
             surface_high: alias("surface_high", &self.surface_high, &self.bg_widget)?,
             surface_highest: alias("surface_highest", &self.surface_highest, &self.bg_hover)?,
             outline: alias("outline", &self.outline, &self.border_inactive)?,
             on_primary: alias("on_primary", &self.on_primary, &self.bg_main)?,
-            on_surface: alias("on_surface", &self.on_surface, &self.text_main)?,
             name: String::new(),
         })
     }
@@ -431,8 +427,6 @@ pub enum WidgetKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppearanceConfig {
-    /// Base font size for body text, in logical pixels.
-    pub font_size: f32,
     /// Corner radius used by framed widgets and menus.
     pub corner_radius: f32,
     /// Duration of hover and open/close animations, in milliseconds. Zero
@@ -455,8 +449,6 @@ pub struct ControlCenterConfig {
     pub width: u32,
     /// Slide/fade duration in milliseconds. Zero opens instantly.
     pub animation_ms: u32,
-    /// Which page to show when opened by something without a page of its own.
-    pub default_page: String,
     /// Reverse the wheel: turning it down scrolls the page up.
     pub invert_scroll: bool,
 }
@@ -715,7 +707,6 @@ pub struct Theme {
 
     /// Material-style surface ramp: lowest (deepest) to highest (most raised).
     pub surface_lowest: Color,
-    pub surface_low: Color,
     pub surface: Color,
     pub surface_high: Color,
     pub surface_highest: Color,
@@ -723,8 +714,6 @@ pub struct Theme {
     pub outline: Color,
     /// Foreground that reads on `primary` (text on filled buttons).
     pub on_primary: Color,
-    /// Foreground that reads on surface colours.
-    pub on_surface: Color,
     /// Name of the theme, for pages that display it.
     pub name: String,
 }

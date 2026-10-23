@@ -114,7 +114,7 @@ pub fn list(rescan: bool) -> Value {
 }
 
 /// Active connections, one entry per connected device.
-pub fn device_status() -> Value {
+fn device_status() -> Value {
     let output = match nmcli(&["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev", "status"]) {
         Ok(output) => output,
         Err(err) => {
@@ -137,7 +137,7 @@ pub fn device_status() -> Value {
     json!({ "ok": true, "devices": devices })
 }
 
-pub fn known_connections() -> Value {
+fn known_connections() -> Value {
     let output = match nmcli(&["-t", "-f", "NAME,TYPE", "connection", "show"]) {
         Ok(output) => output,
         Err(err) => {
@@ -158,7 +158,7 @@ pub fn known_connections() -> Value {
     json!({ "ok": true, "connections": connections })
 }
 
-pub fn active_info(device: &str) -> Value {
+fn active_info(device: &str) -> Value {
     let output = match nmcli(&["-t", "-f", "IP4.ADDRESS,IP4.GATEWAY", "dev", "show", device]) {
         Ok(output) => output,
         Err(err) => {

@@ -11,15 +11,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
-use serde::Deserialize;
-
-/// One workspace as reported by `hyprctl -j monitors`.
-#[derive(Clone, Debug, Deserialize, Default)]
-pub struct Workspace {
-    pub id: i32,
-    pub name: String,
-}
-
 /// Everything the bar needs from the compositor.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HyprState {

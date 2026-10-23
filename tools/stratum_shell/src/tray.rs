@@ -9,10 +9,8 @@
 //! because only one host can own the watcher name: a dev build beside the
 //! installed shell leaves it to that one.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
 use tracing::{debug, info, warn};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
@@ -697,24 +695,6 @@ fn decode_tooltip(value: &OwnedValue) -> (String, String) {
     (title, body)
 }
 
-/// Snapshot for UI state.
-pub fn to_json(items: &[TrayItem]) -> Value {
-    json!({
-        "items": items.iter().map(|item| json!({
-            "id": item.id,
-            "title": item.title,
-            "status": item.status,
-            "icon": item.icon_name,
-            "menu": item.menu,
-        })).collect::<Vec<_>>()
-    })
-}
-
-/// Format a tray item list for logging.
-#[allow(dead_code)]
-fn summary(items: &HashMap<String, TrayItem>) -> String {
-    items.values().map(|i| i.id.as_str()).collect::<Vec<_>>().join(", ")
-}
 
 #[cfg(test)]
 mod tests {
@@ -732,20 +712,6 @@ mod tests {
         let (bus, path) = split_service("org.example.App");
         assert_eq!(bus, "org.example.App");
         assert_eq!(path, "/StatusNotifierItem");
-    }
-
-    #[test]
-    fn json_snapshot_lists_items() {
-        let items = vec![TrayItem {
-            id: "app".into(),
-            title: "App".into(),
-            status: "Active".into(),
-            icon_name: "app-icon".into(),
-            ..Default::default()
-        }];
-        let json = to_json(&items);
-        assert_eq!(json["items"][0]["id"], "app");
-        assert_eq!(json["items"][0]["icon"], "app-icon");
     }
 
     /// Build a node's fields in the wire shape `(ia{sv}av)`.

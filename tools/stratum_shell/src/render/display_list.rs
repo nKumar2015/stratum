@@ -1,10 +1,8 @@
 //! A backend-agnostic draw list.
 //!
 //! The vocabulary is deliberately small: filled/stroked paths, rounded rects,
-//! gradients, text runs, and images. Layout and widgets emit these; the
+//! text runs, and images. Layout and widgets emit these; the
 //! renderer turns them into GPU work. Nothing here knows about Wayland or wgpu.
-
-#![allow(dead_code)] // Forward-looking API lands in M3 (widgets).
 
 use std::sync::Arc;
 
@@ -27,15 +25,6 @@ impl PartialEq for Rect {
 }
 
 impl Rect {
-    pub const EMPTY: Rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        width: 0.0,
-        height: 0.0,
-        radius: 0.0,
-        color: Color::TRANSPARENT,
-    };
-
     /// True when `point` lies inside this rectangle.
     pub fn contains(self, point: Point) -> bool {
         point.x >= self.x
@@ -48,19 +37,9 @@ impl Rect {
 impl Color {
     pub const TRANSPARENT: Self = Self::rgba(0.0, 0.0, 0.0, 0.0);
     pub const WHITE: Self = Self::rgba(1.0, 1.0, 1.0, 1.0);
-    pub const BLACK: Self = Self::rgba(0.0, 0.0, 0.0, 1.0);
 
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
-    }
-
-    pub fn from_hex(hex: u32, alpha: f32) -> Self {
-        Self {
-            r: ((hex >> 16) & 0xff) as f32 / 255.0,
-            g: ((hex >> 8) & 0xff) as f32 / 255.0,
-            b: (hex & 0xff) as f32 / 255.0,
-            a: alpha,
-        }
     }
 
     pub fn to_array(self) -> [f32; 4] {
@@ -108,12 +87,6 @@ impl Transform {
         }
     }
 
-    pub const fn scale(sx: f32, sy: f32) -> Self {
-        Self {
-            m: [sx, 0.0, 0.0, sy, 0.0, 0.0],
-        }
-    }
-
     /// Rotate clockwise by `radians` about the origin.
     pub fn rotate(radians: f32) -> Self {
         let (s, c) = radians.sin_cos();
@@ -148,12 +121,6 @@ impl Transform {
         let [a, b, c, d, e, f] = self.m;
         (a * x + c * y + e, b * x + d * y + f)
     }
-
-    /// True when this transform only translates (the common case, worth a fast
-    /// path).
-    pub fn is_identity(self) -> bool {
-        self.m == Self::IDENTITY.m
-    }
 }
 
 /// A filled rounded rectangle. The fast path: SDF, no tessellation.
@@ -175,32 +142,14 @@ pub struct Rect {
 #[derive(Clone, Debug)]
 pub enum Paint {
     Solid(Color),
-    LinearGradient {
-        from: Point,
-        to: Point,
-        stops: Vec<(f32, Color)>,
-    },
-    RadialGradient {
-        center: Point,
-        radius: f32,
-        stops: Vec<(f32, Color)>,
-    },
 }
 
-impl Paint {
-    pub fn solid(color: Color) -> Self {
-        Paint::Solid(color)
-    }
-}
-
-/// A path segment, in draw order. Curves are cubic/quintic-free for now:
-/// lines, quadratics, and cubics cover authored artwork and UI shapes.
+/// A path segment, in draw order. Lines and quadratics cover the UI's shapes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PathCommand {
     MoveTo(Point),
     LineTo(Point),
     QuadTo(Point, Point),
-    CubicTo(Point, Point, Point),
     Close,
 }
 
@@ -242,36 +191,6 @@ impl Path {
         self.round = true;
         self
     }
-
-    pub fn with_transform(mut self, transform: Transform) -> Self {
-        self.transform = transform;
-        self
-    }
-
-    /// Axis-aligned bounds, used for damage tracking and culling.
-    pub fn bounds(&self) -> (f32, f32, f32, f32) {
-        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
-        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
-        for cmd in &self.commands {
-            let points: &[Point] = match cmd {
-                PathCommand::MoveTo(p) | PathCommand::LineTo(p) => std::slice::from_ref(p),
-                PathCommand::QuadTo(a, b) => &[*a, *b],
-                PathCommand::CubicTo(a, b, c) => &[*a, *b, *c],
-                PathCommand::Close => &[],
-            };
-            for p in points {
-                min_x = min_x.min(p.x);
-                min_y = min_y.min(p.y);
-                max_x = max_x.max(p.x);
-                max_y = max_y.max(p.y);
-            }
-        }
-        let pad = self.stroke.unwrap_or(0.0) * 0.5;
-        if min_x > max_x {
-            return (0.0, 0.0, 0.0, 0.0);
-        }
-        (min_x - pad, min_y - pad, max_x + pad, max_y + pad)
-    }
 }
 
 /// A shaped text run ready for the renderer.
@@ -286,7 +205,6 @@ pub struct TextRun {
     /// Font size in logical pixels.
     pub size: f32,
     pub color: Color,
-    pub family: Arc<str>,
     pub weight: u16,
     pub glyphs: Vec<PositionedGlyph>,
     /// Applied around the run origin when vertices are built.
@@ -337,12 +255,6 @@ pub enum DrawCommand {
     PopClip,
 }
 
-/// The frame's contents.
-///
-/// Text is kept separately because it needs the font/glyph caches, which live
-/// with the renderer rather than in this data structure. A text run records the
-/// clip in effect when it was pushed, so text obeys the same scissor as the
-/// geometry around it.
 /// A large picture drawn beneath everything else (a screenshot's frozen
 /// frame, or the image in the screenshot viewer). Too large for the glyph
 /// atlas, so the renderer keeps it in a texture of its own and uploads it
@@ -361,6 +273,12 @@ pub struct Backdrop {
     pub clip: Option<Rect>,
 }
 
+/// The frame's contents.
+///
+/// Text is kept separately because it needs the font/glyph caches, which live
+/// with the renderer rather than in this data structure. A text run records the
+/// clip in effect when it was pushed, so text obeys the same scissor as the
+/// geometry around it.
 #[derive(Clone, Debug)]
 pub struct DisplayList {
     pub clear: Color,
@@ -436,10 +354,6 @@ impl DisplayList {
     pub fn clip(&self) -> Option<Rect> {
         self.clip_stack.last().copied()
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.commands.is_empty() && self.texts.is_empty()
-    }
 }
 
 /// Intersection of two rects; an empty rect when they do not overlap.
@@ -482,40 +396,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hex_maps_to_srgb_channels() {
-        let c = Color::from_hex(0x4589ff, 1.0);
-        assert!((c.r - 69.0 / 255.0).abs() < 1e-6);
-        assert!((c.g - 137.0 / 255.0).abs() < 1e-6);
-        assert!((c.b - 1.0).abs() < 1e-6);
-        assert_eq!(c.a, 1.0);
-    }
-
-    #[test]
-    fn alpha_is_preserved_and_default_is_transparent() {
-        assert_eq!(Color::from_hex(0x000000, 0.5).a, 0.5);
-        assert_eq!(DisplayList::default().clear, Color::TRANSPARENT);
-        assert!(DisplayList::default().is_empty());
-    }
-
-    #[test]
-    fn path_bounds_include_stroke() {
-        let path = Path::new(
-            vec![
-                PathCommand::MoveTo(Point::new(10.0, 20.0)),
-                PathCommand::LineTo(Point::new(30.0, 40.0)),
-            ],
-            Paint::solid(Color::WHITE),
-        )
-        .stroked(4.0);
-        let (x, y, w, h) = path.bounds();
-        assert_eq!((x, y), (8.0, 18.0));
-        assert_eq!((w, h), (32.0, 42.0));
-    }
-
-    #[test]
-    fn empty_path_has_zero_bounds() {
-        let path = Path::new(vec![PathCommand::Close], Paint::solid(Color::WHITE));
-        assert_eq!(path.bounds(), (0.0, 0.0, 0.0, 0.0));
+    fn default_is_transparent_and_empty() {
+        let list = DisplayList::default();
+        assert_eq!(list.clear, Color::TRANSPARENT);
+        assert!(list.commands.is_empty() && list.texts.is_empty());
     }
 
     #[test]
@@ -531,7 +415,7 @@ mod tests {
         });
         list.push_path(Path::new(
             vec![PathCommand::MoveTo(Point::new(0.0, 0.0)), PathCommand::Close],
-            Paint::solid(Color::BLACK),
+            Paint::Solid(Color::WHITE),
         ));
         assert_eq!(list.commands.len(), 2);
         assert!(matches!(list.commands[0], DrawCommand::Rect(_)));

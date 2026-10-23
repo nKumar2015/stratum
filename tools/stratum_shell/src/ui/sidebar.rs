@@ -15,13 +15,10 @@ use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
 
 /// The sidebar surface for one output.
 pub struct Sidebar {
-    pub config: Arc<Config>,
     pub padding: f32,
     pub spacing: f32,
     pub position: SidebarPosition,
     pub axis: Axis,
-    /// Thickness across the run: rail width or bar height.
-    pub cross_size: f32,
     pub inverted_corners: bool,
     widgets: Vec<Box<dyn Widget>>,
 }
@@ -40,14 +37,8 @@ impl Sidebar {
             spacing: sidebar.spacing as f32,
             position: sidebar.position,
             axis: sidebar.axis(),
-            cross_size: if sidebar.is_vertical() {
-                sidebar.width as f32
-            } else {
-                sidebar.height as f32
-            },
             inverted_corners: sidebar.inverted_corners,
             widgets,
-            config,
         }
     }
 
@@ -98,19 +89,6 @@ impl Sidebar {
         }
     }
 
-    /// Route a click to a widget, using the same geometry as the last paint.
-    ///
-    /// The output name is passed through because a shared widget tree is painted
-    /// on every monitor: a workspace click belongs to the monitor it landed on.
-    pub fn on_click(
-        &mut self,
-        point: Point,
-        output_name: &str,
-        input: &InputState,
-    ) -> Option<Action> {
-        self.on_click_with(point, output_name, input, ui::MouseButton::Left)
-    }
-
     /// Route wheel input to the widget under `point` on `output`.
     pub fn on_scroll(&mut self, point: Point, output_name: &str, delta: f32) -> Option<Action> {
         self.widgets
@@ -127,21 +105,13 @@ impl Sidebar {
         self.widgets.iter().find_map(|widget| widget.hover_target(output, point))
     }
 
-    /// Route a click with an explicit button. The tray uses right-click for its
-    /// context menu.
-    pub fn on_click_with(
-        &mut self,
-        point: Point,
-        output_name: &str,
-        input: &InputState,
-        button: ui::MouseButton,
-    ) -> Option<Action> {
-        let ctx = ClickCtx {
-            point,
-            output_name,
-            input,
-            button,
-        };
+    /// Route a click to a widget, using the same geometry as the last paint.
+    ///
+    /// The output name is passed through because a shared widget tree is painted
+    /// on every monitor: a workspace click belongs to the monitor it landed on.
+    /// The tray uses the button: right-click opens its context menu.
+    pub fn on_click(&mut self, point: Point, output_name: &str, button: ui::MouseButton) -> Option<Action> {
+        let ctx = ClickCtx { point, output_name, button };
         self.widgets
             .iter_mut()
             .find_map(|widget| widget.on_click(&ctx))

@@ -51,25 +51,6 @@ impl PaintCtx<'_> {
 }
 
 impl PaintCtx<'_> {
-    /// Shape a single line of text and append it to `list`.
-    pub fn text(
-        &mut self,
-        list: &mut DisplayList,
-        value: &str,
-        x: f32,
-        y: f32,
-        size: f32,
-        color: Color,
-    ) {
-        let style = TextStyle {
-            family: std::sync::Arc::from(self.theme.font.as_str()),
-            size,
-            weight: 400,
-            color,
-        };
-        self.text_text(list, value, x, y, style);
-    }
-
     pub fn text_text(
         &mut self,
         list: &mut DisplayList,
@@ -111,8 +92,6 @@ pub struct InputState {
 pub enum Action {
     /// Open the control centre on a specific page.
     OpenPanel(crate::ui::control_center::Page),
-    /// Close the control centre.
-    ClosePanel,
     /// Activate a tray item by id.
     ActivateTray(String),
     /// Open a tray item's context menu. `service` and `menu_path` come from the
@@ -149,7 +128,6 @@ pub enum MouseButton {
 pub struct ClickCtx<'a> {
     pub point: Point,
     pub output_name: &'a str,
-    pub input: &'a InputState,
     /// Primary unless the shell reports otherwise.
     pub button: MouseButton,
 }
@@ -218,105 +196,6 @@ pub fn tick_all(widgets: &mut [Box<dyn Widget>], dt: f32) -> bool {
         animating |= widget.tick(dt);
     }
     animating
-}
-
-/// A vertical stack with fixed spacing, used by the sidebar.
-pub struct Column {
-    pub spacing: f32,
-    widgets: Vec<Box<dyn Widget>>,
-}
-
-impl Column {
-    pub fn new(spacing: f32) -> Self {
-        Self {
-            spacing,
-            widgets: Vec::new(),
-        }
-    }
-
-    pub fn push(&mut self, widget: Box<dyn Widget>) {
-        self.widgets.push(widget);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.widgets.is_empty()
-    }
-
-    /// Lay out and paint every child, returning the total height used.
-    pub fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        x: f32,
-        y: f32,
-        width: f32,
-        input: &InputState,
-    ) -> f32 {
-        let metrics = ctx.metrics;
-        let mut cursor = y;
-        let mut first = true;
-        for widget in &mut self.widgets {
-            if !first {
-                cursor += self.spacing;
-            }
-            first = false;
-
-            let height = widget.height(width, metrics).unwrap_or(0.0);
-            let rect = Rect {
-                x,
-                y: cursor,
-                width,
-                height,
-                radius: 0.0,
-                color: Color::TRANSPARENT,
-            };
-            widget.paint(ctx, list, rect, input);
-            cursor += height;
-        }
-        cursor - y
-    }
-
-    /// Route a click to the first child that returns an action.
-    pub fn on_click(
-        &mut self,
-        point: Point,
-        output_name: &str,
-        input: &InputState,
-    ) -> Option<Action> {
-        let ctx = ClickCtx {
-            point,
-            output_name,
-            input,
-            button: MouseButton::Left,
-        };
-        self.widgets
-            .iter_mut()
-            .find_map(|widget| widget.on_click(&ctx))
-    }
-
-    /// Route a click with an explicit button, used for the tray's context menu.
-    pub fn on_click_with(
-        &mut self,
-        point: Point,
-        output_name: &str,
-        input: &InputState,
-        button: MouseButton,
-    ) -> Option<Action> {
-        let ctx = ClickCtx {
-            point,
-            output_name,
-            input,
-            button,
-        };
-        self.widgets
-            .iter_mut()
-            .find_map(|widget| widget.on_click(&ctx))
-    }
-
-    /// Advance child animations.
-    pub fn tick(&mut self, dt: f32) -> bool {
-        tick_all(&mut self.widgets, dt)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,31 +581,5 @@ mod tests {
         // ... both points share that x, and advancing the run moves upward.
         assert!((end_x - 20.0).abs() < 1e-3, "end x was {end_x}");
         assert!((start_y - end_y - 10.0).abs() < 1e-3, "expected 10px of advance");
-    }
-
-    #[test]
-    fn column_accumulates_spacing() {
-        struct Fixed(f32);
-        impl Widget for Fixed {
-            fn height(&self, _w: f32, _metrics: &crate::ui::style::Metrics) -> Option<f32> {
-                Some(self.0)
-            }
-            fn paint(
-                &mut self,
-                _ctx: &mut PaintCtx<'_>,
-                _list: &mut DisplayList,
-                _rect: Rect,
-                _input: &InputState,
-            ) {
-            }
-        }
-
-        let mut column = Column::new(10.0);
-        column.push(Box::new(Fixed(20.0)));
-        column.push(Box::new(Fixed(30.0)));
-        // Two widgets of 20 and 30 with 10px between => 60 total.
-        let total = 20.0 + 10.0 + 30.0;
-        assert!(!column.is_empty());
-        assert_eq!(total, 60.0);
     }
 }

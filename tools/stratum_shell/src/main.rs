@@ -4,10 +4,6 @@
 //! Wayland connection, renders with wgpu on Vulkan, and hosts the system
 //! managers (`stratum_sys`) directly.
 
-#[allow(dead_code)]
-#[cfg(test)]
-mod glyph_probe;
-#[allow(dead_code)]
 mod actions;
 mod config;
 mod dashboard;
@@ -29,7 +25,6 @@ mod power_menu;
 mod toasts;
 mod tray;
 mod tray_menu;
-#[allow(dead_code)]
 mod icons;
 mod render;
 mod sys_state;

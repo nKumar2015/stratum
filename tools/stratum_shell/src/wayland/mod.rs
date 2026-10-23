@@ -34,9 +34,6 @@ pub fn run() -> Result<(), String> {
             // not take the shell down.
             error!("render failed: {err}");
         }
-        if app.should_exit {
-            break Ok(());
-        }
     };
 
     // Drop order is load-bearing. Every surface owns a Vulkan swapchain built

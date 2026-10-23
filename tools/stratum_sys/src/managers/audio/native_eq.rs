@@ -57,8 +57,6 @@ enum PwCommand {
         input_port: String,
         reply: std::sync::mpsc::Sender<Result<u32, String>>,
     },
-    #[allow(dead_code)]
-    Shutdown,
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +296,6 @@ fn pw_thread_main(
         .register();
 
     // Attach the command receiver to the mainloop.
-    let mainloop_for_quit = mainloop.clone();
     let core_for_cmds = core.clone();
     let registry_for_cmds = registry.clone();
     let context_ptr = context.as_raw_ptr();
@@ -333,16 +330,13 @@ fn pw_thread_main(
                 );
                 let _ = reply.send(result);
             }
-            PwCommand::Shutdown => {
-                mainloop_for_quit.quit();
-            }
         }
     });
 
     // Signal that we started successfully.
     let _ = startup_tx.send(Ok(()));
 
-    // Run until quit is called.
+    // Runs for the life of the process.
     mainloop.run();
 
     Ok(())

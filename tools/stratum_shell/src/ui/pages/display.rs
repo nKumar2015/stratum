@@ -91,7 +91,6 @@ impl DisplayPage {
         y = layout::section(ctx, list, body, y, "Text and output");
         let facts = [
             ("Font", ctx.theme.font.clone()),
-            ("Font size", ctx.appearance.font_size.to_string()),
             ("Output", ctx.output_name.to_string()),
         ];
         let cols = layout::columns(body.width, m.card_min_width, m.grid_gap, facts.len());

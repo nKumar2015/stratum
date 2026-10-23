@@ -99,11 +99,8 @@ fn pick_player(players: &[(String, String)], preferred: Option<&str>) -> Option<
         .cloned()
 }
 
-pub fn status() -> Value {
-    status_for(None)
-}
-
-/// [`status`] for `preferred` while it is there, with every player listed
+/// The media status of `preferred` while it is there, else of the playing
+/// (or first) player, with every player listed
 /// (`players`: `[{id, name}]`) and its `shuffle` (`On`, `Off`) and `loop`
 /// (`None`, `Track`, `Playlist`); both are empty for a player without them.
 pub fn status_for(preferred: Option<&str>) -> Value {

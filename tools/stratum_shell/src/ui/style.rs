@@ -198,8 +198,6 @@ pub struct PowerMenuMetrics {
     pub tile_gap: f32,
     /// Padding around the row of tiles.
     pub panel_padding: f32,
-    /// Corner radius of the panel.
-    pub panel_radius: f32,
     /// Corner radius of a tile.
     pub tile_radius: f32,
     /// Icon size inside a tile.
@@ -583,9 +581,6 @@ pub struct AudioPageMetrics {
     pub text: f32,
     pub caption: f32,
     pub line: f32,
-    /// Previous / play-pause / next.
-    pub media_button: f32,
-    pub media_icon: f32,
     /// Height of an output or input device row.
     pub device_height: f32,
     /// How long a chosen device shows as selected before the system agrees
@@ -743,10 +738,6 @@ pub struct ToastMetrics {
     pub card_width: f32,
     /// Gap between cards.
     pub gap: f32,
-    /// Height of the card's header area.
-    pub header_height: f32,
-    /// Height added per body line.
-    pub body_line_height: f32,
     /// Corner radius.
     pub radius: f32,
     /// Accent stripe width.

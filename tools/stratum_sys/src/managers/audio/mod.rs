@@ -49,7 +49,7 @@ pub fn initialize() {
     }
 }
 
-pub fn cleanup_orphans() {
+fn cleanup_orphans() {
     info!("cleaning up lingering EQ graph objects");
     engine::destroy_eq_module();
 }
@@ -374,10 +374,4 @@ pub fn eq_delete_preset(device_id: &str, preset_name: &str) -> Value {
     }
 
     json!({"ok": true, "deleted": true})
-}
-
-pub fn devices() -> Value {
-    // Always read live state for device listings so UI views cannot regress to stale cache.
-    // The refresh helper keeps DEVICE_CACHE in sync for other call sites.
-    refresh_device_cache()
 }

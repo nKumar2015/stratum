@@ -10,10 +10,7 @@
 //! - **Paths** tessellated with `lyon` and cached by geometry hash.
 //! - **Text and images** as textured quads sampling a shared RGBA atlas.
 //!
-//! Solid fills, linear gradients, and radial gradients share the same vertex
-//! format and are selected per-vertex, so most frames are a single draw call.
-
-#![allow(dead_code)] // Renderer helpers used by M3 widgets.
+//! Everything shares one vertex format, so most frames are a single draw call.
 
 use std::collections::HashMap;
 use std::ptr::NonNull;
@@ -25,7 +22,7 @@ use tracing::{debug, info};
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::Proxy;
 
-use super::display_list::{Color, DisplayList, DrawCommand, Path, PathCommand, Paint, Rect, Transform};
+use super::display_list::{DisplayList, DrawCommand, Path, PathCommand, Paint, Rect, Transform};
 use super::Gpu;
 use crate::text::{RasterGlyph, TextEngine};
 
@@ -92,10 +89,6 @@ impl Batch {
 
     fn is_empty(&self) -> bool {
         self.vertices.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.vertices.len()
     }
 }
 
@@ -568,14 +561,14 @@ impl SurfaceRenderer {
                         image.width,
                         image.height,
                     ) {
-                        append_textured(
+                        let s = self.scale;
+                        append_textured_px(
                             &mut batch,
-                            image.x,
-                            image.y,
-                            image.width_logical,
-                            image.height_logical,
+                            image.x * s,
+                            image.y * s,
+                            image.width_logical * s,
+                            image.height_logical * s,
                             uv,
-                            self.scale,
                             [1.0, 1.0, 1.0, 1.0],
                         );
                     }
@@ -795,19 +788,6 @@ fn scissor_rect(rect: Rect, scale: f32, surface: (u32, u32)) -> Option<(u32, u32
     Some((x as u32, y as u32, width as u32, height as u32))
 }
 
-fn append_textured(
-    out: &mut Batch,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    uv: (f32, f32, f32, f32),
-    scale: f32,
-    tint: [f32; 4],
-) {
-    append_textured_px(out, x * scale, y * scale, w * scale, h * scale, uv, tint);
-}
-
 fn append_textured_px(
     out: &mut Batch,
     x: f32,
@@ -889,13 +869,6 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
             PathCommand::QuadTo(a, b) => {
                 builder.quadratic_bezier_to(tp(path.transform, *a, scale), tp(path.transform, *b, scale));
             }
-            PathCommand::CubicTo(a, b, c) => {
-                builder.cubic_bezier_to(
-                    tp(path.transform, *a, scale),
-                    tp(path.transform, *b, scale),
-                    tp(path.transform, *c, scale),
-                );
-            }
             PathCommand::Close => {
                 builder.close();
                 subpath_open = false;
@@ -911,12 +884,7 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
         builder.end(false);
     }
     let lyon_path = builder.build();
-    let fill = match &path.paint {
-        Paint::Solid(c) => *c,
-        Paint::LinearGradient { stops, .. } | Paint::RadialGradient { stops, .. } => {
-            stops.first().map(|(_, c)| *c).unwrap_or(Color::WHITE)
-        }
-    };
+    let Paint::Solid(fill) = path.paint;
 
     // Each vertex is its position and, for an antialiased stroke, its signed
     // distance from the centreline.
@@ -1003,14 +971,7 @@ fn path_hash(path: &Path) -> u64 {
                     p.y.to_bits().hash(&mut hasher);
                 }
             }
-            PathCommand::CubicTo(a, b, c) => {
-                2u8.hash(&mut hasher);
-                for p in [a, b, c] {
-                    p.x.to_bits().hash(&mut hasher);
-                    p.y.to_bits().hash(&mut hasher);
-                }
-            }
-            PathCommand::Close => 3u8.hash(&mut hasher),
+            PathCommand::Close => 2u8.hash(&mut hasher),
         }
     }
     path.stroke.map(f32::to_bits).hash(&mut hasher);
@@ -1021,41 +982,9 @@ fn path_hash(path: &Path) -> u64 {
     // are different vertices. Omitting this made a highlighted border (the
     // power menu's selection) keep the colour it was first cached with, even
     // after the highlight moved elsewhere.
-    match &path.paint {
-        Paint::Solid(color) => {
-            0u8.hash(&mut hasher);
-            for channel in [color.r, color.g, color.b, color.a] {
-                channel.to_bits().hash(&mut hasher);
-            }
-        }
-        Paint::LinearGradient { from, to, stops } => {
-            1u8.hash(&mut hasher);
-            for value in [from.x, from.y, to.x, to.y] {
-                value.to_bits().hash(&mut hasher);
-            }
-            for (offset, color) in stops {
-                offset.to_bits().hash(&mut hasher);
-                for channel in [color.r, color.g, color.b, color.a] {
-                    channel.to_bits().hash(&mut hasher);
-                }
-            }
-        }
-        Paint::RadialGradient {
-            center,
-            radius,
-            stops,
-        } => {
-            2u8.hash(&mut hasher);
-            center.x.to_bits().hash(&mut hasher);
-            center.y.to_bits().hash(&mut hasher);
-            radius.to_bits().hash(&mut hasher);
-            for (offset, color) in stops {
-                offset.to_bits().hash(&mut hasher);
-                for channel in [color.r, color.g, color.b, color.a] {
-                    channel.to_bits().hash(&mut hasher);
-                }
-            }
-        }
+    let Paint::Solid(color) = path.paint;
+    for channel in color.to_array() {
+        channel.to_bits().hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -1063,7 +992,6 @@ fn path_hash(path: &Path) -> u64 {
 /// A shared RGBA atlas for glyph masks and images.
 pub(crate) struct Atlas {
     texture: wgpu::Texture,
-    view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     data: Vec<u8>,
     packer: ShelfPacker,
@@ -1112,11 +1040,6 @@ impl ShelfPacker {
 }
 
 impl Atlas {
-    /// A view of the atlas texture, for tests that need to bind it directly.
-    pub(crate) fn view(&self) -> &wgpu::TextureView {
-        &self.view
-    }
-
     pub(crate) fn new(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Self {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("stratum atlas"),
@@ -1156,7 +1079,6 @@ impl Atlas {
 
         Self {
             texture,
-            view,
             bind_group,
             data: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             packer: ShelfPacker::default(),
@@ -1280,18 +1202,6 @@ impl Atlas {
                 depth_or_array_layers: 1,
             },
         );
-    }
-}
-
-/// Convenience: build a rounded rect from a colour.
-pub fn fill_rect(x: f32, y: f32, width: f32, height: f32, radius: f32, color: Color) -> Rect {
-    Rect {
-        x,
-        y,
-        width,
-        height,
-        radius,
-        color,
     }
 }
 

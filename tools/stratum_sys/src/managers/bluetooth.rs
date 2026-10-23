@@ -124,19 +124,9 @@ fn snapshot(objects: &Objects, include_unpaired: bool) -> Result<Value, String> 
     }))
 }
 
-fn query(include_unpaired: bool) -> Result<Value, String> {
-    with_timeout(BT_TIMEOUT, move || snapshot(&managed_objects(&system()?)?, include_unpaired))
-}
-
-pub fn status() -> Value {
-    query(false).unwrap_or_else(|error| {
-        json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [] })
-    })
-}
-
-/// `status()` plus `all_devices`: every device the adapter knows, discovered
-/// ones included (what `list()` returns), from the same single query. For a
-/// UI that shows both the paired summary and the full list.
+/// The adapter's state and its paired devices, plus `all_devices`: every
+/// device the adapter knows, discovered ones included, from the same single
+/// query. For a UI that shows both the paired summary and the full list.
 pub fn status_with_all() -> Value {
     let result = with_timeout(BT_TIMEOUT, || {
         let objects = managed_objects(&system()?)?;
@@ -147,35 +137,6 @@ pub fn status_with_all() -> Value {
     result.unwrap_or_else(|error| {
         json!({ "ok": false, "error": error, "state": "off", "scanning": "no", "devices": [], "all_devices": [] })
     })
-}
-
-pub fn state() -> Value {
-    let st = status();
-    if let Some(obj) = st.as_object() {
-        let powered = obj.get("state").and_then(Value::as_str).unwrap_or("off") != "off";
-        let state_val = obj.get("state").and_then(Value::as_str).unwrap_or("off");
-        return json!({
-            "ok": true,
-            "command": "bluetooth",
-            "subcommand": "state",
-            "powered": if powered { "yes" } else { "no" },
-            "state": state_val,
-        });
-    }
-    json!({"ok": false, "error": "failed to get status"})
-}
-
-pub fn list() -> Value {
-    match query(true) {
-        Ok(snapshot) => json!({
-            "ok": true,
-            "command": "bluetooth",
-            "subcommand": "list",
-            "hover": false,
-            "devices": snapshot.get("devices").cloned().unwrap_or(json!([])),
-        }),
-        Err(e) => json!({"ok": false, "error": e}),
-    }
 }
 
 /// The default adapter's object path.

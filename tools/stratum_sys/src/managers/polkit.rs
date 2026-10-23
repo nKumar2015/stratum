@@ -2,8 +2,9 @@
 //!
 //! Registers as the session's `AuthenticationAgent` on the system bus and
 //! drives prompts for privileged actions. The agent owns its own pending
-//! session bookkeeping and reports progress through a caller-supplied
-//! [`PolkitSink`] so this module stays independent of any host state or UI.
+//! session bookkeeping and reports progress through the host's
+//! [`crate::Publisher`] so this module stays independent of any host state or
+//! UI.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ enum Outcome {
 }
 
 /// A single in-flight authorization request, keyed by polkit cookie.
-pub struct AuthSession {
+struct AuthSession {
     tx: oneshot::Sender<Outcome>,
     attempts: u32,
 }
@@ -61,12 +62,6 @@ pub enum FailureOutcome {
     /// No such cookie — already answered, cancelled, or timed out.
     Unknown,
 }
-
-/// Callback the agent uses to surface authentication state to its host.
-///
-/// The payload is the `polkit` object the shell already understands:
-/// `{ active, action, message, icon, cookie, user, success? }`.
-pub type PolkitSink = Arc<dyn Fn(Value) + Send + Sync>;
 
 /// Everything the agent needs from the embedding host.
 #[derive(Clone)]

@@ -117,7 +117,6 @@ impl TextEngine {
             y,
             size: style.size,
             color: style.color,
-            family: Arc::clone(&style.family),
             weight: style.weight,
             glyphs: shaped.glyphs,
             transform: Transform::IDENTITY,

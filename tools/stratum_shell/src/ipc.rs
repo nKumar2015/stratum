@@ -1,21 +1,19 @@
 //! The shell's IPC socket.
 //!
-//! External keybinds and `stratum-cli` used to reach the QML shell through
-//! `qs ipc`. This is the native equivalent: a Unix socket at
-//! `$XDG_RUNTIME_DIR/stratum-shell.sock` (override with `$STRATUM_SOCKET`)
-//! speaking one JSON request line and one JSON response line per connection.
+//! External keybinds reach the shell through `stratum-cli`, which talks to a
+//! Unix socket at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override with
+//! `$STRATUM_SOCKET`), one JSON request line and one JSON response line per
+//! connection.
 //!
-//! Targets and function names are deliberately identical to the QML
-//! `IpcHandler`s in `globals/IpcModule.qml`, so `stratum-cli` and every existing
-//! keybind keep working. A function the shell will not serve answers
-//! `unsupported`; during the migration that sent the call on to Quickshell,
-//! and now the CLI reports it.
+//! A request for a target or function [`functions`] does not list is refused
+//! while parsing. A call the shell refuses at run time (a lock it cannot take
+//! safely) answers `unsupported`, which the CLI reports.
 //!
 //! Protocol:
 //!
 //! ```text
 //! -> {"target":"notifications","function":"toggle","args":[]}\n
-//! <- {"ok":true,"pid":4242}\n
+//! <- {"ok":true}\n
 //! <- {"ok":false,"code":"unsupported","error":"..."}\n
 //! ```
 
@@ -51,34 +49,6 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         "todo" => Some(&["add"]),
         "timer" => Some(&["start", "pause", "toggle", "stop"]),
         _ => None,
-    }
-}
-
-/// Whether this shell implements the function yet.
-///
-/// An unserved function answers `unsupported` rather than pretending to
-/// succeed.
-pub fn is_supported(target: &str, function: &str) -> bool {
-    match (target, function) {
-        // The notification centre exists as a page of the settings window, so
-        // every function maps directly onto real behaviour.
-        ("notifications", _) => true,
-        // Themes are config-driven and switch live; the switcher overlay
-        // serves open/close/toggle.
-        ("theme", _) => true,
-        // The power menu exists as its own overlay.
-        ("powermenu", "toggle") => true,
-        // ext-session-lock surfaces with a PAM check. A compositor without the
-        // protocol is reported as unsupported at call time instead.
-        ("lockscreen", "lock") => true,
-        // The dashboard overlay.
-        ("dashboard", _) => true,
-        // The capture overlay and the viewer it opens.
-        ("screenshot", "start") => true,
-        ("settings", _) => true,
-        ("todo", "add") => true,
-        ("timer", _) => true,
-        _ => false,
     }
 }
 
@@ -366,20 +336,14 @@ fn handle_client(stream: UnixStream, tx: &calloop::channel::Sender<Request>) {
 
     let response = match parse_request(&line) {
         Ok(call) => {
-            if !is_supported(&call.target, &call.function) {
-                IpcError::Unsupported.to_json()
+            let (reply_tx, reply_rx) = mpsc::channel();
+            if tx.send(Request { call, reply: reply_tx }).is_err() {
+                IpcError::Failed("shell is shutting down".into()).to_json()
             } else {
-                let (reply_tx, reply_rx) = mpsc::channel();
-                if tx.send(Request { call, reply: reply_tx }).is_err() {
-                    IpcError::Failed("shell is shutting down".into()).to_json()
-                } else {
-                    match reply_rx.recv_timeout(CLIENT_TIMEOUT) {
-                        Ok(Ok(())) => json!({ "ok": true, "pid": std::process::id() }),
-                        Ok(Err(err)) => err.to_json(),
-                        Err(_) => {
-                            IpcError::Failed("timed out waiting for the shell".into()).to_json()
-                        }
-                    }
+                match reply_rx.recv_timeout(CLIENT_TIMEOUT) {
+                    Ok(Ok(())) => json!({ "ok": true }),
+                    Ok(Err(err)) => err.to_json(),
+                    Err(_) => IpcError::Failed("timed out waiting for the shell".into()).to_json(),
                 }
             }
         }
@@ -466,18 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn every_qml_function_is_served_natively() {
-        // Nothing the QML shell answered still needs Quickshell, which the
-        // cutover requires. (Lock can still refuse at call time.)
-        for target in ["dashboard", "lockscreen", "notifications", "powermenu", "screenshot", "theme"] {
-            for function in functions(target).unwrap() {
-                assert!(is_supported(target, function), "{target} {function}");
-            }
-        }
-        assert!(!is_supported("screenshot", "stop"));
-    }
-
-    #[test]
     fn settings_takes_an_optional_page() {
         let call = |function: &str, args: Value| {
             parse(json!({ "target": "settings", "function": function, "args": args }))
@@ -514,7 +466,6 @@ mod tests {
         assert!(call("timer", "start", json!([])).is_ok(), "resumes");
         assert_eq!(call("timer", "start", json!(["1", "2"])).unwrap_err().code(), "bad_args");
         assert_eq!(call("timer", "stop", json!(["x"])).unwrap_err().code(), "bad_args");
-        assert!(is_supported("timer", "toggle") && is_supported("todo", "add"));
     }
 
     #[test]
@@ -564,7 +515,6 @@ mod tests {
 
         let response = ask(r#"{"target":"notifications","function":"open"}"#);
         assert_eq!(response["ok"], true);
-        assert_eq!(response["pid"], std::process::id());
 
         // A validated-but-rejected call carries the responder's error.
         let response = ask(r#"{"target":"theme","function":"set","args":["carbon"]}"#);

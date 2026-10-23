@@ -41,30 +41,13 @@ impl Publisher {
         Self(Arc::new(f))
     }
 
-    /// Publish a snapshot on `channel` (`"audio"`, `"net"`, `"bluetooth"`,
-    /// `"music"`, `"battery"`, `"polkit"`).
+    /// Publish a snapshot on `channel` (`"audio"`, `"polkit"`).
     pub fn emit(&self, channel: &str, payload: Value) {
         (self.0)(channel, payload);
     }
 
     pub fn audio(&self, payload: Value) {
         self.emit("audio", payload);
-    }
-
-    pub fn net(&self, payload: Value) {
-        self.emit("net", payload);
-    }
-
-    pub fn bluetooth(&self, payload: Value) {
-        self.emit("bluetooth", payload);
-    }
-
-    pub fn battery(&self, payload: Value) {
-        self.emit("battery", payload);
-    }
-
-    pub fn music(&self, payload: Value) {
-        self.emit("music", payload);
     }
 
     pub fn polkit(&self, payload: Value) {

@@ -201,15 +201,10 @@ pub struct App {
     theme_choice: Option<crate::theme_choice::Saved>,
     /// Poke used by worker threads to wake the event loop out of its poll.
     /// Held so the ping source's channel stays open for the shell's lifetime.
-    #[allow(dead_code)]
-    wake: Option<calloop::ping::Ping>,
+    _wake: Option<calloop::ping::Ping>,
     /// The IPC listener. Held so its socket file lives exactly as long as the
     /// shell; dropping it unlinks the socket.
-    #[allow(dead_code)]
-    ipc: Option<crate::ipc::Server>,
-
-    #[allow(dead_code)]
-    pub should_exit: bool,
+    _ipc: Option<crate::ipc::Server>,
 }
 
 impl App {
@@ -353,9 +348,8 @@ impl App {
             config_stamp,
             last_reload_check: std::time::Instant::now(),
             theme_choice,
-            wake: None,
-            ipc: None,
-            should_exit: false,
+            _wake: None,
+            _ipc: None,
         };
 
         // Worker threads (actions, pollers, D-Bus) have no way to signal the
@@ -381,7 +375,7 @@ impl App {
         // through it. Keep one clone on the App so it stays alive.
         let wake_for_state = ping.clone();
         app.state.set_waker(Arc::new(move || wake_for_state.ping()));
-        app.wake = Some(ping);
+        app._wake = Some(ping);
 
         app.start_ipc(&loop_handle);
         app.start_lock_events(&loop_handle);
@@ -1888,7 +1882,7 @@ impl App {
     /// handled on the same thread as every other state change.
     fn start_ipc(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
         let (tx, channel) = calloop::channel::channel();
-        self.ipc = crate::ipc::start(tx);
+        self._ipc = crate::ipc::start(tx);
         if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
             match event {
                 calloop::channel::Event::Msg(request) => app.handle_ipc(request),
@@ -1917,11 +1911,7 @@ impl App {
     }
 
     fn execute_ipc(&mut self, call: &IpcCall) -> Result<(), IpcError> {
-        use crate::ipc::{is_supported, IpcError};
-
-        if !is_supported(&call.target, &call.function) {
-            return Err(IpcError::Unsupported);
-        }
+        use crate::ipc::IpcError;
 
         match (call.target.as_str(), call.function.as_str()) {
             // The notifications centre is the Notifications page of the
@@ -2598,7 +2588,7 @@ impl App {
             layer.set_size(size.0, size.1);
             layer.commit();
 
-            let rail = (corner > 0).then(|| match config.position {
+            let rail = (corner > 0).then_some(match config.position {
                 SidebarPosition::Right => (corner as f32, config.width as f32),
                 _ => (0.0, config.width as f32),
             });
@@ -2622,8 +2612,9 @@ impl App {
             osd_layer.set_anchor(Anchor::BOTTOM);
             osd_layer.set_exclusive_zone(-1);
             osd_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            osd_layer.set_margin(0, 0, 72, 0);
-            osd_layer.set_size(320, 94);
+            let osd = &self.config.metrics.osd;
+            osd_layer.set_margin(0, 0, osd.margin_bottom, 0);
+            osd_layer.set_size(osd.width, osd.height);
             osd_layer.commit();
             self.osd_surfaces.push(
                 SurfaceEntry::new(osd_layer, scale, output_name.clone()).with_output(output.clone())
@@ -2645,8 +2636,9 @@ impl App {
             toast_layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT);
             toast_layer.set_exclusive_zone(-1);
             toast_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-            toast_layer.set_margin(12, 12, 12, 12);
-            toast_layer.set_size(344, 0);
+            let toasts = &self.config.metrics.toasts;
+            toast_layer.set_margin(toasts.margin, toasts.margin, toasts.margin, toasts.margin);
+            toast_layer.set_size(toasts.surface_width, 0);
             toast_layer.commit();
             self.toast_surfaces.push(
                 SurfaceEntry::new(toast_layer, scale, output_name.clone()).with_output(output.clone())
@@ -2894,19 +2886,10 @@ struct SettingsWindow {
     height: u32,
     configured: bool,
     dirty: bool,
-    /// Whether we have asked for focus in response to an open request.
-    activated: bool,
-    /// Output the window prefers to open on, used for per-output display info.
-    output: Option<wl_output::WlOutput>,
 }
 
 impl SettingsWindow {
-    fn new(
-        window: Window,
-        scale: i32,
-        output: Option<wl_output::WlOutput>,
-        metrics: &crate::ui::style::WindowMetrics,
-    ) -> Self {
+    fn new(window: Window, scale: i32, metrics: &crate::ui::style::WindowMetrics) -> Self {
         Self {
             renderer: None,
             window,
@@ -2915,8 +2898,6 @@ impl SettingsWindow {
             height: metrics.height,
             configured: false,
             dirty: true,
-            activated: false,
-            output,
         }
     }
 
@@ -3015,21 +2996,15 @@ impl App {
 
         // Match the scale of an existing bar surface so the window is as sharp
         // as the rest of the shell on this output.
-        let (scale, output) = self
-            .surfaces
-            .iter()
-            .max_by_key(|s| s.scale)
-            .map(|s| (s.scale, s.output.clone()))
-            .unwrap_or((1, None));
+        let scale = self.surfaces.iter().map(|s| s.scale).max().unwrap_or(1);
         let metrics = self.config.metrics.window.clone();
-        self.settings = Some(SettingsWindow::new(window, scale, output, &metrics));
+        self.settings = Some(SettingsWindow::new(window, scale, &metrics));
     }
 
     fn apply_action(&mut self, action: crate::ui::Action) {
         use crate::ui::Action;
         match action {
             Action::OpenPanel(page) => self.control_center.toggle(page),
-            Action::ClosePanel => self.control_center.close(),
             Action::ActivateTray(service) => {
                 if let Some(item) = self
                     .state
@@ -3656,10 +3631,7 @@ impl PointerHandler for App {
                     .map(|entry| entry.output_name.clone())
                     .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
                     .unwrap_or_default();
-                if let Some(action) =
-                    self.sidebar
-                        .on_click_with(point, &output_name, &input, button)
-                {
+                if let Some(action) = self.sidebar.on_click(point, &output_name, button) {
                     self.apply_action(action);
                     changed = true;
                 }

@@ -132,7 +132,7 @@ const NVIDIA: &str = "0x10de";
 
 /// The load, temperature and VRAM of every GPU present. A suspended card is
 /// left alone: all three are unknown.
-pub fn read_all() -> Vec<GpuReading> {
+pub(crate) fn read_all() -> Vec<GpuReading> {
     gpu_cards()
         .iter()
         .map(|card| {

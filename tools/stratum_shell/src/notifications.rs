@@ -12,7 +12,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
 use tracing::{debug, info};
 use zbus::zvariant::OwnedValue;
 use zbus::Connection;
@@ -501,22 +500,6 @@ impl Served {
     ) -> zbus::Result<()>;
 }
 
-/// SystemState-friendly snapshot of the notification list.
-pub fn to_json(list: &[Notification]) -> Value {
-    json!({
-        "notifications": list.iter().map(|n| json!({
-            "id": n.id,
-            "app_name": n.app_name,
-            "app_icon": n.app_icon,
-            "summary": n.summary,
-            "body": n.body,
-            "actions": n.actions,
-            "urgency": n.urgency,
-            "image_path": n.image_path,
-        })).collect::<Vec<_>>()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -751,23 +734,5 @@ mod tests {
 
         server.close(1, 2);
         assert_eq!(count.load(Ordering::SeqCst), 0, "close should republish");
-    }
-
-    #[test]
-    fn json_snapshot_shape() {
-        let list = vec![Notification {
-            id: 1,
-            app_name: "app".into(),
-            app_icon: "icon".into(),
-            summary: "hi".into(),
-            body: "there".into(),
-            actions: vec!["default".into(), "Open".into()],
-            urgency: 2,
-            expire_timeout: 3000,
-            ..Default::default()
-        }];
-        let json = to_json(&list);
-        assert_eq!(json["notifications"][0]["summary"], "hi");
-        assert_eq!(json["notifications"][0]["urgency"], 2);
     }
 }
