@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::config::Theme;
+
 impl App {
     /// Redraw every dirty surface. Called after each loop iteration.
     pub fn render_pending(&mut self) -> Result<(), String> {
@@ -43,6 +45,26 @@ impl App {
             }
         }
 
+        self.update_osd_and_toasts(state_changed, dt);
+        self.render_settings_window(dt);
+
+        let theme = self.config.active_theme();
+        self.render_osd(&theme, dt)?;
+        self.render_toasts(&theme, dt)?;
+        self.render_power_menu(&theme, dt)?;
+        self.render_polkit_dialog(&theme, dt, state_changed)?;
+        self.render_hover_menu(&theme, dt, state_changed)?;
+        self.render_dashboard(&theme, dt, state_changed)?;
+        self.render_screenshot(&theme, dt)?;
+        self.render_viewer(&theme, dt);
+        self.render_theme_switcher(&theme, dt)?;
+        self.render_tray_menu(&theme, dt)?;
+        self.render_bars(&theme, dt)
+    }
+
+    /// Feed the OSD and the toasts what changed, and mark their surfaces for
+    /// the frames their animations need.
+    fn update_osd_and_toasts(&mut self, state_changed: bool, dt: f32) {
         self.osd.set_metrics(&self.config.metrics.osd);
         self.toasts.set_metrics(&self.config.metrics.toasts);
         self.osd.observe_audio(&self.state);
@@ -51,7 +73,7 @@ impl App {
         }
 
         // Toasts follow the notification list and expire on their own timers.
-        // `take_dirty` above already consumed the aggregate flag, so sync on any
+        // `take_dirty` already consumed the aggregate flag, so sync on any
         // state change rather than on the notification cell alone. While
         // do-not-disturb is on, existing cards still update and disappear with
         // their notifications, but no new card appears.
@@ -92,7 +114,11 @@ impl App {
                 entry.dirty = true;
             }
         }
+    }
 
+    /// The control centre's window: created on demand, painted while open,
+    /// destroyed once closed, and the actions its pages queued dispatched.
+    fn render_settings_window(&mut self, dt: f32) {
         // The settings window is an ordinary toplevel: create it on demand and
         // redraw while it is open.
         if self.control_center.open {
@@ -175,11 +201,11 @@ impl App {
                 }
             }
         }
+    }
 
-        let theme = self.config.active_theme();
-
-        // OSD overlay. It shares the sidebar's paint context but draws its own
-        // display list, since it has nothing to do with the rail layout.
+    /// The OSD. It shares the sidebar's paint context but draws its own
+    /// display list, since it has nothing to do with the rail layout.
+    fn render_osd(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         // Once it has faded out, detach the buffer: a mapped surface with a
         // transparent buffer can still composite as black on some compositors,
         // which is the "OSD stays black" report.
@@ -193,17 +219,20 @@ impl App {
                 continue;
             }
             let output_name = entry.output_name.clone();
-            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+            let mut ctx = paint_ctx!(self, theme, &output_name, dt);
             let rect = entry.logical_rect();
             let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
             self.osd.paint(&mut ctx, &mut list, rect);
             entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
             entry.dirty = false;
         }
+        Ok(())
+    }
 
-        // Toast stack. The stack keeps its card layouts for clicks and hover.
-        // An empty stack unmaps, for the same reason as the OSD. The surface
-        // takes keyboard focus only while a reply field on it has focus.
+    /// The toast stack. The stack keeps its card layouts for clicks and hover.
+    /// An empty stack unmaps, for the same reason as the OSD. The surface
+    /// takes keyboard focus only while a reply field on it has focus.
+    fn render_toasts(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         let toasts_visible = !self.toasts.is_empty();
         let toast_keyboard = self.toasts.keyboard_output().map(str::to_string);
         for entry in &mut self.toast_surfaces {
@@ -216,7 +245,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 let bounds = self.toasts.paint(&mut ctx, &mut list, rect);
@@ -237,11 +266,14 @@ impl App {
                 entry.set_keyboard_exclusive(wants_keys);
             }
         }
+        Ok(())
+    }
 
-        // Power menu. Only the output it opened on is painted and given
-        // keyboard focus; the rest stay unmapped and inert. Repaints happen on
-        // the state changes that matter (open/close, selection change), not
-        // every frame: forcing a redraw here made the labels shimmer.
+    /// The power menu. Only the output it opened on is painted and given
+    /// keyboard focus; the rest stay unmapped and inert. Repaints happen on
+    /// the state changes that matter (open/close, selection change), not
+    /// every frame: forcing a redraw here made the labels shimmer.
+    fn render_power_menu(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         self.power_menu.set_metrics(&self.config.metrics.power_menu);
         let power_target = self.power_menu.target().map(str::to_string);
         for entry in &mut self.power_surfaces {
@@ -265,7 +297,7 @@ impl App {
                     self.power_menu.selection()
                 );
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.power_menu.paint(&mut ctx, &mut list, rect);
@@ -279,10 +311,13 @@ impl App {
                 entry.set_keyboard_exclusive(true);
             }
         }
+        Ok(())
+    }
 
-        // polkit dialog: follows the agent's published request, on the output
-        // that was focused when the request arrived. Same mapping and focus
-        // rules as the power menu above.
+    /// The polkit dialog: follows the agent's published request, on the output
+    /// that was focused when the request arrived. Same mapping and focus
+    /// rules as the power menu.
+    fn render_polkit_dialog(&mut self, theme: &Theme, dt: f32, state_changed: bool) -> Result<(), String> {
         if state_changed {
             let focused = self.focused_output();
             let payload = self.state.polkit.get();
@@ -303,7 +338,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.polkit_dialog.paint(&mut ctx, &mut list, rect);
@@ -314,9 +349,12 @@ impl App {
                 entry.set_keyboard_exclusive(true);
             }
         }
+        Ok(())
+    }
 
-        // Hover menu. Painted once per change; the painted height sizes the
-        // surface, and a size change waits for the configure before drawing.
+    /// The hover menu. Painted once per change; the painted height sizes the
+    /// surface, and a size change waits for the configure before drawing.
+    fn render_hover_menu(&mut self, theme: &Theme, dt: f32, state_changed: bool) -> Result<(), String> {
         if self.hover_menus.intent.pending() {
             self.update_hover();
         }
@@ -351,7 +389,7 @@ impl App {
             let output_name = entry.output_name.clone();
             let output_size = entry.output_logical_size;
             let clicked = std::mem::take(&mut self.hover_clicked);
-            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+            let mut ctx = paint_ctx!(self, theme, &output_name, dt);
             let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
             let (height, events) = self.hover_menus.paint(
                 &mut ctx,
@@ -390,9 +428,12 @@ impl App {
         if !hover_events.is_empty() {
             self.apply_hover_events(hover_events);
         }
+        Ok(())
+    }
 
-        // Dashboard: its sampler publishes only while it is open, like the
-        // QML watch/unwatch.
+    /// The dashboard: its sampler publishes only while it is open, like the
+    /// QML watch/unwatch. Its Focus timer runs, and ends, while it is closed.
+    fn render_dashboard(&mut self, theme: &Theme, dt: f32, state_changed: bool) -> Result<(), String> {
         self.dashboard.set_config(&self.config.metrics.dashboard, &self.config.dashboard);
         let feed = &self.state.dashboard_feed;
         feed.configure(crate::dashboard::feed::Settings::from_config(&self.config.dashboard));
@@ -425,7 +466,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.dashboard.paint(&mut ctx, &mut list, rect, &dash_snapshot, &dash_music);
@@ -436,9 +477,12 @@ impl App {
                 entry.set_keyboard_exclusive(true);
             }
         }
+        Ok(())
+    }
 
-        // Screenshot overlay: every output whose frame is frozen. Only the
-        // output it started on takes the keyboard, for Escape.
+    /// The screenshot overlay: every output whose frame is frozen. Only the
+    /// output it started on takes the keyboard, for Escape.
+    fn render_screenshot(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         self.screenshot.set_metrics(&self.config.metrics.screenshot);
         let origins: Vec<(i32, i32)> = self
             .screenshot_surfaces
@@ -460,7 +504,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.screenshot.paint(&mut ctx, &mut list, rect, &output_name, origin);
@@ -471,8 +515,12 @@ impl App {
                 entry.set_keyboard_exclusive(entry.output_name == shot_origin);
             }
         }
+        Ok(())
+    }
 
-        // Screenshot viewer window.
+    /// The screenshot viewer window. A failure is logged rather than
+    /// returned, as for the settings window.
+    fn render_viewer(&mut self, theme: &Theme, dt: f32) {
         if self.viewer.is_open() {
             self.viewer.configure(&self.config.metrics.screenshot_viewer, &self.config.screenshot);
             if self.viewer.tick() {
@@ -482,7 +530,7 @@ impl App {
         if let Some(window) = &mut self.viewer_window {
             if window.configured && window.dirty {
                 let output_name = self.surfaces.first().map(|s| s.output_name.clone()).unwrap_or_default();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let mut list = crate::render::display_list::DisplayList::new(theme.bg_main);
                 self.viewer.paint(&mut ctx, &mut list, window.logical_rect());
                 if let Err(err) = window.render_list(&self.gpu, self.display, &list, &mut self.text) {
@@ -490,8 +538,10 @@ impl App {
                 }
             }
         }
+    }
 
-        // Theme switcher, on the output it opened on.
+    /// The theme switcher, on the output it opened on.
+    fn render_theme_switcher(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         self.theme_switcher.set_metrics(&self.config.metrics.theme_switcher);
         let theme_target = self.theme_switcher.target().map(str::to_string);
         let theme_names = self.theme_names();
@@ -506,7 +556,7 @@ impl App {
             }
             if entry.dirty {
                 let output_name = entry.output_name.clone();
-                let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+                let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
                 self.theme_switcher
@@ -518,10 +568,13 @@ impl App {
                 entry.set_keyboard_exclusive(true);
             }
         }
+        Ok(())
+    }
 
-        // Tray context menu. It is sized to its contents, so the layer's size
-        // and margin are set from the published menu whenever that changes; the
-        // surface is unmapped when no menu is open.
+    /// The tray context menu. It is sized to its contents, so the layer's size
+    /// and margin are set from the published menu whenever that changes; the
+    /// surface is unmapped when no menu is open.
+    fn render_tray_menu(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         self.tray_menu.set_metrics(&self.config.metrics.tray_menu);
         let open_menu = self.state.tray_menu.get();
         let menu_target = self.tray_menu.target().map(str::to_string);
@@ -601,7 +654,7 @@ impl App {
                 continue;
             }
             let output_name = entry.output_name.clone();
-            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+            let mut ctx = paint_ctx!(self, theme, &output_name, dt);
             let rect = entry.logical_rect();
             let pointer = self
                 .pointer
@@ -615,7 +668,11 @@ impl App {
             entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
             entry.dirty = false;
         }
+        Ok(())
+    }
 
+    /// The bar on every output.
+    fn render_bars(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
         for entry in &mut self.surfaces {
             if !entry.dirty || !entry.configured {
                 continue;
@@ -631,7 +688,7 @@ impl App {
             // Clone the output name: the context borrows it while `entry` is
             // borrowed mutably for rendering.
             let output_name = entry.output_name.clone();
-            let mut ctx = paint_ctx!(self, &theme, &output_name, dt);
+            let mut ctx = paint_ctx!(self, theme, &output_name, dt);
             entry.render_with(
                 &self.gpu,
                 self.display,
