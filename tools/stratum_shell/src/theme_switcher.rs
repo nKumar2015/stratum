@@ -13,7 +13,7 @@
 //! focused when it opened, like the power menu.
 
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
-use crate::ui::text_field::{self, FieldKey, FieldStyle, TextField};
+use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
 /// Something the caller has to do.
@@ -227,7 +227,7 @@ impl ThemeSwitcher {
             ..surface
         });
 
-        let line = |size: f32| size * 1.4;
+        let line = |size: f32| typo.line(size);
         let list_h = if filtered.is_empty() {
             m.empty_height
         } else {
@@ -249,7 +249,7 @@ impl ThemeSwitcher {
             radius: m.radius,
             color: Color::TRANSPARENT,
         };
-        text_field::paint_frame(list, card, m.border, theme.border_active, theme.bg_main);
+        ui::paint_frame(list, card, m.border, theme.border_active, theme.bg_main);
 
         let x = card.x + m.padding;
         let inner = m.width - m.padding * 2.0;
@@ -271,7 +271,7 @@ impl ThemeSwitcher {
             radius: m.search_radius,
             ..row(y, m.search_height)
         };
-        text_field::paint_frame(list, search, m.border, theme.border_inactive, theme.bg_widget);
+        ui::paint_frame(list, search, m.border, theme.border_inactive, theme.bg_widget);
         self.search.paint(
             ctx,
             list,
@@ -293,7 +293,7 @@ impl ThemeSwitcher {
                 radius: m.row_radius,
                 ..row(y, m.empty_height)
             };
-            text_field::paint_frame(list, empty, m.border, theme.border_inactive, theme.bg_widget);
+            ui::paint_frame(list, empty, m.border, theme.border_inactive, theme.bg_widget);
             ui::paint_text_centered(ctx, list, "No matching themes", empty, m.empty_text, theme.text_muted);
         }
         for (offset, name) in filtered.iter().enumerate().skip(self.scroll).take(shown) {
@@ -304,7 +304,7 @@ impl ThemeSwitcher {
             let selected = self.selection == Some(offset);
             let is_current = name == current;
             if selected || is_current {
-                text_field::paint_frame(
+                ui::paint_frame(
                     list,
                     rect,
                     m.border,

@@ -194,19 +194,14 @@ impl Osd {
             width,
             height,
             radius: m.radius,
-            color: Color::rgba(
-                ctx.theme.bg_main.r,
-                ctx.theme.bg_main.g,
-                ctx.theme.bg_main.b,
-                0.95 * alpha,
-            ),
+            color: ctx.theme.bg_main.with_alpha(m.panel_alpha * alpha),
         };
         ui::paint_frame(
             list,
             panel,
-            panel.color,
+            ctx.appearance.frame_border(),
             ctx.theme.border_active.with_alpha(alpha),
-            ctx.appearance.framed_border,
+            panel.color,
         );
 
         let accent = match self.channel {

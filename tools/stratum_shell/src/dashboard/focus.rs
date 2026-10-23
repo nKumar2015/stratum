@@ -19,7 +19,7 @@ use super::timer::{self, Ended, Mode, Timer};
 use super::{Button, Dashboard, DashboardAction};
 use crate::config::TimerConfig;
 use crate::render::display_list::{Color, DisplayList, Rect};
-use crate::ui::text_field::{self, FieldKey, FieldStyle, TextField};
+use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,7 +314,7 @@ impl Dashboard {
             let lw = super::today::measure(ctx, label, m.caption, regular) + m.inner;
             right -= lw;
             let chip = Rect { x: right, width: lw, radius: m.radius * 0.6, ..title_row };
-            text_field::paint_frame(list, chip, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
+            ui::paint_frame(list, chip, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
             ui::paint_text_centered(ctx, list, label, chip, m.caption, ctx.theme.text_muted);
             self.buttons.push((chip, Button::ClearDone));
             right -= m.inner * 0.5;
@@ -329,7 +329,7 @@ impl Dashboard {
         let focused = self.focus.field == Some(Field::Todo);
         let field = Rect { x, y, width: w, height: m.button, radius: m.radius * 0.6, color: Color::TRANSPARENT };
         let border = if focused { ctx.theme.border_active } else { ctx.theme.border_inactive };
-        text_field::paint_frame(list, field, m.border, border, ctx.theme.bg_main);
+        ui::paint_frame(list, field, m.border, border, ctx.theme.bg_main);
         let style = FieldStyle { text: m.text, padding: m.inner * 0.6, caret_width: m.caret, masked: false, placeholder: Some("Add a to-do") };
         self.focus.input.paint(ctx, list, field, style, !focused);
         self.buttons.push((field, Button::TodoInput));
@@ -350,7 +350,7 @@ impl Dashboard {
                 list.push_rect(Rect { color: ctx.theme.primary, ..check });
                 ui::paint_text_centered(ctx, list, "\u{f012c}", check, m.check * 0.9, ctx.theme.bg_main);
             } else {
-                text_field::paint_frame(list, check, m.border, ctx.theme.border_active, ctx.theme.bg_main);
+                ui::paint_frame(list, check, m.border, ctx.theme.border_active, ctx.theme.bg_main);
             }
             let delete_w = m.check + m.inner;
             let text_x = x + m.check + m.inner * 0.6;
@@ -389,7 +389,7 @@ impl Dashboard {
         };
         let focused = self.focus.field == Some(Field::Note);
         let border = if focused { ctx.theme.border_active } else { ctx.theme.border_inactive };
-        text_field::paint_frame(list, area, m.border, border, ctx.theme.bg_main);
+        ui::paint_frame(list, area, m.border, border, ctx.theme.bg_main);
         self.buttons.push((area, Button::NoteArea));
 
         let pad = m.inner * 0.6;

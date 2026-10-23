@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use crate::pam::Secret;
-use crate::render::display_list::{Color, DisplayList, Rect};
+use crate::render::display_list::{DisplayList, Rect};
 use crate::text::TextStyle;
 use crate::ui::{self, PaintCtx};
 
@@ -205,22 +205,6 @@ fn tail_that_fits(text: &str, max_width: f32, mut measure: impl FnMut(&str) -> f
         }
     }
     String::new()
-}
-
-/// Draw a field's frame: a border ring and its fill.
-pub fn paint_frame(list: &mut DisplayList, field: Rect, border: f32, border_color: Color, fill: Color) {
-    list.push_rect(Rect {
-        color: border_color,
-        ..field
-    });
-    list.push_rect(Rect {
-        x: field.x + border,
-        y: field.y + border,
-        width: (field.width - border * 2.0).max(0.0),
-        height: (field.height - border * 2.0).max(0.0),
-        radius: (field.radius - border).max(0.0),
-        color: fill,
-    });
 }
 
 #[cfg(test)]

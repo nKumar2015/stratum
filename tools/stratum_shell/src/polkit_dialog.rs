@@ -281,7 +281,7 @@ impl PolkitDialog {
         let message_lines =
             ui::wrap_text(ctx, &message, m.message, typo.weight_regular, inner_w, m.message_lines);
 
-        let line = |size: f32| size * 1.4;
+        let line = |size: f32| typo.line(size);
         let header_h = m
             .icon
             .max(line(m.title) + line(m.subtitle) * action_lines.len() as f32);

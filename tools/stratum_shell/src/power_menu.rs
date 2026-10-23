@@ -225,17 +225,9 @@ impl PowerMenu {
             ui::paint_frame(
                 list,
                 tile,
-                if active {
-                    ctx.theme.bg_hover
-                } else {
-                    ctx.theme.bg_widget
-                },
-                if active {
-                    ctx.theme.border_active
-                } else {
-                    ctx.theme.border_inactive
-                },
-                true,
+                ctx.appearance.border_width,
+                if active { ctx.theme.border_active } else { ctx.theme.border_inactive },
+                if active { ctx.theme.bg_hover } else { ctx.theme.bg_widget },
             );
 
             // Matching the QML menu: the active tile's icon is tinted with the
@@ -273,7 +265,7 @@ impl PowerMenu {
                     x: tile.x,
                     y: tile.y + tile.height - m.panel_padding - m.label,
                     width: tile.width,
-                    height: m.label + 4.0,
+                    height: ctx.metrics.typography.line(m.label),
                     radius: 0.0,
                     color: Color::TRANSPARENT,
                 },

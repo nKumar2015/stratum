@@ -122,8 +122,8 @@ fn paint_empty(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, body: Rect, dnd: 
     let card = rect(body.x, body.y, body.width, m.empty_height);
     layout::card(ctx, list, card, Card::Plain);
 
-    let title_h = typo.body * 1.4;
-    let caption_h = typo.caption * 1.4;
+    let title_h = typo.line(typo.body);
+    let caption_h = typo.line(typo.caption);
     let content_h = m.badge + m.card_padding + title_h + caption_h;
     let top = card.y + (card.height - content_h) * 0.5;
     let badge_bg = layout::mix(theme.surface_high, theme.primary, 0.2);

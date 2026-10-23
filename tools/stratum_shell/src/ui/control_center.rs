@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{Config, SidebarPosition};
+use crate::config::Config;
 use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::ui::pages::Pages;
 use crate::ui::{InputState, PaintCtx};
@@ -19,8 +19,6 @@ pub struct ControlCenter {
     pub open: bool,
     pub page: Page,
     config: Arc<Config>,
-    /// Panel size in logical pixels.
-    width: f32,
     /// Animation progress 0..1.
     pub progress: f32,
     pages: Pages,
@@ -32,12 +30,10 @@ pub struct ControlCenter {
 
 impl ControlCenter {
     pub fn new(config: Arc<Config>) -> Self {
-        let width = config.control_center.width as f32;
         Self {
             open: false,
             page: Page::Overview,
             config,
-            width,
             progress: 0.0,
             pages: Pages::new(),
             scroll: 0.0,
@@ -59,7 +55,6 @@ impl ControlCenter {
     /// Replace the configuration after a live reload or theme switch, keeping
     /// window state (page, open flag, animation) intact.
     pub fn set_config(&mut self, config: Arc<Config>) {
-        self.width = config.control_center.width as f32;
         self.config = config;
     }
 
@@ -181,61 +176,9 @@ impl ControlCenter {
 
         let nav = self.paint_nav(ctx, list, panel);
         let content = Rect {
-            x: panel.x + nav + 1.0,
+            x: panel.x + nav + ctx.metrics.window.nav_divider,
             y: panel.y,
-            width: panel.width - nav - 1.0,
-            height: panel.height,
-            radius: 0.0,
-            color: Color::TRANSPARENT,
-        };
-        self.paint_content(ctx, list, content, input);
-        panel
-    }
-
-    /// Paint the overlay variant (kept for the panel-style presentation; the
-    /// window is the default).
-    pub fn paint(
-        &mut self,
-        ctx: &mut PaintCtx<'_>,
-        list: &mut DisplayList,
-        surface: Rect,
-        input: &InputState,
-    ) -> Rect {
-        let alpha = 0.45 * self.progress;
-        list.push_rect(Rect {
-            color: Color::rgba(0.0, 0.0, 0.0, alpha),
-            ..surface
-        });
-
-        let width = self.width.min(surface.width - 40.0);
-        let height = (surface.height - 80.0).max(200.0);
-        let slide = (1.0 - self.progress) * (width + 24.0);
-        let x = match self.config.sidebar.position {
-            SidebarPosition::Right => surface.x + surface.width - width - 12.0 + slide,
-            _ => surface.x + 12.0 - slide,
-        };
-        let panel = Rect {
-            x,
-            y: surface.y + 40.0,
-            width,
-            height,
-            radius: self.config.appearance.corner_radius,
-            color: Color::TRANSPARENT,
-        };
-        crate::ui::paint_frame(
-            list,
-            panel,
-            ctx.theme.bg_main,
-            ctx.theme.border_inactive,
-            true,
-        );
-
-        self.pages.begin_frame(input, ctx.dt);
-        let nav = ctx.metrics.window.nav_width.min(132.0);
-        let content = Rect {
-            x: panel.x + nav + 8.0,
-            y: panel.y,
-            width: panel.width - nav - 8.0,
+            width: panel.width - nav - ctx.metrics.window.nav_divider,
             height: panel.height,
             radius: 0.0,
             color: Color::TRANSPARENT,
@@ -328,7 +271,7 @@ impl ControlCenter {
         list.push_rect(Rect {
             x: panel.x + nav_width,
             y: panel.y,
-            width: 1.0,
+            width: win.nav_divider,
             height: panel.height,
             radius: 0.0,
             color: ctx.theme.outline,
@@ -520,11 +463,10 @@ mod tests {
 
         let mut next = Config::test_defaults();
         next.theme = "gruvbox".into();
-        next.control_center.width = 640;
         center.set_config(Arc::new(next));
 
         assert!(center.open, "open state must survive a config swap");
         assert_eq!(center.page, Page::Display, "page must survive");
-        assert_eq!(center.width, 640.0, "new width should apply");
+        assert_eq!(center.config.theme, "gruvbox", "the new config should apply");
     }
 }

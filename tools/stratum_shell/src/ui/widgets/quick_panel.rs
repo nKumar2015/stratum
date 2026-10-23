@@ -46,9 +46,9 @@ impl QuickPanel {
             ui::paint_frame(
                 list,
                 panel,
-                ctx.theme.bg_widget,
+                ctx.appearance.frame_border(),
                 ctx.theme.border_active,
-                ctx.appearance.framed_border,
+                ctx.theme.bg_widget,
             );
         }
 
@@ -86,9 +86,9 @@ impl QuickPanel {
             ui::paint_frame(
                 list,
                 rect,
-                ctx.theme.bg_widget,
+                ctx.appearance.frame_border(),
                 ctx.theme.border_active,
-                ctx.appearance.framed_border,
+                ctx.theme.bg_widget,
             );
         }
 

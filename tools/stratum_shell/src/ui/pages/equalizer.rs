@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use crate::actions::SystemAction;
 use crate::render::display_list::{Color, DisplayList, Paint, Path, PathCommand, Point, Rect};
 use crate::ui::pages::layout::{self, rect, Card};
-use crate::ui::text_field::{self, FieldKey, FieldStyle, TextField};
+use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, controls, InputState, PaintCtx};
 
 /// The ten bands Reset returns to, and the frequencies legacy presets use.
@@ -761,7 +761,7 @@ impl EqualizerPage {
                 radius: m.radius,
                 ..rect(body.x, y, cancel_x - page.grid_gap - body.x, page.badge)
             };
-            text_field::paint_frame(list, name_rect, m.border, theme.primary, theme.surface);
+            ui::paint_frame(list, name_rect, m.border, theme.primary, theme.surface);
             if let Some(field) = &self.naming {
                 let style = FieldStyle { text: m.text, padding: page.card_padding, caret_width: m.border * 1.5, masked: false, placeholder: Some("Preset name") };
                 field.paint(ctx, list, name_rect, style, false);
@@ -859,7 +859,7 @@ impl EqualizerPage {
         }
         let editing = self.editing.as_ref().filter(|e| e.which == which);
         let border = if editing.is_some() || pointer_on_box { ctx.theme.primary } else { ctx.theme.outline };
-        text_field::paint_frame(list, value_box, m.border, border, ctx.theme.surface);
+        ui::paint_frame(list, value_box, m.border, border, ctx.theme.surface);
         match editing {
             Some(editing) => {
                 editing.field.paint(ctx, list, value_box, FieldStyle { text: m.caption, padding: m.gap, caret_width: m.border * 1.5, masked: false, placeholder: None }, false);

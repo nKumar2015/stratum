@@ -124,7 +124,7 @@ impl PowerPage {
         // `action_height`, or more when the badge and the two lines need it:
         // a fixed height let the name run into the badge.
         let typo = &ctx.metrics.typography;
-        let content = m.badge + m.badge_gap + typo.body * 1.4 + typo.caption * 1.4;
+        let content = m.badge + m.badge_gap + typo.line(typo.body) + typo.line(typo.caption);
         let tile_h = m.action_height.max(content + m.card_padding * 2.0);
         let mut y = body.y;
         let mut hit_tile = false;
@@ -186,8 +186,8 @@ impl PowerPage {
         layout::badge(ctx, list, cell.x + pad, cell.y + pad, option.glyph, accent, badge_bg);
 
         let text_w = cell.width - pad * 2.0;
-        let line = typo.body * 1.4;
-        let caption = typo.caption * 1.4;
+        let line = typo.line(typo.body);
+        let caption = typo.line(typo.caption);
         let label_y = cell.y + cell.height - pad - line - caption;
         let label = ui::elide(ctx, option.name, typo.body, typo.weight_bold, text_w);
         ui::paint_text_vcentered(

@@ -66,10 +66,19 @@ pub struct Typography {
     pub caption: f32,
     /// Small labels above values.
     pub label: f32,
+    /// A line of text is this many times its font size tall.
+    pub line_height: f32,
     /// Weights, kept beside sizes so text styling is adjusted together.
     pub weight_regular: u16,
     pub weight_medium: u16,
     pub weight_bold: u16,
+}
+
+impl Typography {
+    /// The height of one line of text at `size`.
+    pub fn line(&self, size: f32) -> f32 {
+        size * self.line_height
+    }
 }
 
 /// Sizing shared by the sidebar and any container inside it.
@@ -163,6 +172,8 @@ pub struct OsdMetrics {
     pub padding: f32,
     /// Corner radius.
     pub radius: f32,
+    /// The panel's opacity when fully shown.
+    pub panel_alpha: f32,
     /// Height of the value track.
     pub track_height: f32,
     /// Height of the icon, title and value row, and the gap below it.
@@ -368,6 +379,8 @@ pub struct DashboardMetrics {
     pub gap: f32,
     pub inner: f32,
     pub radius: f32,
+    /// A small chip's corners (the music panel's player switch).
+    pub chip_radius: f32,
     pub border: f32,
     /// The card, padding included; the same on every tab, so switching tabs
     /// does not resize it.
@@ -423,6 +436,7 @@ impl DashboardMetrics {
             gap,
             inner,
             radius,
+            chip_radius,
             border,
             width,
             panel_height,
@@ -458,6 +472,7 @@ impl DashboardMetrics {
             gap: gap * s,
             inner: inner * s,
             radius: radius * s,
+            chip_radius: chip_radius * s,
             border: border * s,
             width: width * s,
             panel_height: panel_height * s,
@@ -769,8 +784,9 @@ pub struct WindowMetrics {
     /// Minimum window size.
     pub min_width: u32,
     pub min_height: u32,
-    /// Navigation rail width.
+    /// Navigation rail width, and the divider between it and the page.
     pub nav_width: f32,
+    pub nav_divider: f32,
     /// Height of the rail's header.
     pub nav_header: f32,
     /// Height of one navigation row.

@@ -13,7 +13,7 @@
 use crate::notifications::Notification;
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::style::NotificationCardMetrics;
-use crate::ui::text_field::{self, FieldStyle, TextField};
+use crate::ui::text_field::{FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
 /// What the card offers in place of a reply field.
@@ -212,9 +212,9 @@ pub fn paint(
     ui::paint_frame(
         list,
         Rect { x: card.x - card.radius, width: card.width + card.radius, ..card },
-        theme.surface_high.with_alpha(0.98 * a),
+        ctx.appearance.frame_border(),
         if state.hovered { theme.border_active } else { theme.outline }.with_alpha(a),
-        ctx.appearance.framed_border,
+        theme.surface_high.with_alpha(0.98 * a),
     );
     list.pop_clip();
     // Urgency stripe.
@@ -281,7 +281,7 @@ pub fn paint(
 
     for (rect, _, label) in &layout.actions {
         // Outlined: a plain widget fill is nearly the card's own colour.
-        text_field::paint_frame(
+        ui::paint_frame(
             list,
             *rect,
             m.reply_border,
@@ -293,7 +293,7 @@ pub fn paint(
 
     if let (Some(field), Some(send)) = (layout.reply, layout.send) {
         let focused = state.reply.is_some();
-        text_field::paint_frame(
+        ui::paint_frame(
             list,
             field,
             m.reply_border,
@@ -347,7 +347,7 @@ fn paint_visual(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, n: &Notification
     let theme = ctx.theme;
     match picture {
         Some((width, height, pixels)) => {
-            text_field::paint_frame(
+            ui::paint_frame(
                 list,
                 rect,
                 m.reply_border,

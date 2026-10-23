@@ -288,7 +288,7 @@ fn status_card_height(ctx: &PaintCtx<'_>) -> f32 {
     let m = &ctx.metrics.page;
     let typo = &ctx.metrics.typography;
     let pad = m.card_padding;
-    let content = m.badge + m.badge_gap + m.value * 1.3 + typo.caption * 1.4 + m.meter + pad * 0.75;
+    let content = m.badge + m.badge_gap + m.value * 1.3 + typo.line(typo.caption) + m.meter + pad * 0.75;
     m.stat_card_height.max(content + pad * 2.0)
 }
 
@@ -325,7 +325,7 @@ fn paint_status_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect,
     );
 
     let meter_space = if card.meter.is_some() { m.meter + pad * 0.75 } else { 0.0 };
-    let detail_h = typo.caption * 1.4;
+    let detail_h = typo.line(typo.caption);
     let value_h = m.value * 1.3;
     let detail_y = cell.y + cell.height - pad - meter_space - detail_h;
     let value_y = detail_y - value_h;

@@ -447,8 +447,8 @@ pub fn two_lines(
     caption_color: Color,
 ) {
     let typo = ctx.metrics.typography.clone();
-    let line = typo.body * 1.4;
-    let caption_h = typo.caption * 1.4;
+    let line = typo.line(typo.body);
+    let caption_h = typo.line(typo.caption);
     let top = area.y + (area.height - line - caption_h) * 0.5;
     let title = ui::elide(ctx, title, typo.body, typo.weight_bold, area.width);
     ui::paint_text_vcentered(
@@ -481,7 +481,7 @@ pub fn info_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect, lab
     card(ctx, list, cell, Card::Plain);
     let pad = m.card_padding;
     let width = cell.width - pad * 2.0;
-    let label_h = typo.label * 1.4;
+    let label_h = typo.line(typo.label);
     let value_h = typo.body * 1.5;
     let top = cell.y + (cell.height - label_h - value_h) * 0.5;
     let label = ui::elide(ctx, label, typo.label, typo.weight_regular, width);

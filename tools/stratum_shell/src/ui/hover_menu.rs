@@ -22,7 +22,6 @@ use crate::actions::SystemAction;
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::control_center::Page;
 use crate::ui::pages::Optimistic;
-use crate::ui::text_field;
 use crate::ui::{self, controls, InputState, PaintCtx};
 
 /// Which hover menu.
@@ -215,7 +214,7 @@ impl HoverMenus {
             color: Color::TRANSPARENT,
         };
         let mut background = DisplayList::default();
-        text_field::paint_frame(&mut background, card, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
+        ui::paint_frame(&mut background, card, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
         list.commands.splice(frame_at..frame_at, background.commands);
         (height, frame.events)
     }
@@ -341,7 +340,7 @@ impl HoverMenus {
                 ..row
             };
             let selected = active == *key;
-            text_field::paint_frame(
+            ui::paint_frame(
                 list,
                 rect,
                 m.border,

@@ -130,9 +130,9 @@ impl TrayMenuOverlay {
         ui::paint_frame(
             list,
             surface,
-            ctx.theme.bg_main,
+            ctx.appearance.border_width,
             ctx.theme.border_active,
-            true,
+            ctx.theme.bg_main,
         );
 
         let mut hits = Vec::new();

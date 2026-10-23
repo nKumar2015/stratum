@@ -571,7 +571,7 @@ impl ScreenshotViewer {
             } else {
                 (m.swatch_border, theme.border_inactive)
             };
-            crate::ui::text_field::paint_frame(list, rect, border, border_color, *color);
+            ui::paint_frame(list, rect, border, border_color, *color);
             layout.swatches.push(rect);
             x += m.swatch + m.gap;
         }

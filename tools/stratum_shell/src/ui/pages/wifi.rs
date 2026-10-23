@@ -428,7 +428,7 @@ impl WifiPage {
         let (left, hit) = layout::text_buttons(ctx, list, line.x + line.width, y, &["Connect"], !busy, input, clicked);
         let field = rect(line.x, y, left - page.grid_gap - line.x, page.badge);
         let border = if self.typing { theme.primary } else { theme.outline };
-        crate::ui::text_field::paint_frame(list, Rect { radius: m.radius, ..field }, m.border, border, theme.surface);
+        crate::ui::paint_frame(list, Rect { radius: m.radius, ..field }, m.border, border, theme.surface);
         let style = FieldStyle {
             text: m.field_text,
             padding: m.field_padding,

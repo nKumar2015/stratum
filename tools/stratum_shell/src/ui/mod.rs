@@ -237,21 +237,17 @@ pub fn paint_inverted_corner(
     ));
 }
 
-/// Draw a framed container used behind groups of widgets.
-pub fn paint_frame(
-    list: &mut DisplayList,
-    rect: Rect,
-    fill: Color,
-    border: Color,
-    draw_border: bool,
-) {
-    list.push_rect(Rect {
-        radius: rect.radius,
-        color: fill,
-        ..rect
-    });
-    if draw_border {
-        stroke_rounded(list, rect, border, 1.0);
+/// Dim everything under an overlay: black at `alpha` over `surface`.
+pub fn paint_scrim(list: &mut DisplayList, surface: Rect, alpha: f32) {
+    list.push_rect(Rect { color: Color::rgba(0.0, 0.0, 0.0, alpha), ..surface });
+}
+
+/// Fill `rect` and outline it `border_width` thick inside its edge (no
+/// outline at zero).
+pub fn paint_frame(list: &mut DisplayList, rect: Rect, border_width: f32, border: Color, fill: Color) {
+    list.push_rect(Rect { color: fill, ..rect });
+    if border_width > 0.0 {
+        stroke_rounded(list, rect, border, border_width);
     }
 }
 
@@ -263,8 +259,7 @@ pub fn stroke_rounded(list: &mut DisplayList, rect: Rect, color: Color, width: f
     list.push_outline(Rect { color, ..rect }, width);
 }
 
-/// Center a line of text horizontally inside `rect`.
-#[allow(clippy::too_many_arguments)]
+/// Center a line of regular-weight text inside `rect`.
 pub fn paint_text_centered(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,
@@ -273,22 +268,8 @@ pub fn paint_text_centered(
     size: f32,
     color: Color,
 ) {
-    let style = TextStyle {
-        family: std::sync::Arc::from(ctx.theme.font.as_str()),
-        size,
-        weight: 400,
-        color,
-    };
-    let width = ctx.text.measure(value, &style).0;
-    let (ascent, line_height) = ctx.text.metrics(&style);
-
-    // Centre the line box vertically, then place the baseline inside it. This
-    // is exact rather than a fixed fudge, which is what made mixed-size labels
-    // look misaligned.
-    let box_top = rect.y + (rect.height - line_height) * 0.5;
-    let baseline = box_top + ascent;
-    let x = rect.x + (rect.width - width) * 0.5;
-    ctx.text_text(list, value, x, baseline, style);
+    let weight = ctx.metrics.typography.weight_regular;
+    paint_text_centered_weighted(ctx, list, value, rect, size, weight, color);
 }
 
 /// A standalone icon glyph centred in `rect` by its ink, in
@@ -377,7 +358,6 @@ pub fn paint_text_vcentered(
 }
 
 /// Like [`paint_text_centered`] but with an explicit weight.
-#[allow(clippy::too_many_arguments)]
 pub fn paint_text_centered_weighted(
     ctx: &mut PaintCtx<'_>,
     list: &mut DisplayList,

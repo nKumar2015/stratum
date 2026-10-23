@@ -131,7 +131,7 @@ fn paint_theme_card(
 
     let pad = m.card_padding;
     let inner_w = cell.width - pad * 2.0;
-    let line = typo.body * 1.4;
+    let line = typo.line(typo.body);
     let check_w = if selected { typo.body + pad * 0.5 } else { 0.0 };
     let label = ui::elide(ctx, name, typo.body, typo.weight_bold, inner_w - check_w);
     let label_row = layout::rect(cell.x, cell.y + pad, cell.width, line);
@@ -177,7 +177,7 @@ fn paint_theme_card(
             ..layout::rect(x, swatch_y, m.swatch, m.swatch)
         };
         // Outlined, or a background swatch vanishes into its own card.
-        ui::paint_frame(list, swatch, color, theme.border_inactive, true);
+        ui::paint_frame(list, swatch, ctx.appearance.border_width, theme.border_inactive, color);
         x += m.swatch + m.swatch_gap;
     }
 }
@@ -188,7 +188,7 @@ fn paint_theme_card(
 fn paint_preview(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, card: Rect, name: &str, theme: &Theme) {
     let page = ctx.metrics.page.clone();
     let type_ = ctx.metrics.typography.clone();
-    crate::ui::paint_frame(list, card, theme.bg_main, theme.border_active, true);
+    crate::ui::paint_frame(list, card, ctx.appearance.border_width, theme.border_active, theme.bg_main);
     let inner = Rect {
         x: card.x + page.card_padding,
         y: card.y + page.card_padding,

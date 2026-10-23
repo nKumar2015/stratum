@@ -429,11 +429,10 @@ pub enum WidgetKind {
 pub struct AppearanceConfig {
     /// Corner radius used by framed widgets and menus.
     pub corner_radius: f32,
-    /// Duration of hover and open/close animations, in milliseconds. Zero
-    /// disables animation.
-    pub animation_ms: u32,
-    /// Draw a 1px border around framed widgets.
+    /// Draw a border around framed widgets.
     pub framed_border: bool,
+    /// That border's width in logical pixels.
+    pub border_width: f32,
     /// Font for the sidebar's standalone icons (the launcher logo and the
     /// audio/Bluetooth/Wi-Fi glyphs). QML set no family on these, so
     /// fontconfig fell back to a proportional Nerd Font, whose icons are
@@ -441,12 +440,21 @@ pub struct AppearanceConfig {
     pub icon_font: String,
 }
 
+impl AppearanceConfig {
+    /// The width of a framed widget's border: none when borders are off.
+    pub fn frame_border(&self) -> f32 {
+        if self.framed_border {
+            self.border_width
+        } else {
+            0.0
+        }
+    }
+}
+
 /// The paged settings surface.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControlCenterConfig {
-    /// Panel width in logical pixels.
-    pub width: u32,
     /// Slide/fade duration in milliseconds. Zero opens instantly.
     pub animation_ms: u32,
     /// Reverse the wheel: turning it down scrolls the page up.

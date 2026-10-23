@@ -52,7 +52,6 @@ use stratum_sys::managers::calendar::Occurrence;
 use crate::config::{DashboardConfig, PanelKind, WeekStart};
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::pages::devices::Marquee;
-use crate::ui::text_field;
 use crate::ui::{self, PaintCtx};
 
 /// What the shell has to do after input.
@@ -585,7 +584,7 @@ impl Dashboard {
             radius: m.radius,
             color: Color::TRANSPARENT,
         };
-        text_field::paint_frame(list, card, m.border, ctx.theme.border_active, ctx.theme.bg_main);
+        ui::paint_frame(list, card, m.border, ctx.theme.border_active, ctx.theme.bg_main);
         self.buttons.clear();
 
         let mut y = card.y + m.padding;
@@ -606,7 +605,7 @@ impl Dashboard {
         for (spec, row) in tab.rows.iter().zip(split_down(body, &row_weights, m.gap)) {
             let weights: Vec<f32> = spec.panels.iter().map(|p| p.weight).collect();
             for (panel_spec, panel) in spec.panels.iter().zip(split(row, &weights, m.gap)) {
-                text_field::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
+                ui::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
                 match panel_spec.kind {
                     PanelKind::Glance => self.paint_glance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Weather => self.paint_weather(ctx, list, panel),
@@ -644,7 +643,7 @@ impl Dashboard {
             let pill = Rect { x, width, radius: m.radius * 0.6, ..bar };
             let shown = i == self.tab;
             if shown {
-                text_field::paint_frame(list, pill, m.border, ctx.theme.border_active, ctx.theme.bg_widget);
+                ui::paint_frame(list, pill, m.border, ctx.theme.border_active, ctx.theme.bg_widget);
             }
             let color = if shown { ctx.theme.text_main } else { ctx.theme.text_muted };
             ui::paint_text_vcentered(ctx, list, &label, pill.x + m.inner, pill, m.text, weight, color);
@@ -765,7 +764,7 @@ impl Dashboard {
             };
             let in_month = date.month() == self.month;
             let selected = *date == self.selected;
-            text_field::paint_frame(
+            ui::paint_frame(
                 list,
                 cell,
                 m.border,
@@ -814,7 +813,7 @@ impl Dashboard {
         let x = panel.x + m.inner;
         let w = panel.width - m.inner * 2.0;
         let art = Rect { x: x + (w - m.art) * 0.5, y, width: m.art, height: m.art, radius: m.radius, color: Color::TRANSPARENT };
-        text_field::paint_frame(list, art, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
+        ui::paint_frame(list, art, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
         let url = music["art_url"].as_str().unwrap_or_default();
         let image = url
             .strip_prefix("file://")
@@ -897,8 +896,8 @@ impl Dashboard {
             let weight = ctx.metrics.typography.weight_medium;
             let style = crate::text::TextStyle { family: std::sync::Arc::from(ctx.theme.font.as_str()), size: m.caption, weight, color: ctx.theme.text_muted };
             let lw = ctx.text.measure(&label, &style).0;
-            let chip = Rect { x: x + w - lw - m.inner, y: panel.y + m.inner, width: lw + m.inner, height: m.line * 1.2, radius: m.radius * 0.6, color: Color::TRANSPARENT };
-            text_field::paint_frame(list, chip, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
+            let chip = Rect { x: x + w - lw - m.inner, y: panel.y + m.inner, width: lw + m.inner, height: m.line * 1.2, radius: m.chip_radius, color: Color::TRANSPARENT };
+            ui::paint_frame(list, chip, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
             ui::paint_text_centered(ctx, list, &label, chip, m.caption, ctx.theme.text_muted);
             self.buttons.push((chip, Button::NextPlayer));
         }
@@ -912,7 +911,7 @@ impl Dashboard {
         for (i, (label, button, lit)) in buttons.iter().enumerate() {
             let rect = Rect { x: row.x + i as f32 * (bw + m.cell_gap), width: bw, radius: m.radius * 0.6, ..row };
             let border = if *lit { ctx.theme.border_active } else { ctx.theme.border_inactive };
-            text_field::paint_frame(list, rect, m.border, border, ctx.theme.bg_main);
+            ui::paint_frame(list, rect, m.border, border, ctx.theme.bg_main);
             let color = if *lit { ctx.theme.primary } else { ctx.theme.text_main };
             ui::paint_text_centered(ctx, list, label, rect, m.text, color);
             self.buttons.push((rect, *button));
