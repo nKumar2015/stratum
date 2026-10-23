@@ -406,6 +406,11 @@ pub struct DashboardMetrics {
     pub button: f32,
     /// Album art.
     pub art: f32,
+    /// The timer's face, a to-do's checkbox, and the caret in the Focus
+    /// tab's fields.
+    pub timer_face: f32,
+    pub check: f32,
+    pub caret: f32,
     /// Dimming behind the card (QML `#90000000`).
     pub scrim_alpha: f32,
 }
@@ -444,6 +449,9 @@ impl DashboardMetrics {
             cell_gap,
             button,
             art,
+            timer_face,
+            check,
+            caret,
             scrim_alpha,
         } = self.clone();
         Self {
@@ -476,6 +484,9 @@ impl DashboardMetrics {
             cell_gap: cell_gap * s,
             button: button * s,
             art: art * s,
+            timer_face: timer_face * s,
+            check: check * s,
+            caret: caret * s,
             scrim_alpha,
         }
     }

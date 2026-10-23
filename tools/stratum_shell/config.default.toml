@@ -106,11 +106,21 @@ week_start = "sunday"   # or "monday"
 week_numbers = true
 agenda_days = 14        # how far ahead the agenda looks
 
+# The Focus tab's timer; `stratum-cli timer start 25m|pomodoro|stopwatch`.
+# It keeps running while the dashboard is closed and notifies at the end.
+[dashboard.timer]
+presets_min = [5, 15, 25]   # countdown buttons, 1-6 of them
+work_min = 25               # Pomodoro
+break_min = 5
+long_break_min = 15
+rounds = 4                  # work rounds before the long break
+
 # Tabs, in order; it always opens on the first. A tab is rows of panels:
 # rows share its height by weight, a row's panels its width. Panel kinds:
 # glance (time, date, next event, batteries, do-not-disturb), weather, agenda,
 # performance (load bars), graphs (history, temperatures, network), calendar
-# (month grid; a click picks the agenda's day), music.
+# (month grid; a click picks the agenda's day), music, todo, note, timer
+# (to-dos and the note are kept in $XDG_STATE_HOME/stratum/focus.json).
 [[dashboard.tabs]]
 name = "Today"
 icon = "\U000F056E"
@@ -135,6 +145,15 @@ rows = [{ weight = 1.0, panels = [
 name = "System"
 icon = "\U000F04C5"
 rows = [{ weight = 1.0, panels = [{ kind = "graphs", weight = 1.0 }] }]
+
+[[dashboard.tabs]]
+name = "Focus"
+icon = "\U000F05DD"
+rows = [{ weight = 1.0, panels = [
+    { kind = "todo", weight = 1.0 },
+    { kind = "note", weight = 1.15 },
+    { kind = "timer", weight = 0.9 },
+] }]
 
 [sidebar]
 position = "left"       # "left" or "right"
@@ -459,6 +478,9 @@ cell = 32.0             # calendar day
 cell_gap = 4.0
 button = 28.0
 art = 110.0             # album art
+timer_face = 48.0       # the Focus tab's timer
+check = 14.0            # a to-do's checkbox
+caret = 1.5             # in the Focus tab's fields
 scrim_alpha = 0.56
 
 [metrics.screenshot]    # the capture overlay

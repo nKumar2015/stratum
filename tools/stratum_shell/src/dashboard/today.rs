@@ -2,7 +2,8 @@
 //!
 //! - Glance: the time and date, uptime, then on the right CPU and RAM, the
 //!   battery (with time left), each connected Bluetooth device that reports
-//!   its charge, and do-not-disturb, which a click toggles.
+//!   its charge, the Focus tab's timer while set, and do-not-disturb, which
+//!   a click toggles.
 //! - Weather: the place, current conditions, the next hours and the next
 //!   days, from [`super::weather`]. A forecast older than `refresh_min`, or
 //!   a failed fetch, says so at the bottom.
@@ -88,7 +89,7 @@ fn degrees(value: f32) -> String {
     format!("{}\u{b0}", value.round())
 }
 
-fn measure(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16) -> f32 {
+pub(super) fn measure(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16) -> f32 {
     let style = crate::text::TextStyle {
         family: std::sync::Arc::from(ctx.theme.font.as_str()),
         size,
@@ -146,6 +147,11 @@ impl Dashboard {
         }
         for (glyph, name, percent) in device_batteries(&ctx.state.bluetooth.get()) {
             chips.push((glyph, format!("{name} {percent}%"), ctx.theme.primary));
+        }
+        // The Focus tab's timer, last so it sits by the bell and goes last.
+        if let Some((glyph, text)) = super::focus::glance_chip(&self.focus.timer, std::time::Instant::now()) {
+            let color = if self.focus.timer.running() { ctx.theme.warning } else { ctx.theme.text_muted };
+            chips.push((glyph, text, color));
         }
         let mut right = row.x + row.width;
         let (bell, bell_color) = if dnd { ("\u{f009b}", ctx.theme.warning) } else { ("\u{f009a}", ctx.theme.text_muted) };

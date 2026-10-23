@@ -15,6 +15,9 @@
 //!   ← → while a tab with a calendar is shown.
 //! - Now playing: art, title, artist, album, position and length, and
 //!   previous / play-pause / next.
+//! - Focus: to-dos, a note and a timer ([`focus`]). A focused field takes
+//!   the keys, so 1–9 type there, and Escape leaves the field before it
+//!   closes the dashboard.
 //!
 //! Resource data comes from the sampler in [`feed`]; now playing is
 //! `SystemState::music`, which the sampler refreshes while the dashboard is
@@ -25,7 +28,10 @@
 mod agenda;
 pub mod calendar;
 pub mod feed;
+mod focus;
+mod note;
 mod system;
+pub mod timer;
 mod today;
 pub mod weather;
 
@@ -250,6 +256,8 @@ pub struct Dashboard {
     /// from. Expanding a long-running series walks every instance, so it is
     /// done once per range rather than on every paint.
     occurrences: (u64, std::collections::HashMap<(NaiveDate, NaiveDate), Vec<Occurrence>>),
+    /// The Focus tab's to-dos, note and timer, which outlive closing.
+    focus: focus::Focus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +277,22 @@ enum Button {
     Loop,
     /// The player chip, which steps to the next player.
     NextPlayer,
+    /// The Focus tab: a to-do's checkbox and text, its delete button, the
+    /// to-do input, clearing the done ones, and the note.
+    TodoToggle(usize),
+    TodoDelete(usize),
+    TodoInput,
+    ClearDone,
+    NoteArea,
+    /// The timer: a countdown of these minutes, the other modes, and the
+    /// controls of a set timer.
+    TimerPreset(u64),
+    Stopwatch,
+    Pomodoro,
+    TimerToggle,
+    TimerReset,
+    TimerAdd,
+    TimerStop,
 }
 
 impl Dashboard {
@@ -282,6 +306,7 @@ impl Dashboard {
             selected: today,
             player: None,
             occurrences: (0, std::collections::HashMap::new()),
+            focus: focus::Focus::default(),
             card: None,
             buttons: Vec::new(),
             error: None,
@@ -344,6 +369,7 @@ impl Dashboard {
         self.tab_hits.clear();
         self.tab = 0;
         self.title = Marquee::ticker();
+        self.focus.field = None;
         let today = today();
         (self.year, self.month, self.selected) = (today.year(), today.month(), today);
     }
@@ -378,6 +404,7 @@ impl Dashboard {
         }
         self.tab = tab;
         self.buttons.clear();
+        self.focus.field = None;
         DashboardAction::Redraw
     }
 
@@ -385,12 +412,26 @@ impl Dashboard {
         self.config.tabs.get(self.tab).is_some_and(|t| t.rows.iter().flat_map(|r| &r.panels).any(|p| p.kind == kind))
     }
 
-    pub fn key(&mut self, keysym: smithay_client_toolkit::seat::keyboard::Keysym, modifiers: Modifiers) -> DashboardAction {
+    /// A key; `text` is what it types, for a focused Focus-tab field.
+    pub fn key(
+        &mut self,
+        keysym: smithay_client_toolkit::seat::keyboard::Keysym,
+        text: Option<&str>,
+        modifiers: Modifiers,
+    ) -> DashboardAction {
         use smithay_client_toolkit::seat::keyboard::Keysym;
         if !self.open {
             return DashboardAction::None;
         }
         let count = self.config.tabs.len();
+        // A focused field types everything but Ctrl+Tab, which still
+        // switches tabs (and so leaves the field).
+        let tab_switch = modifiers.ctrl && matches!(keysym, Keysym::Tab | Keysym::ISO_Left_Tab);
+        if !tab_switch {
+            if let Some(action) = self.focus_key(keysym, text, modifiers.ctrl) {
+                return action;
+            }
+        }
         match keysym {
             Keysym::Escape => {
                 self.close();
@@ -434,7 +475,17 @@ impl Dashboard {
         if let Some(tab) = self.tab_hits.iter().find(|(r, _)| r.contains(point)).map(|(_, t)| *t) {
             return self.select_tab(tab);
         }
-        if let Some((rect, button)) = self.buttons.iter().find(|(r, _)| r.contains(point)).copied() {
+        // Later buttons are drawn over earlier ones (a to-do's delete over
+        // its row), so the last hit wins.
+        let hit = self.buttons.iter().rev().find(|(r, _)| r.contains(point)).copied();
+        // Anything but a field takes the focus away from the field.
+        if !matches!(hit, Some((_, Button::TodoInput | Button::NoteArea))) {
+            self.focus.field = None;
+        }
+        if let Some(action) = hit.and_then(|(_, button)| self.focus_click(button)) {
+            return action;
+        }
+        if let Some((rect, button)) = hit {
             let player = music["player"].as_str().unwrap_or("None").to_string();
             let media = matches!(
                 button,
@@ -535,9 +586,13 @@ impl Dashboard {
                     PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
                     PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
                     PanelKind::Music => self.paint_music(ctx, list, panel, music),
+                    PanelKind::Todo => self.paint_todo(ctx, list, panel),
+                    PanelKind::Note => self.paint_note(ctx, list, panel),
+                    PanelKind::Timer => self.paint_timer(ctx, list, panel),
                 }
             }
         }
+        self.painted_timer(std::time::Instant::now());
         self.card = Some(card);
     }
 
@@ -859,14 +914,14 @@ mod tests {
         d.toggle("HDMI-A-1", Some(calendar));
         assert_eq!(d.target(), Some("HDMI-A-1"));
         let now = (d.year, d.month);
-        assert_eq!(d.key(Keysym::Right, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::Right, None, Modifiers::default()), DashboardAction::Redraw);
         assert_eq!((d.year, d.month), shift(now.0, now.1, 1));
         assert_eq!(d.navigate(Button::Month(-3)), DashboardAction::Redraw);
         d.navigate(Button::Today);
         assert_eq!((d.year, d.month), now);
-        d.key(Keysym::Left, Modifiers::default());
+        d.key(Keysym::Left, None, Modifiers::default());
         // Closing returns to this month for next time.
-        assert_eq!(d.key(Keysym::Escape, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::Escape, None, Modifiers::default()), DashboardAction::Redraw);
         assert!(!d.is_open());
         assert_eq!((d.year, d.month), now);
     }
@@ -908,19 +963,19 @@ mod tests {
         let mut d = dashboard();
         let count = d.config.tabs.len();
         d.open_on("a", None);
-        assert_eq!(d.key(Keysym::_2, Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!(d.key(Keysym::_2, Some("2"), Modifiers::default()), DashboardAction::Redraw);
         assert_eq!(d.tab, 1);
-        assert_eq!(d.key(Keysym::_9, Modifiers::default()), DashboardAction::None, "no ninth tab");
+        assert_eq!(d.key(Keysym::_9, Some("9"), Modifiers::default()), DashboardAction::None, "no ninth tab");
         let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
         let ctrl_shift = Modifiers { shift: true, ..ctrl };
-        d.key(Keysym::Tab, ctrl);
+        d.key(Keysym::Tab, None, ctrl);
         assert_eq!(d.tab, 2 % count);
-        d.key(Keysym::_1, Modifiers::default());
-        d.key(Keysym::ISO_Left_Tab, ctrl_shift);
+        d.key(Keysym::_1, Some("1"), Modifiers::default());
+        d.key(Keysym::ISO_Left_Tab, None, ctrl_shift);
         assert_eq!(d.tab, count - 1, "back from the first wraps to the last");
-        d.key(Keysym::Tab, ctrl_shift);
+        d.key(Keysym::Tab, None, ctrl_shift);
         assert_eq!(d.tab, count - 2, "Shift+Tab may arrive as Tab with Shift held");
-        assert_eq!(d.key(Keysym::Tab, Modifiers::default()), DashboardAction::None, "Tab alone is not a tab switch");
+        assert_eq!(d.key(Keysym::Tab, None, Modifiers::default()), DashboardAction::None, "Tab alone is not a tab switch");
     }
 
     #[test]
@@ -929,8 +984,35 @@ mod tests {
         let system = d.config.tab_index("system").unwrap();
         d.open_on("a", Some(system));
         let now = (d.year, d.month);
-        assert_eq!(d.key(Keysym::Right, Modifiers::default()), DashboardAction::None);
+        assert_eq!(d.key(Keysym::Right, None, Modifiers::default()), DashboardAction::None);
         assert_eq!((d.year, d.month), now);
+    }
+
+    #[test]
+    fn a_focused_field_types_digits_and_escape_leaves_it_first() {
+        let mut d = dashboard();
+        let focus = d.config.tab_index("focus").expect("a Focus tab ships");
+        d.open_on("a", Some(focus));
+        let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
+        d.buttons = vec![(rect, Button::NoteArea)];
+        d.on_click(Point::new(5.0, 5.0), &Value::Null);
+        assert_eq!(d.key(Keysym::_1, Some("1"), Modifiers::default()), DashboardAction::Redraw);
+        assert_eq!((d.tab, d.focus.note.text()), (focus, "1"), "typed, not a tab switch");
+        d.key(Keysym::Escape, None, Modifiers::default());
+        assert!(d.is_open(), "the first Escape leaves the field");
+        d.key(Keysym::Escape, None, Modifiers::default());
+        assert!(!d.is_open());
+    }
+
+    #[test]
+    fn ctrl_tab_leaves_a_focused_field() {
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let rect = Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT };
+        d.buttons = vec![(rect, Button::TodoInput)];
+        d.on_click(Point::new(5.0, 5.0), &Value::Null);
+        d.key(Keysym::Tab, None, Modifiers { ctrl: true, ..Modifiers::default() });
+        assert_eq!((d.tab, d.focus.field), (1, None));
     }
 
     #[test]

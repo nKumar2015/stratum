@@ -47,6 +47,9 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         // Native only: the QML shell had no settings window to open.
         "settings" => Some(&["open", "close", "toggle"]),
         "theme" => Some(&["open", "close", "toggle", "set"]),
+        // Native only: the dashboard's Focus tab.
+        "todo" => Some(&["add"]),
+        "timer" => Some(&["start", "pause", "toggle", "stop"]),
         _ => None,
     }
 }
@@ -73,6 +76,8 @@ pub fn is_supported(target: &str, function: &str) -> bool {
         // The capture overlay and the viewer it opens.
         ("screenshot", "start") => true,
         ("settings", _) => true,
+        ("todo", "add") => true,
+        ("timer", _) => true,
         _ => false,
     }
 }
@@ -210,6 +215,17 @@ pub fn parse_request(line: &str) -> Result<IpcCall, IpcError> {
                 "dashboard {function} expects at most 1 argument, got {}",
                 args.len()
             )));
+        }
+    } else if target == "todo" {
+        // The words of an unquoted `todo add buy milk`, joined by the shell.
+        if args.iter().all(|a| a.trim().is_empty()) {
+            return Err(IpcError::BadArgs("todo add expects the to-do's text".into()));
+        }
+    } else if target == "timer" && function == "start" {
+        // A length, `pomodoro` or `stopwatch`; none resumes. The shell
+        // parses the length.
+        if args.len() > 1 {
+            return Err(IpcError::BadArgs(format!("timer start expects at most 1 argument, got {}", args.len())));
         }
     } else {
         let required = usize::from(function == "set");
@@ -484,6 +500,21 @@ mod tests {
         assert_eq!(call("open", json!(["system"])).unwrap().args, ["system"]);
         assert_eq!(call("open", json!(["a", "b"])).unwrap_err().code(), "bad_args");
         assert_eq!(call("close", json!(["system"])).unwrap_err().code(), "bad_args");
+    }
+
+    #[test]
+    fn todo_and_timer_arguments() {
+        let call = |target: &str, function: &str, args: Value| {
+            parse(json!({ "target": target, "function": function, "args": args }))
+        };
+        assert_eq!(call("todo", "add", json!(["buy", "milk"])).unwrap().args, ["buy", "milk"]);
+        assert_eq!(call("todo", "add", json!([])).unwrap_err().code(), "bad_args");
+        assert_eq!(call("todo", "add", json!([" "])).unwrap_err().code(), "bad_args");
+        assert!(call("timer", "start", json!(["25m"])).is_ok());
+        assert!(call("timer", "start", json!([])).is_ok(), "resumes");
+        assert_eq!(call("timer", "start", json!(["1", "2"])).unwrap_err().code(), "bad_args");
+        assert_eq!(call("timer", "stop", json!(["x"])).unwrap_err().code(), "bad_args");
+        assert!(is_supported("timer", "toggle") && is_supported("todo", "add"));
     }
 
     #[test]

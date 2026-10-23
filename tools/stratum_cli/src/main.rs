@@ -8,7 +8,7 @@ use serde_json::json;
 use commands::{audio, battery, bluetooth, dashboard, net, notifications_snapshot, osd, portal_save_file, screenshot_menu, screenshot_post, theme, wifi};
 use common::{emit_help, emit_json, fail, is_help_flag};
 
-const ROOT_COMMANDS: [&str; 17] = [
+const ROOT_COMMANDS: [&str; 19] = [
     "audio",
     "battery",
     "bluetooth",
@@ -25,6 +25,8 @@ const ROOT_COMMANDS: [&str; 17] = [
     "screenshot-post",
     "settings",
     "theme",
+    "timer",
+    "todo",
     "wifi",
 ];
 
@@ -75,6 +77,8 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
         "screenshot" => Some(&["start"]),
         "settings" => Some(&["open [page]", "close", "toggle [page]"]),
         "theme" => Some(&["open", "close", "toggle", "set"]),
+        "todo" => Some(&["add <text>"]),
+        "timer" => Some(&["start [25m|90s|1h30m|pomodoro|stopwatch]", "pause", "toggle", "stop"]),
         _ => None,
     }
 }

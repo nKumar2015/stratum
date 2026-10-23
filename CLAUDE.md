@@ -117,8 +117,17 @@ message), fetches with `curl` only while open, and keeps copies in
 over the system zoneinfo; series repeat in their own zone's wall time. Test
 with fixture feeds as `file://` addresses, never the user's calendar. The sampler also refreshes
 `SystemState::music` while open. The calendar grid is computed locally. Media
-controls run `playerctl` on the action worker. The overhaul has phases still
-to come (graphs, weather, calendar sync, to-dos); the plan is in memory.
+controls run `playerctl` on the action worker. The Focus tab
+(`dashboard/focus.rs`, `note.rs`, `timer.rs`) keeps to-dos and a note in
+`$XDG_STATE_HOME/stratum/focus.json`, loaded at start rather than in
+`Dashboard::new` so tests never touch the real file. Its timer lives in
+memory and runs while the dashboard is closed: the loop's timeout follows
+`Dashboard::timer_wake`, and its end is posted over D-Bus
+(`SystemAction::Notify`) so DND and the toasts treat it like any other
+notification. `stratum-cli todo add …` and `timer start|pause|toggle|stop`
+drive it. Keys go to a focused field first; Ctrl+Tab still switches tabs.
+There is no key repeat anywhere in the shell, the note included. Phase 7
+(polish) is still to come; the plan is in memory.
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`, not to Quickshell's

@@ -427,8 +427,11 @@ impl App {
             return std::time::Duration::from_millis(50);
         }
         // The clock changes once a minute; a one-second wakeup is enough to
-        // catch it without spinning.
-        std::time::Duration::from_secs(1)
+        // catch it without spinning. A running timer wakes when its face
+        // changes, or (unseen) when it ends.
+        let idle = std::time::Duration::from_secs(1);
+        let timer = self.dashboard.timer_wake(std::time::Instant::now());
+        timer.map_or(idle, |wait| wait.min(idle))
     }
 
     /// Redraw every dirty surface. Called after each loop iteration.
@@ -904,7 +907,12 @@ impl App {
         feed.configure(crate::dashboard::feed::Settings::from_config(&self.config.dashboard));
         feed.set_open(self.dashboard.is_open());
         feed.set_player(self.dashboard.player());
-        if self.dashboard.is_open() && (state_changed || self.dashboard.animating()) {
+        let now = std::time::Instant::now();
+        if let Some(ended) = self.dashboard.tick_timer(now) {
+            let (summary, body) = ended.message();
+            self.actions.push(crate::actions::SystemAction::Notify { summary, body });
+        }
+        if self.dashboard.is_open() && (state_changed || self.dashboard.animating() || self.dashboard.timer_changed(now)) {
             self.mark_dashboard_dirty();
         }
         let dash_target = self.dashboard.target().map(str::to_string);
@@ -1983,6 +1991,20 @@ impl App {
                 }
                 self.mark_dashboard_dirty();
             }
+            ("todo", "add") => {
+                // The parser guarantees at least one argument; the words of
+                // an unquoted `todo add buy milk` arrive one each.
+                if !self.dashboard.add_todo(&call.args.join(" ")) {
+                    return Err(IpcError::BadArgs("a to-do needs some text".into()));
+                }
+                self.mark_dashboard_dirty();
+            }
+            ("timer", function) => {
+                self.dashboard
+                    .timer_command(function, call.args.first().map(String::as_str))
+                    .map_err(IpcError::BadArgs)?;
+                self.mark_dashboard_dirty();
+            }
             ("settings", function @ ("open" | "close" | "toggle")) => {
                 use crate::ui::control_center::Page;
                 // The parser has already rejected unknown page names. Without
@@ -2249,6 +2271,7 @@ impl App {
         let publisher = SystemState::publisher(&self.state);
         self.actions.start_worker(Arc::clone(&self.state));
         self.state.dashboard_feed.spawn(Arc::clone(&self.state));
+        self.dashboard.load_focus();
 
         // The managers' async entry points expect a Tokio runtime. The shell's
         // UI thread runs calloop, so give them a small dedicated runtime.
@@ -3882,7 +3905,7 @@ impl KeyboardHandler for App {
         }
 
         if self.dashboard.is_open() {
-            let action = self.dashboard.key(event.keysym, self.modifiers);
+            let action = self.dashboard.key(event.keysym, event.utf8.as_deref(), self.modifiers);
             self.apply_dashboard_action(action);
             return;
         }

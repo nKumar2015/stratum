@@ -131,6 +131,11 @@ impl Config {
         if calendar.refresh_min == 0 || !(1..=60).contains(&calendar.agenda_days) {
             return Err("dashboard.calendar: refresh_min must be positive and agenda_days 1-60".into());
         }
+        let timer = &dashboard.timer;
+        let minutes = timer.presets_min.iter().chain([&timer.work_min, &timer.break_min, &timer.long_break_min]);
+        if !(1..=6).contains(&timer.presets_min.len()) || timer.rounds == 0 || minutes.clone().any(|m| !(1..=24 * 60).contains(m)) {
+            return Err("dashboard.timer: 1-6 presets, rounds positive, and every length 1-1440 minutes".into());
+        }
         Ok(())
     }
 
@@ -515,6 +520,7 @@ pub struct DashboardConfig {
     pub tabs: Vec<DashboardTab>,
     pub weather: WeatherConfig,
     pub calendar: CalendarConfig,
+    pub timer: TimerConfig,
 }
 
 /// Calendar sync from ICS feeds. Fetched only while the dashboard is open,
@@ -610,6 +616,38 @@ pub enum PanelKind {
     Graphs,
     Calendar,
     Music,
+    /// To-dos, kept in `$XDG_STATE_HOME/stratum/focus.json`.
+    Todo,
+    /// A free-form note, kept with the to-dos.
+    Note,
+    /// Countdown, stopwatch and Pomodoro.
+    Timer,
+}
+
+/// The Focus tab's timer.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TimerConfig {
+    /// Countdown buttons, in minutes.
+    pub presets_min: Vec<u64>,
+    /// Pomodoro: work, short and long breaks, and work rounds before a long
+    /// break.
+    pub work_min: u64,
+    pub break_min: u64,
+    pub long_break_min: u64,
+    pub rounds: u32,
+}
+
+impl TimerConfig {
+    pub fn pomodoro(&self) -> crate::dashboard::timer::Pomodoro {
+        let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
+        crate::dashboard::timer::Pomodoro {
+            work: minutes(self.work_min),
+            short_break: minutes(self.break_min),
+            long_break: minutes(self.long_break_min),
+            rounds: self.rounds,
+        }
+    }
 }
 
 /// Which GPU the shell renders on. Read once at start; a reload does not move
