@@ -1,8 +1,8 @@
 # stratum-shell
 
-The native Stratum desktop shell — the Rust replacement for the Quickshell/QML
-implementation. It owns the Wayland connection, renders with wgpu on Vulkan, and
-embeds the system managers directly (no daemon socket between UI and state).
+The Stratum desktop shell. It owns the Wayland connection, renders with wgpu on
+Vulkan, and embeds the system managers directly (no daemon socket between UI and
+state). It replaced a Quickshell/QML shell on 2026-10-22.
 
 ## Status
 
@@ -12,9 +12,9 @@ Every surface of the QML shell is ported, and the native shell replaced it on
 ## IPC
 
 External tools talk to the shell over a Unix socket at
-`$XDG_RUNTIME_DIR/stratum-shell.sock` (override with `$STRATUM_SOCKET`). It
-mirrors the QML `IpcHandler` contract, so `stratum-cli` and existing keybinds
-work unchanged:
+`$XDG_RUNTIME_DIR/stratum-shell.sock` (override with `$STRATUM_SOCKET`). Its
+targets and function names are the QML shell's, so keybinds written for it
+kept working:
 
 ```sh
 stratum-cli notifications toggle
@@ -99,7 +99,9 @@ Notes:
 - `render/` — display list, wgpu renderer, glyph atlas, tessellation.
 - `text.rs` / `icons.rs` — shaping with Nerd Font fallback, icon-theme lookup.
 - `wayland/` — SCTK plumbing, layer surfaces, per-output scaling.
-- `glyph_probe.rs` — offscreen render test for the text pipeline.
+  `wayland/state.rs` holds `App`; `wayland/state/` splits its behaviour by
+  concern (rendering, input, outputs, lock, screenshots, overlays, IPC).
+- `paths.rs` — where state files go, and how they are written.
 
 ## Build
 
