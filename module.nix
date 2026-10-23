@@ -68,17 +68,13 @@ in {
         brightnessctl # brightness, and the OSD's fallback reading
         curl # the dashboard's weather and calendar sync
         grim # screenshots
-        libnotify # notify-send, for screenshot failures
         networkmanager # nmcli
         pciutils # lspci, the dashboard's GPU name
-        pipewire # pw-link, pw-cli
+        pipewire # pw-link, and pw-cli for the EQ when the native path is unavailable
         playerctl # media controls
-        pulseaudio # pactl
         upower # battery details
-        wireplumber # wpctl
         wl-clipboard # copying screenshots
-      ])
-      ++ lib.optional cfg.installPortal pkgs.xdg-desktop-portal-gtk;
+      ]);
 
     xdg.configFile."stratum/config.toml".source =
       toml.generate "stratum-config.toml" (lib.recursiveUpdate defaults cfg.settings);

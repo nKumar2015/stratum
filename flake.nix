@@ -24,6 +24,28 @@
         f (import nixpkgs {
           inherit system overlays;
         }));
+
+    version = (nixpkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
+
+    # What the shell builds and links against. It embeds stratum_sys, whose
+    # PipeWire bindings run bindgen, so the PipeWire/SPA headers and libclang
+    # must be present too.
+    shellNativeInputs = pkgs: with pkgs; [pkg-config clang];
+    shellInputs = pkgs:
+      with pkgs; [
+        wayland
+        wayland-protocols
+        libxkbcommon
+        vulkan-loader
+        pipewire
+        libpulseaudio
+        pam
+      ];
+    # wgpu and xkbcommon dlopen these at runtime, which linking alone does not
+    # put on the search path; without them the shell exits with "no suitable
+    # Vulkan adapter".
+    dlopenLibs = pkgs: pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon]);
+    libclang = pkgs: "${pkgs.llvmPackages.libclang.lib}/lib";
   in {
     packages = forAllSystems (pkgs: let
       # Single source tree for the Cargo workspace: crates depend on each other
@@ -42,49 +64,30 @@
     in {
       stratum-cli = pkgs.rustPlatform.buildRustPackage {
         pname = "stratum-cli";
-        version = "0.1.0";
+        inherit version;
 
         src = workspaceSrc;
         buildAndTestSubdir = "tools/stratum_cli";
         cargoLock.lockFile = ./Cargo.lock;
-
-        nativeBuildInputs = with pkgs; [pkg-config];
-        buildInputs = with pkgs; [dbus openssl];
       };
 
       stratum-shell = pkgs.rustPlatform.buildRustPackage {
         pname = "stratum-shell";
-        version = "0.1.0";
+        inherit version;
 
         src = workspaceSrc;
         buildAndTestSubdir = "tools/stratum_shell";
         cargoLock.lockFile = ./Cargo.lock;
 
-        nativeBuildInputs = with pkgs; [pkg-config clang];
-        # Wayland client headers + the Vulkan loader are needed at link time.
-        # The shell embeds stratum_sys, whose PipeWire bindings run bindgen, so
-        # the PipeWire/SPA headers and libclang must be present too.
-        buildInputs = with pkgs; [
-          wayland wayland-protocols
-          libxkbcommon
-          vulkan-loader
-          libGL
-          dbus
-          pipewire
-          libpulseaudio
-          pam
-        ];
+        nativeBuildInputs = shellNativeInputs pkgs;
+        buildInputs = shellInputs pkgs;
 
-        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        LIBCLANG_PATH = libclang pkgs;
 
-        # wgpu and xkbcommon dlopen the Vulkan loader, libwayland and
-        # libxkbcommon, which linking alone does not put on the runpath; the
-        # shell then exits with "no suitable Vulkan adapter". A runpath, not a
-        # wrapper script: a wrapper renames the process, and
+        # A runpath, not a wrapper script: a wrapper renames the process, and
         # `pkill -x stratum-shell` stops matching it.
         postFixup = ''
-          patchelf --add-rpath ${pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon])} \
-            $out/bin/stratum-shell
+          patchelf --add-rpath ${dlopenLibs pkgs} $out/bin/stratum-shell
         '';
 
         # Every default the shell has; the binary finds it at
@@ -117,39 +120,24 @@
 
     devShells = forAllSystems (pkgs: {
       default = pkgs.mkShell {
-        packages = with pkgs; [
-          (rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
-            ];
-          })
-          pkg-config
-          dbus
-          glib
-          openssl
-          pam
-          clang
-          libpulseaudio
-          pipewire
+        packages =
+          [
+            (pkgs.rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-src"
+                "rust-analyzer"
+              ];
+            })
+            # dbus-launch, for private buses in live tests.
+            pkgs.dbus
+          ]
+          ++ shellNativeInputs pkgs
+          ++ shellInputs pkgs;
 
-          # Native shell: Wayland protocol headers, keyboard handling, and the
-          # Vulkan loader that wgpu presents through.
-          wayland
-          wayland-protocols
-          libxkbcommon
-          vulkan-loader
-          libGL
-          udev
-        ];
-
-        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-        # wgpu and xkbcommon are loaded with dlopen at runtime, so being on the
-        # link line is not enough; without this the shell exits with "no
-        # suitable Vulkan adapter". Prepended so the user's own path survives.
+        LIBCLANG_PATH = libclang pkgs;
+        # Prepended so the user's own path survives.
         shellHook = ''
-          export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [vulkan-loader wayland libxkbcommon])}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          echo "Rust dev shell ready (cargo/rustc/clippy/rustfmt + dbus tooling)."
+          export LD_LIBRARY_PATH="${dlopenLibs pkgs}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         '';
       };
     });
