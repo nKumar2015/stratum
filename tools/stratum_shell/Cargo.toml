@@ -44,6 +44,8 @@ stratum_sys = { path = "../stratum_sys" }
 # worker thread instead of blocking the Wayland loop.
 tokio = { workspace = true }
 zbus = { workspace = true }
+# `StreamExt` for zbus signal streams; already built for zbus.
+futures-lite = { version = "2", default-features = false }
 serde_json = { workspace = true }
 toml = "1.1"
 # FFI types for the PAM binding (malloc'd conversation replies, getpwuid_r).

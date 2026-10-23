@@ -2036,6 +2036,7 @@ dependencies = [
  "chrono",
  "cosmic-text",
  "fontdb",
+ "futures-lite",
  "image",
  "libc",
  "lyon",

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
 /// A tray item as reported by its D-Bus properties.
@@ -193,37 +193,41 @@ struct Watcher {
 impl Watcher {
     /// Applications call this when they want to be shown. `service` is either a
     /// bus name or a bus name plus object path.
-    fn register_status_notifier_item(&self, service: String) {
+    async fn register_status_notifier_item(
+        &self,
+        service: String,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>,
+    ) {
+        // libappindicator and Electron register an object path alone; the item
+        // is then at that path on the caller's own connection.
+        let service = match (service.starts_with('/'), header.sender()) {
+            (true, Some(sender)) => format!("{sender}{service}"),
+            _ => service,
+        };
         info!("tray item registered: {service}");
         let (bus, path) = split_service(&service);
-        let mut items = self
-            .inner
-            .items
-            .lock()
-            .map(|items| items.clone())
-            .unwrap_or_default();
-
-        if !items.iter().any(|item| item.service == bus) {
-            // Properties are filled in asynchronously by the shell's poller;
-            // register the identity now so the item appears immediately.
-            items.push(TrayItem {
-                service: bus.clone(),
-                path,
-                id: bus.clone(),
-                title: bus,
-                status: "Active".into(),
-                ..Default::default()
-            });
+        let added = match self.inner.items.lock() {
+            Ok(mut items) if !items.iter().any(|item| item.service == bus) => {
+                // Properties are filled in asynchronously by the shell's
+                // poller; register the identity now so the item appears
+                // immediately.
+                items.push(TrayItem {
+                    service: bus.clone(),
+                    path,
+                    id: bus.clone(),
+                    title: bus,
+                    status: "Active".into(),
+                    ..Default::default()
+                });
+                true
+            }
+            _ => false,
+        };
+        if added {
+            self.inner.publish();
+            let _ = Self::status_notifier_item_registered(&emitter, service).await;
         }
-        drop(items);
-        // Re-read through the published path so the sink sees the update.
-        let current = self
-            .inner
-            .items
-            .lock()
-            .map(|items| items.clone())
-            .unwrap_or_default();
-        self.inner.set_items(current);
     }
 
     fn register_status_notifier_host(&self, service: String) {
@@ -425,7 +429,9 @@ pub async fn serve(tray: Arc<Tray>) -> zbus::Result<()> {
 
     // Populate immediately rather than leaving the tray empty for the first
     // poll interval.
-    if !owns_watcher {
+    if owns_watcher {
+        tokio::spawn(forget_vanished_items(Arc::clone(&tray), connection.clone()));
+    } else {
         adopt_foreign_items(&tray, &connection).await;
         refresh_items(&tray, &connection).await;
     }
@@ -447,6 +453,55 @@ pub async fn serve(tray: Arc<Tray>) -> zbus::Result<()> {
 
     std::future::pending::<()>().await;
     Ok(())
+}
+
+/// Drop the items of every application that leaves the bus, as the watcher's
+/// owner must. Without this a closed app's icon stays in the tray.
+async fn forget_vanished_items(tray: Arc<Tray>, connection: Connection) {
+    use futures_lite::StreamExt;
+
+    let changes = match zbus::fdo::DBusProxy::new(&connection).await {
+        Ok(dbus) => dbus.receive_name_owner_changed().await,
+        Err(err) => Err(err),
+    };
+    let mut changes = match changes {
+        Ok(changes) => changes,
+        Err(err) => {
+            warn!("tray: cannot follow bus names, closed apps will keep their icons: {err}");
+            return;
+        }
+    };
+    while let Some(change) = changes.next().await {
+        let Ok(args) = change.args() else { continue };
+        if args.new_owner().is_some() {
+            continue;
+        }
+        let name = args.name().as_str();
+        let removed: Vec<TrayItem> = match tray.items.lock() {
+            Ok(mut items) => {
+                let (gone, kept) = items.drain(..).partition(|item| item.service == name);
+                *items = kept;
+                gone
+            }
+            Err(_) => continue,
+        };
+        if removed.is_empty() {
+            continue;
+        }
+        info!("tray item gone: {name}");
+        tray.publish();
+        if let Ok(watcher) = connection
+            .object_server()
+            .interface::<_, Watcher>("/StatusNotifierWatcher")
+            .await
+        {
+            for item in removed {
+                let service = format!("{}{}", item.service, item.path);
+                let _ = Watcher::status_notifier_item_unregistered(watcher.signal_emitter(), service)
+                    .await;
+            }
+        }
+    }
 }
 
 /// Mirror the item list published by another host's watcher.
@@ -943,5 +998,71 @@ mod tests {
             "menus must be asked to populate before the layout is read"
         );
         drop(server);
+    }
+
+    /// Wait up to two seconds for `done` to hold.
+    fn eventually(done: impl Fn() -> bool) -> bool {
+        for _ in 0..40 {
+            if done() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        done()
+    }
+
+    #[test]
+    fn registered_items_stay_until_their_app_leaves() {
+        let tray = Tray::new(Arc::new(|_| {}));
+        // A name of its own, so the test never takes the session's watcher.
+        let name = format!("org.stratum.TestWatcher{}", std::process::id());
+
+        let Some(watcher) = pollster::block_on(async {
+            let connection = zbus::Connection::session().await.ok()?;
+            connection
+                .object_server()
+                .at("/StatusNotifierWatcher", Watcher { inner: Arc::clone(&tray) })
+                .await
+                .ok()?;
+            connection.request_name(name.as_str()).await.ok()?;
+            Some(connection)
+        }) else {
+            eprintln!("skipping: no session bus");
+            return;
+        };
+        let forget_tray = Arc::clone(&tray);
+        let forget_connection = watcher.clone();
+        std::thread::spawn(move || {
+            pollster::block_on(forget_vanished_items(forget_tray, forget_connection))
+        });
+
+        // Registered by path alone, as libappindicator does: the item is on
+        // the caller's own connection. Registering twice keeps one item.
+        let app = pollster::block_on(async {
+            let app = zbus::Connection::session().await.unwrap();
+            for _ in 0..2 {
+                app.call_method(
+                    Some(name.as_str()),
+                    "/StatusNotifierWatcher",
+                    Some("org.kde.StatusNotifierWatcher"),
+                    "RegisterStatusNotifierItem",
+                    &("/org/ayatana/NotificationItem/test",),
+                )
+                .await
+                .unwrap();
+            }
+            app
+        });
+        let sender = app.unique_name().unwrap().to_string();
+        let items = tray.snapshot();
+        assert_eq!(items.len(), 1, "one registration was kept: {items:?}");
+        assert_eq!(items[0].service, sender);
+        assert_eq!(items[0].path, "/org/ayatana/NotificationItem/test");
+
+        pollster::block_on(app.close()).unwrap();
+        assert!(
+            eventually(|| tray.snapshot().is_empty()),
+            "an app that left the bus keeps its icon"
+        );
     }
 }
