@@ -121,6 +121,11 @@ impl PowerPage {
         let (_, body) = layout::header(ctx, list, area, "Power", &summary);
 
         let cols = layout::columns(body.width, m.action_min_width, m.grid_gap, 3);
+        // `action_height`, or more when the badge and the two lines need it:
+        // a fixed height let the name run into the badge.
+        let typo = &ctx.metrics.typography;
+        let content = m.badge + m.badge_gap + typo.body * 1.4 + typo.caption * 1.4;
+        let tile_h = m.action_height.max(content + m.card_padding * 2.0);
         let mut y = body.y;
         let mut hit_tile = false;
         for (section, (label, names)) in SECTIONS.iter().enumerate() {
@@ -129,7 +134,7 @@ impl PowerPage {
             }
             y = layout::section(ctx, list, body, y, label);
             let options: Vec<_> = names.iter().filter_map(|name| option(name)).collect();
-            let cells = layout::cells(body.x, y, body.width, options.len(), cols, m.action_height, m.grid_gap);
+            let cells = layout::cells(body.x, y, body.width, options.len(), cols, tile_h, m.grid_gap);
             for (option, cell) in options.iter().zip(&cells) {
                 let armed = self.armed.name == Some(option.name);
                 if self.tile(ctx, list, *cell, option, armed, input) && clicked {
@@ -141,7 +146,7 @@ impl PowerPage {
                     }
                 }
             }
-            y += layout::grid_height(options.len(), cols, m.action_height, m.grid_gap);
+            y += layout::grid_height(options.len(), cols, tile_h, m.grid_gap);
         }
         // A click anywhere else on the page backs out.
         if clicked && !hit_tile {

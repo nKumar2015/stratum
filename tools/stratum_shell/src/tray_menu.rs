@@ -62,24 +62,36 @@ impl TrayMenuOverlay {
 
     /// Surface size in logical pixels, given the menu contents.
     ///
-    /// Returns `None` when nothing should be shown.
-    pub fn size(&self, menu: Option<&TrayMenu>) -> Option<(f32, f32)> {
+    /// Returns `None` when nothing should be shown. `measure` gives a label's
+    /// width at `metrics.text`: the panel fits the widest, between `width`
+    /// and `max_width`.
+    pub fn size(&self, menu: Option<&TrayMenu>, mut measure: impl FnMut(&str) -> f32) -> Option<(f32, f32)> {
+        let m = &self.metrics;
         let menu = menu?;
-        let visible = menu
+        let visible: Vec<_> = menu
             .entries
             .iter()
             .filter(|entry| entry.visible)
-            .count()
-            .min(self.metrics.max_rows);
-        if visible == 0 {
+            .take(m.max_rows)
+            .collect();
+        if visible.is_empty() {
             return None;
         }
-        let height = self.metrics.padding * 2.0 + visible as f32 * self.metrics.row_height;
-        Some((self.metrics.width, height))
+        let widest = visible
+            .iter()
+            .filter(|entry| !entry.separator)
+            .map(|entry| {
+                let chevron = if entry.has_children { m.chevron_width } else { 0.0 };
+                entry.depth as f32 * m.indent + measure(&entry.label) + chevron
+            })
+            .fold(0.0, f32::max);
+        let width = (widest + (m.padding + m.label_inset) * 2.0).clamp(m.width, m.max_width.max(m.width));
+        let height = m.padding * 2.0 + visible.len() as f32 * m.row_height;
+        Some((width.ceil(), height))
     }
 
-    /// Map a click inside the menu surface to an entry id.
-    pub fn on_click(&self, point: crate::render::display_list::Point, menu: &TrayMenu) -> Option<i32> {
+    /// Map a click at `point` on a menu surface `width` wide to an entry id.
+    pub fn on_click(&self, point: crate::render::display_list::Point, menu: &TrayMenu, width: f32) -> Option<i32> {
         let visible: Vec<_> = menu
             .entries
             .iter()
@@ -92,7 +104,7 @@ impl TrayMenuOverlay {
             let row = Rect {
                 x: self.metrics.padding,
                 y,
-                width: self.metrics.width - self.metrics.padding * 2.0,
+                width: width - self.metrics.padding * 2.0,
                 height: self.metrics.row_height,
                 radius: 0.0,
                 color: Color::TRANSPARENT,
@@ -169,16 +181,12 @@ impl TrayMenuOverlay {
             } else {
                 ctx.theme.text_muted
             };
-            ui::paint_text_vcentered(
-                ctx,
-                list,
-                &entry.label,
-                row.x + 8.0 + entry.depth as f32 * m.indent,
-                row,
-                m.text,
-                ctx.metrics.typography.weight_regular,
-                color,
-            );
+            let label_x = row.x + m.label_inset + entry.depth as f32 * m.indent;
+            let chevron = if entry.has_children { m.chevron_width } else { 0.0 };
+            let room = row.x + row.width - m.label_inset - chevron - label_x;
+            let weight = ctx.metrics.typography.weight_regular;
+            let label = ui::elide(ctx, &entry.label, m.text, weight, room);
+            ui::paint_text_vcentered(ctx, list, &label, label_x, row, m.text, weight, color);
 
             // A submenu marker, since nested menus are shown inline rather than
             // as a flyout.
@@ -187,7 +195,7 @@ impl TrayMenuOverlay {
                     ctx,
                     list,
                     "\u{f054}",
-                    row.x + row.width - 18.0,
+                    row.x + row.width - m.chevron_width,
                     row,
                     ctx.metrics.typography.caption,
                     ctx.metrics.typography.weight_regular,
@@ -240,9 +248,29 @@ mod tests {
         let overlay = TrayMenuOverlay::new();
         let m = &overlay.metrics;
         let menu = menu(vec![entry(1, "One"), entry(2, "Two")]);
-        let (width, height) = overlay.size(Some(&menu)).unwrap();
-        assert_eq!(width, m.width);
+        let (width, height) = overlay.size(Some(&menu), |_| 20.0).unwrap();
+        assert_eq!(width, m.width, "short labels keep the narrowest width");
         assert_eq!(height, m.padding * 2.0 + 2.0 * m.row_height);
+    }
+
+    #[test]
+    fn width_fits_the_widest_label_up_to_the_maximum() {
+        let overlay = TrayMenuOverlay::new();
+        let m = &overlay.metrics;
+        let mut nested = entry(2, "Nested");
+        nested.depth = 1;
+        let short = menu(vec![entry(1, "One"), nested]);
+        // 10 px per character: "Nested" is 60 wide, indented one level.
+        let measure = |label: &str| label.len() as f32 * 10.0;
+        let (width, _) = overlay.size(Some(&short), measure).unwrap();
+        assert_eq!(width, m.width, "60 px of label still fits the narrowest panel");
+
+        let long = menu(vec![entry(1, &"x".repeat(25))]);
+        let (width, _) = overlay.size(Some(&long), measure).unwrap();
+        assert_eq!(width, 250.0 + (m.padding + m.label_inset) * 2.0);
+
+        let huge = menu(vec![entry(1, &"x".repeat(200))]);
+        assert_eq!(overlay.size(Some(&huge), measure).unwrap().0, m.max_width);
     }
 
     #[test]
@@ -251,7 +279,7 @@ mod tests {
         let mut hidden = entry(2, "Hidden");
         hidden.visible = false;
         let menu = menu(vec![entry(1, "One"), hidden, entry(3, "Three")]);
-        let (_, height) = overlay.size(Some(&menu)).unwrap();
+        let (_, height) = overlay.size(Some(&menu), |_| 0.0).unwrap();
         assert_eq!(
             height,
             overlay.metrics.padding * 2.0 + 2.0 * overlay.metrics.row_height
@@ -260,7 +288,7 @@ mod tests {
         // The second visible row is id 3, not the hidden id 2.
         let y = overlay.metrics.padding + overlay.metrics.row_height * 1.5;
         let id = overlay
-            .on_click(Point::new(10.0, y), &menu)
+            .on_click(Point::new(10.0, y), &menu, overlay.metrics.width)
             .expect("row two is clickable");
         assert_eq!(id, 3);
     }
@@ -276,10 +304,11 @@ mod tests {
 
         let row = overlay.metrics.row_height;
         let pad = overlay.metrics.padding;
-        assert_eq!(overlay.on_click(Point::new(10.0, pad + row * 1.5), &menu), None);
-        assert_eq!(overlay.on_click(Point::new(10.0, pad + row * 2.5), &menu), None);
+        let width = overlay.metrics.width;
+        assert_eq!(overlay.on_click(Point::new(10.0, pad + row * 1.5), &menu, width), None);
+        assert_eq!(overlay.on_click(Point::new(10.0, pad + row * 2.5), &menu, width), None);
         assert_eq!(
-            overlay.on_click(Point::new(10.0, pad + row * 0.5), &menu),
+            overlay.on_click(Point::new(10.0, pad + row * 0.5), &menu, width),
             Some(1)
         );
     }
@@ -287,8 +316,8 @@ mod tests {
     #[test]
     fn empty_menu_has_no_size() {
         let overlay = TrayMenuOverlay::new();
-        assert_eq!(overlay.size(None), None);
-        assert_eq!(overlay.size(Some(&menu(Vec::new()))), None);
+        assert_eq!(overlay.size(None, |_| 0.0), None);
+        assert_eq!(overlay.size(Some(&menu(Vec::new())), |_| 0.0), None);
     }
 
     #[test]

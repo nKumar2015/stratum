@@ -262,14 +262,15 @@ impl OverviewPage {
 
         let cols = layout::columns(body.width, m.card_min_width, m.grid_gap, cards.len());
         let cols = layout::even_columns(cols, cards.len());
-        let cells = layout::cells(body.x, y, body.width, cards.len(), cols, m.stat_card_height, m.grid_gap);
+        let card_h = status_card_height(ctx);
+        let cells = layout::cells(body.x, y, body.width, cards.len(), cols, card_h, m.grid_gap);
         let mut navigate = None;
         for (card, cell) in cards.iter().zip(&cells) {
             if paint_status_card(ctx, list, *cell, card, input) && clicked {
                 navigate = Some(card.page);
             }
         }
-        let bottom = y + layout::grid_height(cards.len(), cols, m.stat_card_height, m.grid_gap);
+        let bottom = y + layout::grid_height(cards.len(), cols, card_h, m.grid_gap);
         (bottom, navigate)
     }
 }
@@ -278,6 +279,17 @@ impl Default for OverviewPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A status card's height: `stat_card_height`, or more when the badge, the
+/// value, the detail and the meter need it. A fixed height let the value run
+/// into the badge.
+fn status_card_height(ctx: &PaintCtx<'_>) -> f32 {
+    let m = &ctx.metrics.page;
+    let typo = &ctx.metrics.typography;
+    let pad = m.card_padding;
+    let content = m.badge + m.badge_gap + m.value * 1.3 + typo.caption * 1.4 + m.meter + pad * 0.75;
+    m.stat_card_height.max(content + pad * 2.0)
 }
 
 /// Draw a status card. Returns whether the pointer is over it.

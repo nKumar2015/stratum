@@ -199,7 +199,10 @@ slide_distance = 24.0
 reveal_seconds = 0.18
 
 [metrics.tray_menu]
-width = 200.0           # context menu panel
+width = 200.0           # context menu panel: narrowest; it grows to fit
+max_width = 400.0       # its widest label up to here, then cuts labels
+label_inset = 8.0       # before a label, and kept after the widest
+chevron_width = 18.0    # the submenu marker
 row_height = 28.0
 padding = 6.0
 radius = 6.0
@@ -503,6 +506,8 @@ card_min_width = 200.0  # column is dropped (so tiled and floating differ)
 stat_card_height = 112.0  # Overview status cards
 badge = 34.0            # the round badge behind a card's glyph
 badge_icon = 16.0
+badge_gap = 8.0         # below a badge that sits above text; status cards
+                        # and Power tiles grow past their height to keep it
 value = 20.0            # a status card's large value
 meter = 6.0             # the bar along a status card's bottom
 tile_min_width = 150.0  # Overview quick toggles

@@ -12,10 +12,13 @@
 //!   selects a region instead, captured on release.
 //! - A crosshair follows the pointer, and the selection's size is shown
 //!   beside it (the geometry readout).
-//! - Capturing hides the overlay, waits `capture_delay_ms` for the compositor
-//!   to present the screen without it, and runs `grim`. The image then opens
-//!   in the screenshot viewer. A failed capture reports it as a notification
-//!   and goes back to picking, as QML did.
+//! - Capturing cuts the pick out of the frozen frame, so the image is what
+//!   the user saw while picking: running `grim` again caught whatever had
+//!   moved since. Only without a frame does it hide the overlay, wait
+//!   `capture_delay_ms` for the compositor to present the screen without it,
+//!   and run `grim`. The image then opens in the screenshot viewer. A failed
+//!   capture reports it as a notification and goes back to picking, as QML
+//!   did.
 //! - Escape closes it.
 //!
 //! The frozen frames come from `grim -t ppm` on stdout, decoded straight into
@@ -262,6 +265,21 @@ impl Screenshot {
         Some(capture)
     }
 
+    /// `capture` cut out of the frame frozen on `output`, whose top-left is
+    /// `origin` and logical size `size` in global layout coordinates.
+    /// Premultiplied RGBA. `None` without a frame, or when none of the
+    /// capture is on it.
+    pub fn crop_frozen(
+        &self,
+        output: &str,
+        origin: (i32, i32),
+        size: (i32, i32),
+        capture: &Capture,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        let frame = self.frames.get(output)?;
+        crop(frame.width, frame.height, &frame.pixels, origin, size, capture)
+    }
+
     /// A capture failed: pick again, over the same frozen frames.
     pub fn capture_failed(&mut self) {
         if self.phase == Phase::Capturing {
@@ -436,6 +454,52 @@ pub fn decode_ppm(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     Some((width, height, rgba))
 }
 
+/// Cut `capture` out of a `width`×`height` RGBA frame of an output at
+/// `origin` with logical size `size`. The rect is clamped to the frame, so a
+/// window that overhangs the output keeps only its part on it.
+fn crop(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    origin: (i32, i32),
+    size: (i32, i32),
+    capture: &Capture,
+) -> Option<(u32, u32, Vec<u8>)> {
+    if size.0 <= 0 || size.1 <= 0 || pixels.len() < (width * height * 4) as usize {
+        return None;
+    }
+    let (x, y, w, h) = match capture {
+        Capture::Geometry { x, y, width, height, .. } => (x - origin.0, y - origin.1, *width, *height),
+        Capture::Output { .. } => (0, 0, size.0, size.1),
+    };
+    // Frame pixels per logical pixel: 1.6 on an output scaled by 1.6.
+    let (sx, sy) = (width as f32 / size.0 as f32, height as f32 / size.1 as f32);
+    let edge = |v: i32, scale: f32, limit: u32| ((v as f32 * scale).round().max(0.0) as u32).min(limit);
+    let (left, right) = (edge(x, sx, width), edge(x + w, sx, width));
+    let (top, bottom) = (edge(y, sy, height), edge(y + h, sy, height));
+    if right <= left || bottom <= top {
+        return None;
+    }
+    let row_bytes = ((right - left) * 4) as usize;
+    let mut out = Vec::with_capacity(row_bytes * (bottom - top) as usize);
+    for row in top..bottom {
+        let start = ((row * width + left) * 4) as usize;
+        out.extend_from_slice(&pixels[start..start + row_bytes]);
+    }
+    Some((right - left, bottom - top, out))
+}
+
+/// Write an opaque RGBA image to a new temporary PNG and return its path.
+/// The viewer owns the file from then on.
+pub fn save_png(width: u32, height: u32, pixels: &[u8]) -> Result<String, String> {
+    let path = temp_path().ok_or("failed to allocate output file")?;
+    image::save_buffer(&path, pixels, width, height, image::ExtendedColorType::Rgba8).map_err(|err| {
+        let _ = std::fs::remove_file(&path);
+        format!("failed to write the capture: {err}")
+    })?;
+    Ok(path)
+}
+
 /// Run `capture` with `grim` into a new temporary PNG and return its path.
 /// The viewer owns the file from then on.
 pub fn capture(capture: &Capture) -> Result<String, String> {
@@ -506,6 +570,44 @@ mod tests {
         assert!(shot.open_on("A"));
         shot.frozen("A", 2, 2, vec![0; 16]);
         shot
+    }
+
+    /// A frame whose every pixel holds its own coordinates: `[x, y, 0, 255]`.
+    fn coordinate_frame(width: u32, height: u32) -> Vec<u8> {
+        (0..height)
+            .flat_map(|y| (0..width).flat_map(move |x| [x as u8, y as u8, 0, 255]))
+            .collect()
+    }
+
+    fn region(x: i32, y: i32, width: i32, height: i32) -> Capture {
+        Capture::Geometry { x, y, width, height, mode: Mode::Region }
+    }
+
+    #[test]
+    fn a_region_is_cut_from_the_frozen_frame_at_the_output_scale() {
+        // 10x5 logical at scale 1.6 is a 16x8 frame, left of the origin as
+        // HDMI-A-1 is.
+        let frame = coordinate_frame(16, 8);
+        let (w, h, pixels) = crop(16, 8, &frame, (-10, 0), (10, 5), &region(-5, 0, 5, 5)).unwrap();
+        assert_eq!((w, h), (8, 8));
+        assert_eq!(&pixels[..4], &[8, 0, 0, 255], "starts 5 logical px in");
+        assert_eq!(&pixels[pixels.len() - 4..], &[15, 7, 0, 255]);
+    }
+
+    #[test]
+    fn a_crop_keeps_only_what_is_on_the_output() {
+        let frame = coordinate_frame(4, 4);
+        let (w, h, pixels) = crop(4, 4, &frame, (0, 0), (4, 4), &region(-2, 2, 4, 9)).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(&pixels[..4], &[0, 2, 0, 255]);
+        assert_eq!(crop(4, 4, &frame, (0, 0), (4, 4), &region(5, 0, 2, 2)), None);
+    }
+
+    #[test]
+    fn an_output_capture_is_the_whole_frame() {
+        let frame = coordinate_frame(3, 2);
+        let output = Capture::Output { output: "A".into() };
+        assert_eq!(crop(3, 2, &frame, (7, 7), (3, 2), &output), Some((3, 2, frame.clone())));
     }
 
     #[test]

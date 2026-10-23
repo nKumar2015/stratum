@@ -1023,8 +1023,14 @@ impl Default for HoverMenuMetrics {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TrayMenuMetrics {
-    /// Width of the menu panel.
+    /// The narrowest and widest the panel may be. In between, it fits its
+    /// widest label, as QML's did; past `max_width` labels are cut short.
     pub width: f32,
+    pub max_width: f32,
+    /// Space before a label, and kept free after the widest one.
+    pub label_inset: f32,
+    /// Room for the marker after an entry with a submenu.
+    pub chevron_width: f32,
     /// Height of one row.
     pub row_height: f32,
     /// Inner padding.
@@ -1046,6 +1052,9 @@ impl Default for TrayMenuMetrics {
     fn default() -> Self {
         Self {
             width: 200.0,
+            max_width: 400.0,
+            label_inset: 8.0,
+            chevron_width: 18.0,
             row_height: 28.0,
             padding: 6.0,
             radius: 6.0,
@@ -1222,10 +1231,12 @@ pub struct PageMetrics {
     pub grid_gap: f32,
     pub card_min_width: f32,
     /// Status cards: height, the round badge behind the glyph, glyph size,
-    /// the large value, and the meter along the bottom.
+    /// the large value, and the meter along the bottom. Cards with the badge
+    /// above their text grow past their height to keep `badge_gap` below it.
     pub stat_card_height: f32,
     pub badge: f32,
     pub badge_icon: f32,
+    pub badge_gap: f32,
     pub value: f32,
     pub meter: f32,
     /// Quick toggle tiles: narrowest tile, and its height.
@@ -1282,6 +1293,7 @@ impl Default for PageMetrics {
             stat_card_height: 112.0,
             badge: 34.0,
             badge_icon: 16.0,
+            badge_gap: 8.0,
             value: 20.0,
             meter: 6.0,
             tile_min_width: 150.0,

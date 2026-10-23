@@ -1047,7 +1047,16 @@ impl App {
         self.tray_menu.set_metrics(&self.config.metrics.tray_menu);
         let open_menu = self.state.tray_menu.get();
         let menu_target = self.tray_menu.target().map(str::to_string);
-        let menu_size = self.tray_menu.size(open_menu.as_ref());
+        let label_style = crate::text::TextStyle {
+            family: std::sync::Arc::from(theme.font.as_str()),
+            size: self.config.metrics.tray_menu.text,
+            weight: self.config.metrics.typography.weight_regular,
+            color: Color::WHITE,
+        };
+        let text = &mut self.text;
+        let menu_size = self
+            .tray_menu
+            .size(open_menu.as_ref(), |label| text.measure(label, &label_style).0);
         let placement = self.tray_menu.placement();
         let geometry = menu_size.map(|(width, height)| {
             (
@@ -1063,12 +1072,22 @@ impl App {
                     // Placement is per output: the monitor the menu opens on
                     // decides where its edge is, and applying one output's
                     // placement to every surface put the menu off screen on the
-                    // other monitor.
-                    let (anchor, (top, right, bottom, left)) = super::surfaces::beside_rail(
-                        self.config.sidebar.position,
-                        self.tray_menu.placement().y.round() as i32,
-                        0,
-                    );
+                    // other monitor. It opens level with its icon, moved back
+                    // as far as it must to end on the output: from an icon low
+                    // on the rail it ran off the bottom.
+                    let extent = surface
+                        .output
+                        .as_ref()
+                        .and_then(|o| self.output_state.info(o))
+                        .and_then(|info| info.logical_size);
+                    let along = self.tray_menu.placement().y.round() as i32;
+                    let along = match (extent, self.config.sidebar.axis()) {
+                        (Some((_, h)), crate::config::Axis::Vertical) => along.min(h - height as i32).max(0),
+                        (Some((w, _)), crate::config::Axis::Horizontal) => along.min(w - width as i32).max(0),
+                        (None, _) => along,
+                    };
+                    let (anchor, (top, right, bottom, left)) =
+                        super::surfaces::beside_rail(self.config.sidebar.position, along, 0);
                     surface.layer.set_size(width, height);
                     surface.layer.set_anchor(anchor);
                     surface.layer.set_margin(top, right, bottom, left);
@@ -1427,25 +1446,41 @@ impl App {
         self.mark_screenshot_dirty();
     }
 
-    /// Run a picked capture once the overlay is off screen.
-    fn run_screenshot_capture(&mut self, capture: crate::screenshot::Capture) {
+    /// Run a capture picked on `output`: cut from its frozen frame, or, with
+    /// no frame, taken with `grim` once the overlay is off screen.
+    fn run_screenshot_capture(&mut self, output: &str, capture: crate::screenshot::Capture) {
         let Some(sender) = self.screenshot_events.clone() else {
             return;
         };
+        let frozen = self.screenshot.crop_frozen(
+            output,
+            self.output_origin(output),
+            self.output_logical_size(output),
+            &capture,
+        );
         let delay = std::time::Duration::from_millis(self.screenshot.metrics().capture_delay_ms);
         std::thread::spawn(move || {
-            std::thread::sleep(delay);
             let mode = capture.mode();
-            // Decoded here too, so the viewer opens with its image.
-            let captured = crate::screenshot::capture(&capture).and_then(|path| {
-                match crate::screenshot_viewer::load(&path) {
-                    Ok(image) => Ok((path, image)),
-                    Err(error) => {
-                        let _ = std::fs::remove_file(&path);
-                        Err(error)
-                    }
+            let captured = match frozen {
+                Some((width, height, pixels)) => crate::screenshot::save_png(width, height, &pixels)
+                    .map(|path| {
+                        let image = crate::screenshot_viewer::Image { width, height, pixels: Arc::from(pixels) };
+                        (path, image)
+                    }),
+                None => {
+                    std::thread::sleep(delay);
+                    // Decoded here too, so the viewer opens with its image.
+                    crate::screenshot::capture(&capture).and_then(|path| {
+                        match crate::screenshot_viewer::load(&path) {
+                            Ok(image) => Ok((path, image)),
+                            Err(error) => {
+                                let _ = std::fs::remove_file(&path);
+                                Err(error)
+                            }
+                        }
+                    })
                 }
-            });
+            };
             let event = match captured {
                 Ok((path, image)) => ScreenshotEvent::Captured { path, mode, image },
                 Err(error) => ScreenshotEvent::CaptureFailed { error },
@@ -1488,7 +1523,7 @@ impl App {
             }
             PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
                 if let Some(capture) = self.screenshot.release(output, origin) {
-                    self.run_screenshot_capture(capture);
+                    self.run_screenshot_capture(output, capture);
                 }
             }
             _ => return,
@@ -1511,6 +1546,17 @@ impl App {
             .and_then(|e| e.output.as_ref())
             .and_then(|o| self.output_state.info(o))
             .and_then(|info| info.logical_position)
+            .unwrap_or((0, 0))
+    }
+
+    /// `output`'s size in logical pixels, or `(0, 0)` while unknown.
+    fn output_logical_size(&self, output_name: &str) -> (i32, i32) {
+        self.screenshot_surfaces
+            .iter()
+            .find(|e| e.output_name == output_name)
+            .and_then(|e| e.output.as_ref())
+            .and_then(|o| self.output_state.info(o))
+            .and_then(|info| info.logical_size)
             .unwrap_or((0, 0))
     }
 
@@ -3332,6 +3378,20 @@ impl PointerHandler for App {
                 self.viewer_pointer(&event.kind, x, y);
                 continue;
             }
+            // The tray menu repaints only when marked, so its hover highlight
+            // needs every move, enter and leave over it.
+            if let Some(menu) = self
+                .tray_menu_surfaces
+                .iter_mut()
+                .find(|t| t.layer.wl_surface() == &event.surface)
+            {
+                if matches!(
+                    event.kind,
+                    PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } | PointerEventKind::Leave { .. }
+                ) {
+                    menu.dirty = true;
+                }
+            }
             // Once any surface sets a shape, every surface must: compositors
             // keep the last image across enters, so the screenshot crosshair
             // would otherwise stay on the bar.
@@ -3448,14 +3508,15 @@ impl PointerHandler for App {
                 .any(|p| p.layer.wl_surface() == &surface);
             // A click inside the open tray menu either runs an entry or
             // dismisses the menu.
-            let on_tray_menu = self
+            let tray_menu_width = self
                 .tray_menu_surfaces
                 .iter()
-                .any(|t| t.layer.wl_surface() == &surface);
-            if on_tray_menu {
+                .find(|t| t.layer.wl_surface() == &surface)
+                .map(|t| t.logical_rect().width);
+            if let Some(width) = tray_menu_width {
                 let menu = self.state.tray_menu.get();
                 if let Some(menu) = menu {
-                    if let Some(id) = self.tray_menu.on_click(point, &menu) {
+                    if let Some(id) = self.tray_menu.on_click(point, &menu, width) {
                         self.actions.push(crate::actions::SystemAction::TrayMenuEvent {
                             service: menu.service,
                             path: menu.path,
