@@ -135,4 +135,4 @@ notifications without touching your real session.
 
 ## License
 
-MIT.
+MIT; see [LICENSE](LICENSE).
