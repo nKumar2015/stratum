@@ -2421,12 +2421,13 @@ impl App {
                     || config.metrics.bar.corner_size != self.config.metrics.bar.corner_size;
                 self.config = Arc::new(config);
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
+                // An open settings window would otherwise keep the old
+                // config until restart.
+                self.control_center.set_config(Arc::clone(&self.config));
                 if width_changed {
                     info!("sidebar geometry changed; restart to apply the new anchorage");
                 }
-                for entry in &mut self.surfaces {
-                    entry.dirty = true;
-                }
+                self.mark_all_dirty();
             }
             Err(err) => {
                 tracing::error!("config reload rejected: {err}\nkeeping the previous configuration");
