@@ -1,5 +1,6 @@
 //! The agenda: events from the selected day (today unless a day was clicked
-//! in the month grid) for `agenda_days`, grouped by day. The first day is
+//! in the month grid) for `agenda_days`, grouped by day; the `day` panel
+//! shows the selected day alone. The first day is
 //! always shown, empty or not; later days only when they hold something.
 //! Today's next event says how soon it starts, and so does the glance
 //! strip's chip for it.
@@ -80,7 +81,9 @@ impl Dashboard {
         next_event(&events, now).map(|o| format!("{} \u{b7} {}", o.summary, starts_in(now, o.start)))
     }
 
-    pub(super) fn paint_agenda(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect) {
+    /// The agenda from the selected day on, or (`one_day`, the `day` panel)
+    /// that day alone.
+    pub(super) fn paint_agenda(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, panel: Rect, one_day: bool) {
         let m = self.metrics.clone();
         let (regular, medium) = (ctx.metrics.typography.weight_regular, ctx.metrics.typography.weight_medium);
         let mut y = Self::title(ctx, list, panel, "Agenda", &m);
@@ -110,7 +113,7 @@ impl Dashboard {
         let today = today();
         let now = chrono::Local::now().naive_local();
         let from = self.selected;
-        let days = u64::from(self.config.calendar.agenda_days);
+        let days = if one_day { 1 } else { u64::from(self.config.calendar.agenda_days) };
         let events = self.occurrences(ctx, from, from + Days::new(days));
         let next = next_event(&events, now).cloned();
         let time_w = measure(ctx, "12:00 PM", m.caption, regular) + m.inner;

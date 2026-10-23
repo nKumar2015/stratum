@@ -77,7 +77,7 @@ history = 90            # samples the graphs keep (90 x 2 s = 3 minutes)
 background_history = true
 # The card's width as a share of the screen's: [metrics.dashboard] is scaled
 # up to reach it (never down, and never taller than the screen).
-screen_fraction = 0.6
+screen_fraction = 0.48
 
 # Weather from Open-Meteo, fetched only while the dashboard is open. The
 # postal code is looked up once; the zip and coordinates go to Open-Meteo.
@@ -119,9 +119,10 @@ rounds = 4                  # work rounds before the long break
 
 # Tabs, in order; it always opens on the first. A tab is rows of panels:
 # rows share its height by weight, a row's panels its width. Panel kinds:
-# glance (time, date, next event, batteries, do-not-disturb), weather, agenda,
-# performance (load bars), graphs (history, temperatures, network), calendar
-# (month grid; a click picks the agenda's day), music, todo, note, timer
+# glance (time, date, next event, batteries, do-not-disturb), weather, agenda
+# (the selected day on), day (the selected day alone), performance (load
+# bars), graphs (history, temperatures, network), calendar (month grid; a
+# click picks the agenda's day), music, todo, note, timer
 # (to-dos and the note are kept in $XDG_STATE_HOME/stratum/focus.json).
 [[dashboard.tabs]]
 name = "Today"
@@ -140,7 +141,7 @@ name = "Calendar"
 icon = "\U000F00ED"
 rows = [{ weight = 1.0, panels = [
     { kind = "calendar", weight = 1.4 },
-    { kind = "agenda", weight = 1.0 },
+    { kind = "day", weight = 1.0 },
 ] }]
 
 [[dashboard.tabs]]

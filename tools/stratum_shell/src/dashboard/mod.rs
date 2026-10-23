@@ -459,7 +459,7 @@ impl Dashboard {
             Keysym::Right if self.shows(PanelKind::Calendar) => {
                 self.navigate(Button::Month(if modifiers.shift { 12 } else { 1 }))
             }
-            Keysym::t if plain && (self.shows(PanelKind::Calendar) || self.shows(PanelKind::Agenda)) => {
+            Keysym::t if plain && [PanelKind::Calendar, PanelKind::Agenda, PanelKind::Day].iter().any(|&k| self.shows(k)) => {
                 self.navigate(Button::Today)
             }
             Keysym::d if plain && self.shows(PanelKind::Glance) => DashboardAction::ToggleDnd,
@@ -609,7 +609,8 @@ impl Dashboard {
                 match panel_spec.kind {
                     PanelKind::Glance => self.paint_glance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Weather => self.paint_weather(ctx, list, panel),
-                    PanelKind::Agenda => self.paint_agenda(ctx, list, panel),
+                    PanelKind::Agenda => self.paint_agenda(ctx, list, panel, false),
+                    PanelKind::Day => self.paint_agenda(ctx, list, panel, true),
                     PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
                     PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
                     PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
@@ -664,7 +665,7 @@ impl Dashboard {
         if self.shows(PanelKind::Calendar) {
             keys.push("\u{2190}\u{2192} month \u{b7} \u{21e7} year");
         }
-        if self.shows(PanelKind::Calendar) || self.shows(PanelKind::Agenda) {
+        if [PanelKind::Calendar, PanelKind::Agenda, PanelKind::Day].iter().any(|&k| self.shows(k)) {
             keys.push("T today");
         }
         if self.shows(PanelKind::Todo) || self.shows(PanelKind::Note) {

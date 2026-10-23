@@ -612,6 +612,8 @@ pub enum PanelKind {
     Weather,
     /// Events from the selected day (today unless one is picked) on.
     Agenda,
+    /// The selected day's events alone, beside a month grid.
+    Day,
     /// Load bars for CPU, GPUs, RAM and storage.
     Performance,
     /// The same, with history graphs, temperatures and network.
