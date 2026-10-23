@@ -23,6 +23,7 @@
 //! instant. Closing resets the calendar to the current month, as QML did.
 
 pub mod feed;
+mod system;
 
 use chrono::Datelike;
 use serde_json::Value;
@@ -44,6 +45,9 @@ pub enum DashboardAction {
     Redraw,
     /// `previous`, `play-pause`, or `next`, for the player.
     Media { player: String, action: String },
+    /// Run a command; the dashboard has closed so its window is not hidden
+    /// behind the overlay.
+    Spawn(Vec<String>),
 }
 
 /// One cell of the month grid.
@@ -199,6 +203,8 @@ enum Button {
     Previous,
     PlayPause,
     Next,
+    /// The processes panel's title.
+    ProcessMonitor,
 }
 
 impl Dashboard {
@@ -360,6 +366,11 @@ impl Dashboard {
                         action: action.to_string(),
                     }
                 }
+                Button::ProcessMonitor => {
+                    let command = self.config.process_monitor.clone();
+                    self.close();
+                    DashboardAction::Spawn(command)
+                }
                 other => self.navigate(other),
             };
         }
@@ -413,6 +424,11 @@ impl Dashboard {
             text_field::paint_frame(list, panel, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
             match spec.kind {
                 PanelKind::Performance => self.paint_performance(ctx, list, panel, snapshot.sample.as_ref()),
+                PanelKind::Graphs => self.paint_graphs(ctx, list, panel, snapshot),
+                PanelKind::Processes => {
+                    let processes = snapshot.sample.as_ref().map(|s| s.processes.as_slice()).unwrap_or_default();
+                    self.paint_processes(ctx, list, panel, processes);
+                }
                 PanelKind::Calendar => self.paint_calendar(ctx, list, panel),
                 PanelKind::Music => self.paint_music(ctx, list, panel, music),
             }
@@ -750,7 +766,15 @@ mod tests {
             cpu_percent: Some(41.6),
             memory: Usage { used: 3 << 30, total: 12 << 30 },
             root: Usage { used: 1 << 30, total: 2 << 30 },
-            gpus: vec![stratum_sys::managers::gpu::GpuReading { name: "Radeon".into(), load: Load::Asleep }],
+            network: None,
+            temperatures: Default::default(),
+            gpus: vec![stratum_sys::managers::gpu::GpuReading {
+                name: "Radeon".into(),
+                load: Load::Asleep,
+                temperature: None,
+                vram: None,
+            }],
+            processes: Vec::new(),
         };
         let rows = performance_rows(Some(&sample));
         assert_eq!(rows[0].3, "42%");

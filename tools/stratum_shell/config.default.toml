@@ -75,9 +75,13 @@ history = 90            # samples the graphs keep (90 x 2 s = 3 minutes)
 # Keep sampling while closed, so the graphs are full on open. A closed
 # dashboard only records; nothing repaints.
 background_history = true
+processes = 12          # listed by the processes panel, busiest first
+# Run when the processes panel's title is clicked; [] runs nothing.
+process_monitor = ["kitty", "btop"]
 
 # Tabs, in order; it always opens on the first. Each tab's panels sit side by
-# side, sharing its width by weight. Panel kinds: performance, calendar, music.
+# side, sharing its width by weight. Panel kinds: performance (load bars),
+# graphs (history, temperatures, network), processes, calendar, music.
 [[dashboard.tabs]]
 name = "Today"
 icon = "\U000F056E"
@@ -95,7 +99,10 @@ panels = [{ kind = "calendar", weight = 1.0 }]
 [[dashboard.tabs]]
 name = "System"
 icon = "\U000F04C5"
-panels = [{ kind = "performance", weight = 1.0 }]
+panels = [
+    { kind = "graphs", weight = 3.0 },
+    { kind = "processes", weight = 2.0 },
+]
 
 [sidebar]
 position = "left"       # "left" or "right"
@@ -401,6 +408,10 @@ width = 812.0           # the card, on every tab
 panel_height = 340.0
 tab_height = 30.0       # the tab bar
 tab_gap = 6.0
+graph = 22.0            # a history graph's height
+graph_line = 1.5        # its line
+graph_fill = 0.18       # opacity of the area under the line
+graph_gap = 8.0         # between graph rows
 title = 15.0
 text = 13.0
 caption = 11.0

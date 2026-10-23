@@ -26,11 +26,15 @@ lazy_static! {
     static ref GPU_NAMES: Mutex<HashMap<PathBuf, Option<String>>> = Mutex::new(HashMap::new());
 }
 
-/// One GPU's load.
+/// One GPU's load, temperature and memory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GpuReading {
     pub name: String,
     pub load: Load,
+    /// °C, when the driver reports it.
+    pub temperature: Option<f32>,
+    /// Used and total VRAM in bytes.
+    pub vram: Option<(u64, u64)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,21 +130,31 @@ fn is_suspended(card: &Path) -> bool {
 
 const NVIDIA: &str = "0x10de";
 
-/// The load of every GPU present.
+/// The load, temperature and VRAM of every GPU present. A suspended card is
+/// left alone: all three are unknown.
 pub fn read_all() -> Vec<GpuReading> {
     gpu_cards()
         .iter()
         .map(|card| {
             let vendor = fs::read_to_string(card.join("device/vendor")).unwrap_or_default();
             let vendor = vendor.trim();
+            let mut reading = NvmlReading::default();
             let load = if is_suspended(card) {
                 Load::Asleep
             } else if let Some(percent) = read_percent(&card.join("device/gpu_busy_percent"))
                 .or_else(|| read_percent(&card.join("gt_busy_percent")))
             {
+                reading.temperature = hwmon_temperature(card);
+                reading.vram = sysfs_vram(card);
                 Load::Percent(percent)
             } else if vendor == NVIDIA {
-                pci_slot(card).and_then(|slot| nvml_load(&slot)).map_or(Load::Unknown, Load::Percent)
+                match pci_slot(card).and_then(|slot| nvml_read(&slot)) {
+                    Some(nvml) => {
+                        reading = nvml;
+                        nvml.load.map_or(Load::Unknown, Load::Percent)
+                    }
+                    None => Load::Unknown,
+                }
             } else {
                 Load::Unknown
             };
@@ -150,21 +164,48 @@ pub fn read_all() -> Vec<GpuReading> {
                 "0x8086" => "Intel",
                 _ => "GPU",
             };
-            GpuReading { name: gpu_name(card).unwrap_or_else(|| fallback.to_string()), load }
+            GpuReading {
+                name: gpu_name(card).unwrap_or_else(|| fallback.to_string()),
+                load,
+                temperature: reading.temperature,
+                vram: reading.vram,
+            }
         })
         .collect()
+}
+
+/// The card's own temperature sensor (amdgpu's `edge`), in °C.
+fn hwmon_temperature(card: &Path) -> Option<f32> {
+    fs::read_dir(card.join("device/hwmon"))
+        .ok()?
+        .flatten()
+        .find_map(|hwmon| fs::read_to_string(hwmon.path().join("temp1_input")).ok())
+        .and_then(|milli| milli.trim().parse::<f32>().ok())
+        .map(|milli| milli / 1000.0)
+}
+
+/// Used and total VRAM in bytes, as amdgpu reports it. An APU's "VRAM" is
+/// the carve-out from system memory.
+fn sysfs_vram(card: &Path) -> Option<(u64, u64)> {
+    let read = |name: &str| fs::read_to_string(card.join("device").join(name)).ok()?.trim().parse::<u64>().ok();
+    Some((read("mem_info_vram_used")?, read("mem_info_vram_total")?)).filter(|&(_, total)| total > 0)
 }
 
 type NvmlCall = unsafe extern "C" fn() -> c_int;
 type HandleByPci = unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> c_int;
 type Utilization = unsafe extern "C" fn(*mut c_void, *mut NvmlUtilization) -> c_int;
+type Temperature = unsafe extern "C" fn(*mut c_void, c_int, *mut c_uint) -> c_int;
+type MemoryInfo = unsafe extern "C" fn(*mut c_void, *mut NvmlMemory) -> c_int;
 
-/// The NVML entry points used here.
+/// The NVML entry points used here. Temperature and memory are optional, so
+/// a driver without them still reports load.
 struct Nvml {
     init: NvmlCall,
     shutdown: NvmlCall,
     handle_by_pci: HandleByPci,
     utilization: Utilization,
+    temperature: Option<Temperature>,
+    memory: Option<MemoryInfo>,
 }
 
 #[repr(C)]
@@ -174,7 +215,25 @@ struct NvmlUtilization {
     memory: c_uint,
 }
 
+#[repr(C)]
+#[derive(Default)]
+struct NvmlMemory {
+    total: u64,
+    free: u64,
+    used: u64,
+}
+
 const NVML_SUCCESS: c_int = 0;
+/// `NVML_TEMPERATURE_GPU`: the die.
+const NVML_TEMPERATURE_GPU: c_int = 0;
+
+/// What one NVML session (or amdgpu's sysfs) reports for a card.
+#[derive(Clone, Copy, Debug, Default)]
+struct NvmlReading {
+    load: Option<i64>,
+    temperature: Option<f32>,
+    vram: Option<(u64, u64)>,
+}
 
 /// NVML, loaded once and never unloaded. `None` without the NVIDIA driver.
 fn nvml() -> Option<&'static Nvml> {
@@ -209,30 +268,45 @@ fn nvml() -> Option<&'static Nvml> {
                 utilization: std::mem::transmute::<*mut c_void, Utilization>(symbol(
                     "nvmlDeviceGetUtilizationRates",
                 )?),
+                temperature: symbol("nvmlDeviceGetTemperature")
+                    .map(|p| std::mem::transmute::<*mut c_void, Temperature>(p)),
+                memory: symbol("nvmlDeviceGetMemoryInfo").map(|p| std::mem::transmute::<*mut c_void, MemoryInfo>(p)),
             })
         }
     })
     .as_ref()
 }
 
-/// The NVIDIA GPU at PCI address `slot`'s load. NVML is initialised for the
-/// one query only, so the shell holds no handle that could keep the GPU from
-/// suspending.
-fn nvml_load(slot: &str) -> Option<i64> {
+/// The NVIDIA GPU at PCI address `slot`: load, temperature and memory. NVML
+/// is initialised for the one query only, so the shell holds no handle that
+/// could keep the GPU from suspending.
+fn nvml_read(slot: &str) -> Option<NvmlReading> {
     let nvml = nvml()?;
     let slot = CString::new(slot).ok()?;
     // SAFETY: init and shutdown are paired (NVML counts them); the device
-    // handle is used only between them, and both out-pointers are valid.
+    // handle is used only between them, and every out-pointer is valid.
     unsafe {
         if (nvml.init)() != NVML_SUCCESS {
             return None;
         }
         let mut device = std::ptr::null_mut();
-        let mut usage = NvmlUtilization::default();
-        let ok = (nvml.handle_by_pci)(slot.as_ptr(), &mut device) == NVML_SUCCESS
-            && (nvml.utilization)(device, &mut usage) == NVML_SUCCESS;
+        let mut reading = NvmlReading::default();
+        if (nvml.handle_by_pci)(slot.as_ptr(), &mut device) == NVML_SUCCESS {
+            let mut usage = NvmlUtilization::default();
+            if (nvml.utilization)(device, &mut usage) == NVML_SUCCESS {
+                reading.load = Some(i64::from(usage.gpu));
+            }
+            let mut celsius: c_uint = 0;
+            if nvml.temperature.is_some_and(|f| f(device, NVML_TEMPERATURE_GPU, &mut celsius) == NVML_SUCCESS) {
+                reading.temperature = Some(celsius as f32);
+            }
+            let mut memory = NvmlMemory::default();
+            if nvml.memory.is_some_and(|f| f(device, &mut memory) == NVML_SUCCESS) && memory.total > 0 {
+                reading.vram = Some((memory.used, memory.total));
+            }
+        }
         (nvml.shutdown)();
-        ok.then_some(i64::from(usage.gpu))
+        Some(reading)
     }
 }
 

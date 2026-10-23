@@ -17,7 +17,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use stratum_sys::managers::gpu::Load;
-use stratum_sys::managers::sysmon::{Sample, Sampler};
+use stratum_sys::managers::sysmon::{Detail, Sample, Sampler};
 
 use crate::sys_state::SystemState;
 
@@ -29,13 +29,16 @@ pub struct Snapshot {
     pub history: History,
 }
 
-/// Recent readings, oldest first, as percentages.
+/// Recent readings, oldest first: loads as percentages, network in bytes
+/// per second.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct History {
     pub cpu: VecDeque<f32>,
     pub memory: VecDeque<f32>,
     /// One series per GPU, in the sample's order.
     pub gpus: Vec<VecDeque<f32>>,
+    pub rx: VecDeque<f32>,
+    pub tx: VecDeque<f32>,
 }
 
 impl History {
@@ -53,6 +56,10 @@ impl History {
             push(&mut self.cpu, cpu, len);
         }
         push(&mut self.memory, sample.memory.percent(), len);
+        if let Some(network) = sample.network {
+            push(&mut self.rx, network.rx as f32, len);
+            push(&mut self.tx, network.tx as f32, len);
+        }
         // GPUs are sampled only while the dashboard is open, so a closed
         // sample (none) ends their series and the next open starts afresh.
         // A GPU appearing or going away renumbers them too.
@@ -75,6 +82,8 @@ pub struct Settings {
     pub sample_ms: u64,
     pub history: usize,
     pub background: bool,
+    /// Processes listed while open.
+    pub processes: usize,
 }
 
 impl Settings {
@@ -83,7 +92,14 @@ impl Settings {
             sample_ms: config.sample_ms,
             history: config.history,
             background: config.background_history,
+            processes: config.processes,
         }
+    }
+
+    /// What a sample reads: GPUs and processes cost milliseconds, so only
+    /// while the dashboard is open.
+    fn detail(&self, open: bool) -> Detail {
+        Detail { gpus: open, processes: if open { self.processes } else { 0 } }
     }
 }
 
@@ -167,10 +183,11 @@ impl Feed {
             if opened && !settings.background {
                 (sampler, history, last) = (Sampler::new(), History::default(), None);
             }
-            // Opening samples at once: background samples carry no GPUs.
+            // Opening samples at once: background samples carry no GPUs. The
+            // process list needs two readings, so the second comes sooner.
             let now = Instant::now();
             if now >= next || opened || last.is_none() {
-                let mut sample = sampler.sample(open);
+                let mut sample = sampler.sample(settings.detail(open));
                 history.push(&sample, settings.history);
                 // Sampled just after a background sample, CPU time may not
                 // have moved yet; show the last load rather than none.
@@ -178,7 +195,8 @@ impl Feed {
                     sample.cpu_percent = last.and_then(|s| s.cpu_percent);
                 }
                 last = Some(sample);
-                next = now + Duration::from_millis(settings.sample_ms);
+                let interval = if opened { settings.sample_ms / 4 } else { settings.sample_ms };
+                next = now + Duration::from_millis(interval);
             }
             if open {
                 state.music.set(stratum_sys::managers::music::status());
@@ -194,15 +212,36 @@ impl Feed {
 mod tests {
     use super::*;
     use stratum_sys::managers::gpu::GpuReading;
-    use stratum_sys::managers::sysmon::Usage;
+    use stratum_sys::managers::sysmon::{Rates, Usage};
 
     fn sample(cpu: Option<f32>, gpus: usize) -> Sample {
         Sample {
             cpu_percent: cpu,
             memory: Usage { used: 1, total: 4 },
             root: Usage::default(),
-            gpus: (0..gpus).map(|_| GpuReading { name: "GPU".into(), load: Load::Percent(50) }).collect(),
+            network: cpu.map(|_| Rates { rx: 1000.0, tx: 10.0 }),
+            temperatures: Default::default(),
+            gpus: (0..gpus)
+                .map(|_| GpuReading { name: "GPU".into(), load: Load::Percent(50), temperature: None, vram: None })
+                .collect(),
+            processes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn network_rates_join_once_there_are_two_readings() {
+        let mut history = History::default();
+        history.push(&sample(None, 0), 3);
+        assert!(history.rx.is_empty());
+        history.push(&sample(Some(1.0), 0), 3);
+        assert_eq!((history.rx[0], history.tx[0]), (1000.0, 10.0));
+    }
+
+    #[test]
+    fn only_an_open_dashboard_reads_gpus_and_processes() {
+        let settings = Settings { sample_ms: 2000, history: 90, background: true, processes: 8 };
+        assert_eq!(settings.detail(false), Detail::default());
+        assert_eq!(settings.detail(true), Detail { gpus: true, processes: 8 });
     }
 
     #[test]

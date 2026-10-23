@@ -378,6 +378,12 @@ pub struct DashboardMetrics {
     /// The tab bar above the panels, and the gap between its tabs.
     pub tab_height: f32,
     pub tab_gap: f32,
+    /// A history graph's height, its line width, the opacity of the area
+    /// under the line, and the gap between graph rows.
+    pub graph: f32,
+    pub graph_line: f32,
+    pub graph_fill: f32,
+    pub graph_gap: f32,
     pub title: f32,
     pub text: f32,
     pub caption: f32,

@@ -11,6 +11,7 @@ use crate::render::display_list::{
 pub mod animation;
 pub mod control_center;
 pub mod controls;
+pub mod graph;
 pub mod hover_menu;
 pub mod notification_card;
 pub mod pages;

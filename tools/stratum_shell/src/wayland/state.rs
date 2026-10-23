@@ -2070,6 +2070,7 @@ impl App {
             DashboardAction::Media { player, action } => {
                 self.actions.push(crate::actions::SystemAction::Media { player, action });
             }
+            DashboardAction::Spawn(argv) => self.actions.push(crate::actions::SystemAction::Spawn(argv)),
         }
         self.mark_dashboard_dirty();
     }

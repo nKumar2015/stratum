@@ -97,8 +97,10 @@ tab `dashboard open|toggle <tab>` names. Its data comes from a sampler thread
 (`dashboard/feed.rs`, over `stratum_sys::managers::sysmon`) that keeps a
 history for the graphs, recording in the background but publishing into
 `SystemState::dashboard` only while open, so a closed dashboard never wakes
-the loop. GPUs are sampled only while open: an NVML reading costs ~20 ms
-(held open, NVML would keep the dGPU awake). The sampler also refreshes
+the loop. GPUs and processes are sampled only while open: an NVML reading
+costs ~20 ms (held open, NVML would keep the dGPU awake), and processes a
+file each. The System tab's graphs are `ui/graph.rs`, which spans a fixed
+number of readings so the line scrolls rather than stretches. The sampler also refreshes
 `SystemState::music` while open. The calendar grid is computed locally. Media
 controls run `playerctl` on the action worker. The overhaul has phases still
 to come (graphs, weather, calendar sync, to-dos); the plan is in memory.

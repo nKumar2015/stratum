@@ -489,6 +489,11 @@ pub struct DashboardConfig {
     /// Keep sampling while the dashboard is closed, so the graphs are full
     /// when it opens. Closed, samples are only recorded: nothing repaints.
     pub background_history: bool,
+    /// Processes the processes panel lists, busiest first. Read only while
+    /// the dashboard is open.
+    pub processes: usize,
+    /// Run when the processes panel's title is clicked; empty runs nothing.
+    pub process_monitor: Vec<String>,
     /// The tabs, in order. The dashboard always opens on the first.
     pub tabs: Vec<DashboardTab>,
 }
@@ -522,7 +527,12 @@ pub struct DashboardPanel {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelKind {
+    /// Load bars for CPU, GPUs, RAM and storage.
     Performance,
+    /// The same, with history graphs, temperatures and network.
+    Graphs,
+    /// The busiest processes.
+    Processes,
     Calendar,
     Music,
 }
