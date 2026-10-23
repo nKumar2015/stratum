@@ -194,7 +194,7 @@ The **power menu** is a fullscreen overlay surface per output. Only the output
 it opened on is mapped and given `KeyboardInteractivity::Exclusive`, so keys
 reach it and nowhere else. It is toggled by `stratum-cli powermenu toggle`; the
 shortcut itself stays in the compositor. Keyboard support comes from SCTK's
-`xkbcommon` feature (`KeyboardHandler` in `wayland/state.rs`); modifier state is
+`xkbcommon` feature (`KeyboardHandler` in `wayland/state/input.rs`); modifier state is
 tracked for future text entry.
 
 The **IPC socket** exists at `$XDG_RUNTIME_DIR/stratum-shell.sock` (override
@@ -385,6 +385,14 @@ in it; there is no IPC between UI and state.
 anything animates, one second when idle. Worker threads (actions, pollers,
 PipeWire, D-Bus) wake it through a `calloop::ping` installed in `App::new` and
 exposed as `SystemState::set_waker`.
+
+`App` and its fields are in `wayland/state.rs`; its behaviour is split by
+concern into `wayland/state/`: `render.rs` (painting each surface),
+`input.rs`, `outputs.rs` (surfaces per output), `lock.rs`, `screenshot.rs`,
+`overlays.rs` (polkit, toasts, dashboard, themes, hover menus), `ipc.rs`,
+`monitors.rs` (managers and config reload) and `settings_window.rs`.
+`paint_ctx!` is defined before those modules are declared, which is what
+makes it visible in them.
 
 ### State
 
