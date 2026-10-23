@@ -1,9 +1,9 @@
-use super::{config, native_eq, parser};
+use super::{config, native_eq, parser, pulse};
 use tracing::{info, warn};
 
 use crate::managers::common::{command_available, run_command_capture};
 use lazy_static::lazy_static;
-use pulsectl::controllers::{AppControl, SinkController};
+use pulsectl::controllers::AppControl;
 use serde_json::{json, Value};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -57,11 +57,7 @@ fn apply_eq_bands_pipewire(
     }
 
     let resolved_device = if device_id == "@DEFAULT_SINK@" {
-        let def = SinkController::create()
-            .ok()
-            .and_then(|mut ctrl| ctrl.get_server_info().ok())
-            .and_then(|info| info.default_sink_name)
-            .unwrap_or_else(|| device_id.to_string());
+        let def = pulse::default_sink_name().unwrap_or_else(|| device_id.to_string());
         parser::resolve_effective_default_sink(def.trim())
     } else {
         device_id.to_string()
@@ -122,11 +118,7 @@ fn apply_eq_bands_pipewire(
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    let current_default = SinkController::create()
-        .ok()
-        .and_then(|mut ctrl| ctrl.get_server_info().ok())
-        .and_then(|info| info.default_sink_name)
-        .unwrap_or_default();
+    let current_default = pulse::default_sink_name().unwrap_or_default();
     if current_default.trim() != config::EQ_VIRTUAL_INPUT_SINK {
         let _ = run_command_capture("pactl", &["set-default-sink", config::EQ_VIRTUAL_INPUT_SINK]);
     }
@@ -347,17 +339,12 @@ fn ensure_eq_output_links(target: &str) {
 }
 
 fn move_active_streams_to_eq(target_sink: &str) {
-    let Ok(mut sink_ctrl) = SinkController::create() else {
-        return;
-    };
-
-    let Ok(apps) = sink_ctrl.list_applications() else {
-        return;
-    };
-
-    for app in apps {
-        let _ = sink_ctrl.move_app_by_name(app.index, target_sink);
-    }
+    let _ = pulse::with_sink(|ctrl| {
+        for app in ctrl.list_applications()? {
+            let _ = ctrl.move_app_by_name(app.index, target_sink);
+        }
+        Ok(())
+    });
 }
 
 fn map_filter_type_for_pipewire(filter_type: &str) -> &'static str {

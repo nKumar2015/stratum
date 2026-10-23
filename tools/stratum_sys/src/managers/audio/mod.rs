@@ -1,6 +1,7 @@
 use crate::managers::common::{run_capture_optional, run_command_capture};
 use pulsectl::controllers::types::DeviceInfo;
-use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
+use pulsectl::controllers::DeviceControl;
+use pulsectl::ControllerError;
 use serde_json::{json, Value};
 use std::time::Instant;
 use tracing::{info, warn};
@@ -10,6 +11,7 @@ pub(crate) mod engine;
 pub(crate) mod monitor;
 pub(crate) mod native_eq;
 pub(crate) mod parser;
+pub(crate) mod pulse;
 
 use crate::Publisher;
 
@@ -27,11 +29,7 @@ pub fn initialize() {
     }
     engine::warm_pw_cli_availability_cache();
     cleanup_orphans();
-    let default_sink_raw = SinkController::create()
-        .ok()
-        .and_then(|mut ctrl| ctrl.get_server_info().ok())
-        .and_then(|info| info.default_sink_name)
-        .unwrap_or_default();
+    let default_sink_raw = pulse::default_sink_name().unwrap_or_default();
     let effective = parser::resolve_effective_default_sink(default_sink_raw.trim());
 
     info!(
@@ -75,28 +73,27 @@ pub fn snapshot() -> Option<Value> {
 }
 
 pub fn set_volume(percent: i64) -> Value {
-    match SinkController::create() {
-        Ok(mut ctrl) => set_default_volume(&mut ctrl, "sink", percent),
-        Err(err) => json!({"ok": false, "error": format!("sink controller unavailable: {}", err)}),
-    }
+    let result = pulse::with_sink(|ctrl| set_default_volume(ctrl, percent));
+    volume_result(result, "sink")
 }
 
 /// Set the default source (microphone) to an absolute percentage.
 pub fn set_input_volume(percent: i64) -> Value {
-    match SourceController::create() {
-        Ok(mut ctrl) => set_default_volume(&mut ctrl, "source", percent),
-        Err(err) => json!({"ok": false, "error": format!("source controller unavailable: {}", err)}),
+    let result = pulse::with_source(|ctrl| set_default_volume(ctrl, percent));
+    volume_result(result, "source")
+}
+
+fn volume_result(result: Result<i64, ControllerError>, kind: &str) -> Value {
+    refresh_device_cache();
+    match result {
+        Ok(volume) => json!({"ok": true, "volume": volume}),
+        Err(err) => json!({"ok": false, "error": format!("failed to set {} volume: {}", kind, err)}),
     }
 }
 
-fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, percent: i64) -> Value {
+fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, percent: i64) -> Result<i64, ControllerError> {
     let target = percent.clamp(0, 150) as f64;
-    let default_device = match ctrl.get_default_device() {
-        Ok(device) => device,
-        Err(err) => {
-            return json!({"ok": false, "error": format!("failed to query default {}: {}", kind, err)});
-        }
-    };
+    let default_device = ctrl.get_default_device()?;
 
     let current = parser::extract_first_percent(&default_device.volume.print())
         .and_then(|v| v.trim_end_matches('%').parse::<f64>().ok())
@@ -108,9 +105,7 @@ fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, pe
     } else if target < current {
         ctrl.decrease_device_volume_by_percent(default_device.index, delta);
     }
-
-    refresh_device_cache();
-    serde_json::json!({"ok": true, "volume": target.round() as i64})
+    Ok(target.round() as i64)
 }
 
 /// Mute or unmute the default sink.
@@ -119,47 +114,35 @@ fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, pe
 /// "set volume to 0", which destroyed the level the user had set. The sink's
 /// own mute flag is the right control and is what `pactl`/`wpctl` use too.
 pub fn set_mute(muted: bool) -> Value {
-    match SinkController::create() {
-        Ok(mut ctrl) => set_default_mute(&mut ctrl, "sink", muted),
-        Err(err) => json!({"ok": false, "error": format!("sink controller unavailable: {}", err)}),
-    }
+    let result = pulse::with_sink(|ctrl| set_default_mute(ctrl, muted));
+    mute_result(result, "sink", muted)
 }
 
 /// Mute or unmute the default source (microphone).
 pub fn set_input_mute(muted: bool) -> Value {
-    match SourceController::create() {
-        Ok(mut ctrl) => set_default_mute(&mut ctrl, "source", muted),
-        Err(err) => json!({"ok": false, "error": format!("source controller unavailable: {}", err)}),
+    let result = pulse::with_source(|ctrl| set_default_mute(ctrl, muted));
+    mute_result(result, "source", muted)
+}
+
+fn mute_result(result: Result<(), ControllerError>, kind: &str, muted: bool) -> Value {
+    refresh_device_cache();
+    match result {
+        Ok(()) => json!({"ok": true, "mute": if muted { "yes" } else { "no" }}),
+        Err(err) => json!({"ok": false, "error": format!("failed to mute default {}: {}", kind, err)}),
     }
 }
 
-fn set_default_mute<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, kind: &str, muted: bool) -> Value {
-    let default_device = match ctrl.get_default_device() {
-        Ok(device) => device,
-        Err(err) => {
-            return json!({"ok": false, "error": format!("failed to query default {}: {}", kind, err)});
-        }
-    };
-
+fn set_default_mute<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, muted: bool) -> Result<(), ControllerError> {
+    let default_device = ctrl.get_default_device()?;
     // `set_device_mute_by_index` returns `()`, so a failure to look the device
     // up beforehand is the only signal that the device is unreachable.
-    if let Err(err) = ctrl.get_device_by_index(default_device.index) {
-        return json!({"ok": false, "error": format!("failed to read default {}: {}", kind, err)});
-    }
+    ctrl.get_device_by_index(default_device.index)?;
     ctrl.set_device_mute_by_index(default_device.index, muted);
-    refresh_device_cache();
-    json!({"ok": true, "mute": if muted { "yes" } else { "no" }})
+    Ok(())
 }
 
 pub fn set_input(target: &str) -> Value {
-    let mut source_ctrl = match SourceController::create() {
-        Ok(ctrl) => ctrl,
-        Err(err) => {
-            return json!({"ok": false, "error": format!("source controller unavailable: {}", err)});
-        }
-    };
-
-    match source_ctrl.set_default_device(target) {
+    match pulse::with_source(|ctrl| ctrl.set_default_device(target)) {
         Ok(true) => {}
         Ok(false) => {
             return json!({"ok": false, "error": format!("source '{}' not accepted", target)});
@@ -180,13 +163,9 @@ pub fn set_output(target: &str) -> Value {
     }
 
     // Skip if we're already on this device
-    if let Ok(mut ctrl) = SinkController::create() {
-        if let Ok(current_device) = ctrl.get_default_device() {
-            if let Some(current_name) = &current_device.name {
-                if current_name == target {
-                    return json!({"ok": true, "sink": target, "note": "already on target device"});
-                }
-            }
+    if let Ok(current_device) = pulse::with_sink(|ctrl| ctrl.get_default_device()) {
+        if current_device.name.as_deref() == Some(target) {
+            return json!({"ok": true, "sink": target, "note": "already on target device"});
         }
     }
 
@@ -200,11 +179,8 @@ pub fn set_output(target: &str) -> Value {
     info!("switching output to: {}", target);
     let mut res = engine::auto_apply_preset_for_device(target);
     if !res.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-        match SinkController::create()
-            .ok()
-            .map(|mut ctrl| ctrl.set_default_device(target))
-        {
-            Some(Ok(true)) => {
+        match pulse::with_sink(|ctrl| ctrl.set_default_device(target)) {
+            Ok(true) => {
                 res = json!({
                     "ok": true,
                     "sink": target,
@@ -212,24 +188,17 @@ pub fn set_output(target: &str) -> Value {
                     "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
                 });
             }
-            Some(Ok(false)) => {
+            Ok(false) => {
                 res = json!({
                     "ok": false,
                     "error": format!("failed to switch sink and apply EQ: sink '{}' rejected", target),
                     "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
                 });
             }
-            Some(Err(err)) => {
+            Err(err) => {
                 res = json!({
                     "ok": false,
                     "error": format!("failed to switch sink and apply EQ: {}", err),
-                    "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
-                });
-            }
-            None => {
-                res = json!({
-                    "ok": false,
-                    "error": "failed to switch sink and apply EQ: sink controller unavailable",
                     "eq_error": res.get("error").cloned().unwrap_or_else(|| Value::String("unknown error".to_string())),
                 });
             }

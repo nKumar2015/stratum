@@ -1,5 +1,6 @@
-use super::{config, engine};
-use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
+use super::{config, engine, pulse};
+use pulsectl::controllers::types::DeviceInfo;
+use pulsectl::controllers::DeviceControl;
 use serde_json::{json, Value};
 
 pub(crate) fn extract_first_percent(text: &str) -> Option<String> {
@@ -41,20 +42,10 @@ pub(crate) fn resolve_effective_default_sink(default_sink: &str) -> String {
     resolved
 }
 
-pub(crate) fn is_headphone_default_sink(default_sink: &str) -> String {
+pub(crate) fn is_headphone_default_sink(sinks: &[DeviceInfo], default_sink: &str) -> String {
     if default_sink.trim().is_empty() {
         return "no".to_string();
     }
-
-    let mut sink_ctrl = match SinkController::create() {
-        Ok(ctrl) => ctrl,
-        Err(_) => return "no".to_string(),
-    };
-
-    let sinks = match sink_ctrl.list_devices() {
-        Ok(list) => list,
-        Err(_) => return "no".to_string(),
-    };
 
     let Some(default_row) = sinks
         .iter()
@@ -152,29 +143,16 @@ pub(crate) fn parse_eq_bands(value: &Value) -> Option<(Vec<config::EqBand>, bool
 }
 
 pub(crate) fn fetch_current_audio_status() -> Value {
-    let mut sink_ctrl = match SinkController::create() {
-        Ok(ctrl) => ctrl,
-        Err(_) => {
-            return json!({"ok": false, "error": "failed to connect sink controller"});
-        }
-    };
-    let mut source_ctrl = match SourceController::create() {
-        Ok(ctrl) => ctrl,
-        Err(_) => {
-            return json!({"ok": false, "error": "failed to connect source controller"});
-        }
-    };
-
-    let server_info = match sink_ctrl.get_server_info() {
-        Ok(info) => info,
-        Err(_) => return json!({"ok": false, "error": "failed to query server info"}),
-    };
+    let (server_info, sink_devices) =
+        match pulse::with_sink(|ctrl| Ok((ctrl.get_server_info()?, ctrl.list_devices().unwrap_or_default()))) {
+            Ok(found) => found,
+            Err(_) => return json!({"ok": false, "error": "failed to query server info"}),
+        };
 
     let default_sink_raw = server_info.default_sink_name.unwrap_or_default();
     let default_source = server_info.default_source_name.unwrap_or_default();
     let default_sink = resolve_effective_default_sink(&default_sink_raw);
 
-    let sink_devices = sink_ctrl.list_devices().unwrap_or_default();
     let default_sink_dev = sink_devices
         .iter()
         .find(|dev| dev.name.as_deref().unwrap_or_default() == default_sink_raw)
@@ -209,7 +187,7 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         })
         .collect::<Vec<_>>();
 
-    let source_devices = source_ctrl.list_devices().unwrap_or_default();
+    let source_devices = pulse::with_source(|ctrl| ctrl.list_devices()).unwrap_or_default();
     let default_source_dev = source_devices
         .iter()
         .find(|dev| dev.name.as_deref().unwrap_or_default() == default_source);
@@ -240,7 +218,7 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         })
         .collect::<Vec<_>>();
 
-    let headphones = is_headphone_default_sink(&default_sink);
+    let headphones = is_headphone_default_sink(&sink_devices, &default_sink);
 
     json!({
         "ok": true,
