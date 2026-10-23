@@ -20,6 +20,7 @@ struct VertexIn {
     @location(9) p1: vec2<f32>,
     @location(10) radial_radius: f32,
     @location(11) uv: vec4<f32>,
+    @location(12) stroke: f32,
 };
 
 struct VertexOut {
@@ -35,6 +36,7 @@ struct VertexOut {
     @location(8) p1: vec2<f32>,
     @location(9) radial_radius: f32,
     @location(10) uv: vec4<f32>,
+    @location(11) stroke: f32,
 };
 
 @vertex
@@ -53,6 +55,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.p1 = in.p1;
     out.radial_radius = in.radial_radius;
     out.uv = in.uv;
+    out.stroke = in.stroke;
     return out;
 }
 
@@ -64,12 +67,19 @@ fn rounded_box_sdf(p: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    // Rects use the SDF for coverage; paths and textured quads are already
-    // bounded by their geometry.
+    // Rects use the SDF for coverage, fading over the pixel across their
+    // edge; an outlined rect keeps only the band `stroke` wide inside it.
+    // Antialiased strokes (radius -2) fade over the pixel at each side of
+    // the line. Other paths and textured quads are bounded by their geometry.
     var coverage = 1.0;
     if in.radius >= 0.0 {
         let d = rounded_box_sdf(in.local, in.half_size, max(in.radius, 0.0));
         coverage = 1.0 - smoothstep(-0.5, 0.5, d);
+        if in.stroke > 0.0 {
+            coverage = coverage * smoothstep(-0.5, 0.5, d + in.stroke);
+        }
+    } else if in.radius < -1.5 {
+        coverage = clamp(in.half_size.x + 0.5 - abs(in.local.x), 0.0, 1.0);
     }
 
     var color = in.color;

@@ -369,6 +369,14 @@ format, one draw call split into scissored segments. Notable invariants:
   different vertices. Keying on geometry alone made the power menu's selection
   outline stay on whichever tile was highlighted first.
 - `textureSampleLevel`, not `textureSample`, because of divergent control flow.
+- **Antialiasing has no MSAA**; coverage comes from the shader. A rect's quad
+  reaches half a pixel past it so the SDF can fade its edge. Outlines
+  (`DisplayList::push_outline`, which `ui::stroke_rounded` uses) are a band of
+  that same SDF, inside the edge. Butt-capped path strokes are tessellated a
+  pixel wider, with each vertex's signed distance from the centreline in
+  `local.x` (`radius` = `RADIUS_STROKE`). Fills and round-capped strokes are
+  still hard-edged: lyon puts same-side vertices next to each other in round
+  caps, which that distance cannot describe.
 - Clear to `Color::TRANSPARENT`, never a theme colour with zero alpha. The
   swapchain is premultiplied, so colour under zero alpha is *added* to what is
   below: the strip beside the rail that holds the inverted corners came out

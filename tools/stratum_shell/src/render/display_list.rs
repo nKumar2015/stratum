@@ -325,6 +325,10 @@ pub struct Image {
 #[derive(Clone, Debug)]
 pub enum DrawCommand {
     Rect(Rect),
+    /// The outline of a rounded rect, `width` thick, inside its edge.
+    /// Drawn from the same distance field as a rect's fill, so its corners
+    /// are true arcs and its edges antialiased.
+    Outline { rect: Rect, width: f32 },
     Path(Path),
     Image(Image),
     /// Restrict everything drawn after this to `rect`.
@@ -391,6 +395,10 @@ impl DisplayList {
 
     pub fn push_rect(&mut self, rect: Rect) {
         self.commands.push(DrawCommand::Rect(rect));
+    }
+
+    pub fn push_outline(&mut self, rect: Rect, width: f32) {
+        self.commands.push(DrawCommand::Outline { rect, width });
     }
 
     pub fn push_path(&mut self, path: Path) {
@@ -528,6 +536,8 @@ mod tests {
         assert_eq!(list.commands.len(), 2);
         assert!(matches!(list.commands[0], DrawCommand::Rect(_)));
         assert!(matches!(list.commands[1], DrawCommand::Path(_)));
+        list.push_outline(Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 5.0, color: Color::WHITE }, 1.5);
+        assert!(matches!(list.commands.last(), Some(DrawCommand::Outline { width, .. }) if *width == 1.5));
     }
 }
 

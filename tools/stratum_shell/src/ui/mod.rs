@@ -370,39 +370,12 @@ pub fn paint_frame(
     }
 }
 
-/// Stroke the outline of a rounded rectangle, leaving its inside untouched
-/// (a translucent fill shows through, unlike two stacked rects).
+/// Stroke the outline of a rounded rectangle, `width` thick inside its edge,
+/// leaving its inside untouched (a translucent fill shows through, unlike two
+/// stacked rects). It is drawn from the rect's own distance field, so it
+/// follows a fill of the same rect exactly, with true arcs at the corners.
 pub fn stroke_rounded(list: &mut DisplayList, rect: Rect, color: Color, width: f32) {
-    list.push_path(
-        Path::new(
-            vec![
-                PathCommand::MoveTo(Point::new(rect.x + rect.radius, rect.y)),
-                PathCommand::LineTo(Point::new(rect.x + rect.width - rect.radius, rect.y)),
-                PathCommand::QuadTo(
-                    Point::new(rect.x + rect.width, rect.y),
-                    Point::new(rect.x + rect.width, rect.y + rect.radius),
-                ),
-                PathCommand::LineTo(Point::new(rect.x + rect.width, rect.y + rect.height - rect.radius)),
-                PathCommand::QuadTo(
-                    Point::new(rect.x + rect.width, rect.y + rect.height),
-                    Point::new(rect.x + rect.width - rect.radius, rect.y + rect.height),
-                ),
-                PathCommand::LineTo(Point::new(rect.x + rect.radius, rect.y + rect.height)),
-                PathCommand::QuadTo(
-                    Point::new(rect.x, rect.y + rect.height),
-                    Point::new(rect.x, rect.y + rect.height - rect.radius),
-                ),
-                PathCommand::LineTo(Point::new(rect.x, rect.y + rect.radius)),
-                PathCommand::QuadTo(
-                    Point::new(rect.x, rect.y),
-                    Point::new(rect.x + rect.radius, rect.y),
-                ),
-                PathCommand::Close,
-            ],
-            Paint::Solid(color),
-        )
-        .stroked(width),
-    );
+    list.push_outline(Rect { color, ..rect }, width);
 }
 
 /// Center a line of text horizontally inside `rect`.

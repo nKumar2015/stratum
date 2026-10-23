@@ -133,6 +133,8 @@ struct Vertex {
     /// sequentially, so any extra field shifts `uv` and silently corrupts every
     /// textured quad.
     uv: [f32; 4],
+    /// A rect drawn as an outline this many pixels thick; 0 fills it.
+    stroke: f32,
 }
 
 impl Vertex {
@@ -156,9 +158,16 @@ impl Vertex {
             p1: [0.0; 2],
             radial_radius: 0.0,
             uv: [0.0; 4],
+            stroke: 0.0,
         }
     }
 }
+
+/// `radius` for path geometry, which is bounded by its triangles.
+const RADIUS_PATH: f32 = -1.0;
+/// `radius` for an antialiased stroke: `local.x` is the signed distance
+/// from the centreline and `half_size.x` the half width, both in pixels.
+const RADIUS_STROKE: f32 = -2.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -167,7 +176,7 @@ struct Globals {
     _pad: [f32; 2],
 }
 
-const VERTEX_ATTRS: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 13] = wgpu::vertex_attr_array![
     0 => Float32x2, // position
     1 => Float32x2, // local
     2 => Float32x2, // half_size
@@ -180,6 +189,7 @@ const VERTEX_ATTRS: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
     9 => Float32x2, // p1
     10 => Float32,  // radial_radius
     11 => Float32x4,// uv
+    12 => Float32,  // stroke
 ];
 
 /// Per-surface presentation state.
@@ -538,7 +548,8 @@ impl SurfaceRenderer {
 
         for command in &list.commands {
             match command {
-                DrawCommand::Rect(rect) => self.append_rect(&mut batch, rect),
+                DrawCommand::Rect(rect) => self.append_rect(&mut batch, rect, 0.0),
+                DrawCommand::Outline { rect, width } => self.append_rect(&mut batch, rect, *width),
                 DrawCommand::Path(path) => {
                     let key = path_hash(path);
                     used_paths.insert(key);
@@ -741,23 +752,30 @@ impl SurfaceRenderer {
         Ok(())
     }
 
-    fn append_rect(&self, out: &mut Batch, rect: &Rect) {
+    /// A rect, filled, or outlined `stroke` logical pixels thick.
+    fn append_rect(&self, out: &mut Batch, rect: &Rect, stroke: f32) {
         let scale = self.scale;
         let (x, y) = (rect.x * scale, rect.y * scale);
         let (w, h) = (rect.width * scale, rect.height * scale);
         let half = [w * 0.5, h * 0.5];
         let r = (rect.radius * scale).min(half[0]).min(half[1]);
         let color = rect.color.to_array();
+        // The edge is antialiased across a pixel centred on it, so the quad
+        // reaches half a pixel past the rect (`local` follows it).
+        let (px0, py0, px1, py1) = (x - 0.5, y - 0.5, x + w + 0.5, y + h + 0.5);
+        let (lx, ly) = (half[0] + 0.5, half[1] + 0.5);
 
-        for (px, py, lx, ly) in [
-            (x, y, -half[0], -half[1]),
-            (x + w, y, half[0], -half[1]),
-            (x + w, y + h, half[0], half[1]),
-            (x, y, -half[0], -half[1]),
-            (x + w, y + h, half[0], half[1]),
-            (x, y + h, -half[0], half[1]),
+        for (px, py, sx, sy) in [
+            (px0, py0, -1.0, -1.0),
+            (px1, py0, 1.0, -1.0),
+            (px1, py1, 1.0, 1.0),
+            (px0, py0, -1.0, -1.0),
+            (px1, py1, 1.0, 1.0),
+            (px0, py1, -1.0, 1.0),
         ] {
-            out.push(Vertex::solid([px, py], [lx, ly], half, r, color));
+            let mut vertex = Vertex::solid([px, py], [sx * lx, sy * ly], half, r, color);
+            vertex.stroke = stroke * scale;
+            out.push(vertex);
         }
     }
 }
@@ -810,7 +828,7 @@ fn append_textured_px(
         (x + w, y + h, u1, v1),
         (x, y + h, u0, v1),
     ] {
-        let mut vertex = Vertex::solid([px, py], [0.0, 0.0], [0.0, 0.0], -1.0, tint);
+        let mut vertex = Vertex::solid([px, py], [0.0, 0.0], [0.0, 0.0], RADIUS_PATH, tint);
         vertex.kind = 3.0;
         vertex.uv = [u, v, 0.0, 0.0];
         out.push(vertex);
@@ -841,7 +859,7 @@ fn append_quad_transformed(
     ];
     for (px, py, u, v) in corners {
         let (tx, ty) = t.apply(px, py);
-        let mut vertex = Vertex::solid([tx * scale, ty * scale], [0.0, 0.0], [0.0, 0.0], -1.0, tint);
+        let mut vertex = Vertex::solid([tx * scale, ty * scale], [0.0, 0.0], [0.0, 0.0], RADIUS_PATH, tint);
         vertex.kind = 3.0;
         vertex.uv = [u, v, 0.0, 0.0];
         out.push(vertex);
@@ -902,10 +920,22 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
         }
     };
 
-    let mut buffers: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
+    // Each vertex is its position and, for an antialiased stroke, its signed
+    // distance from the centreline.
+    let mut buffers: VertexBuffers<[f32; 3], u32> = VertexBuffers::new();
+    // Butt-capped strokes are antialiased: tessellated a pixel wider, with
+    // each vertex's side giving the shader its distance from the centreline,
+    // so the edge fades over that pixel. Round caps and joins put vertices of
+    // one side next to each other, which that distance cannot describe, so
+    // those strokes keep hard edges.
+    let mut half_width = 0.0;
+    let antialiased = path.stroke.is_some() && !path.round;
     if let Some(width) = path.stroke {
         let mut tess = StrokeTessellator::new();
-        let mut opts = StrokeOptions::default().with_line_width(width * scale);
+        half_width = width * scale * 0.5;
+        let fringe = if antialiased { 1.0 } else { 0.0 };
+        let reach = half_width + fringe * 0.5;
+        let mut opts = StrokeOptions::default().with_line_width(width * scale + fringe);
         if path.round {
             opts = opts
                 .with_line_join(lyon::tessellation::LineJoin::Round)
@@ -916,7 +946,8 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
                 &lyon_path,
                 &opts,
                 &mut BuffersBuilder::new(&mut buffers, |v: StrokeVertex| {
-                    [v.position().x, v.position().y]
+                    let side = if v.side() == lyon::tessellation::Side::Positive { 1.0 } else { -1.0 };
+                    [v.position().x, v.position().y, side * reach]
                 }),
             )
             .is_err()
@@ -930,7 +961,7 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
                 &lyon_path,
                 &FillOptions::default(),
                 &mut BuffersBuilder::new(&mut buffers, |v: FillVertex| {
-                    [v.position().x, v.position().y]
+                    [v.position().x, v.position().y, 0.0]
                 }),
             )
             .is_err()
@@ -941,14 +972,12 @@ fn tessellate_path(path: &Path, scale: f32) -> Vec<Vertex> {
 
     let mut out = Vec::with_capacity(buffers.indices.len());
     for index in buffers.indices {
-        let p = buffers.vertices[index as usize];
-        out.push(Vertex::solid(
-            p,
-            [0.0, 0.0],
-            [0.0, 0.0],
-            -1.0,
-            fill.to_array(),
-        ));
+        let [x, y, distance] = buffers.vertices[index as usize];
+        out.push(if antialiased {
+            Vertex::solid([x, y], [distance, 0.0], [half_width, 0.0], RADIUS_STROKE, fill.to_array())
+        } else {
+            Vertex::solid([x, y], [0.0, 0.0], [0.0, 0.0], RADIUS_PATH, fill.to_array())
+        });
     }
     out
 }
@@ -1311,6 +1340,35 @@ mod tests {
         .stroked(3.0);
         let verts = tessellate_path(&path, 2.0);
         assert!(!verts.is_empty(), "expected stroke geometry");
+    }
+
+    #[test]
+    fn a_butt_stroke_carries_its_distance_from_the_centreline() {
+        let path = Path::new(
+            vec![PathCommand::MoveTo(Point::new(0.0, 10.0)), PathCommand::LineTo(Point::new(50.0, 10.0))],
+            Paint::Solid(Color::WHITE),
+        )
+        .stroked(2.0);
+        let verts = tessellate_path(&path, 2.0);
+        // 2 logical px at 2x is 4 px, half of it 2, plus the half-pixel fringe.
+        assert!(verts.iter().all(|v| v.radius == RADIUS_STROKE && v.half_size[0] == 2.0));
+        assert!(verts.iter().all(|v| v.local[0].abs() == 2.5));
+        assert!(verts.iter().any(|v| v.local[0] > 0.0) && verts.iter().any(|v| v.local[0] < 0.0));
+        // The geometry is a pixel wider than the line, for the fringe.
+        let ys: Vec<f32> = verts.iter().map(|v| v.position[1]).collect();
+        let spread = ys.iter().cloned().fold(f32::MIN, f32::max) - ys.iter().cloned().fold(f32::MAX, f32::min);
+        assert_eq!(spread, 5.0);
+    }
+
+    #[test]
+    fn a_round_stroke_keeps_hard_edges() {
+        let path = Path::new(
+            vec![PathCommand::MoveTo(Point::new(0.0, 10.0)), PathCommand::LineTo(Point::new(50.0, 10.0))],
+            Paint::Solid(Color::WHITE),
+        )
+        .stroked(2.0)
+        .rounded();
+        assert!(tessellate_path(&path, 1.0).iter().all(|v| v.radius == RADIUS_PATH));
     }
 
     #[test]
