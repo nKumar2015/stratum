@@ -232,6 +232,8 @@ impl ScreenshotViewer {
         self.open = false;
         self.image = None;
         self.strokes.clear();
+        // The capture is a full image; give its pages back.
+        crate::memory::release_freed();
         self.gesture = None;
         self.status = None;
         self.working = false;

@@ -545,6 +545,7 @@ impl App {
             if let Some(window) = self.settings.take() {
                 debug!("closing settings window");
                 drop(window);
+                crate::memory::release_freed();
             }
         }
 

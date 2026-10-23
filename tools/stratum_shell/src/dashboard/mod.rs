@@ -380,6 +380,7 @@ impl Dashboard {
         self.focus.field = None;
         let today = today();
         (self.year, self.month, self.selected) = (today.year(), today.month(), today);
+        crate::memory::release_freed();
     }
 
     /// The events overlapping `from`..`to`, expanded once per calendar

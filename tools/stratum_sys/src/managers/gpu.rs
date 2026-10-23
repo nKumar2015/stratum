@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use lazy_static::lazy_static;
 
@@ -200,6 +200,8 @@ type MemoryInfo = unsafe extern "C" fn(*mut c_void, *mut NvmlMemory) -> c_int;
 /// The NVML entry points used here. Temperature and memory are optional, so
 /// a driver without them still reports load.
 struct Nvml {
+    /// The `dlopen` handle, closed by [`release`].
+    handle: *mut c_void,
     init: NvmlCall,
     shutdown: NvmlCall,
     handle_by_pci: HandleByPci,
@@ -235,53 +237,85 @@ struct NvmlReading {
     vram: Option<(u64, u64)>,
 }
 
-/// NVML, loaded once and never unloaded. `None` without the NVIDIA driver.
-fn nvml() -> Option<&'static Nvml> {
-    static NVML: OnceLock<Option<Nvml>> = OnceLock::new();
-    NVML.get_or_init(|| {
-        // The NixOS driver directory is not on the default search path of a
-        // process started without the session's LD_LIBRARY_PATH.
-        let handle = ["libnvidia-ml.so.1", "/run/opengl-driver/lib/libnvidia-ml.so.1"]
-            .iter()
-            .find_map(|name| {
-                let name = CString::new(*name).ok()?;
-                // SAFETY: dlopen on a NUL-terminated name; the handle is kept
-                // for the life of the process.
-                let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
-                (!handle.is_null()).then_some(handle)
-            })?;
-        let symbol = |name: &str| -> Option<*mut c_void> {
-            let name = CString::new(name).ok()?;
-            // SAFETY: dlsym on a live handle and a NUL-terminated name.
-            let ptr = unsafe { libc::dlsym(handle, name.as_ptr()) };
-            (!ptr.is_null()).then_some(ptr)
-        };
-        // SAFETY: each pointer is NVML's exported function of that name,
-        // whose C signature the field's type matches (nvml.h).
+// SAFETY: the handle and function pointers are process-wide and NVML's
+// calls are thread-safe; the mutex below serialises every use anyway.
+unsafe impl Send for Nvml {}
+
+/// NVML while it is loaded: from the first NVIDIA reading until
+/// [`release`]. Loaded, it keeps ~15 MB of zeroed statics resident.
+static NVML: Mutex<Option<Nvml>> = Mutex::new(None);
+
+/// Unload NVML until the next reading, when nothing samples GPUs (the
+/// dashboard closed). Its CUDA helper thread stays, with `libcuda`: that is
+/// ~1.5 MB, and unloading a library a thread runs in is not safe.
+pub fn release() {
+    let mut nvml = NVML.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(nvml) = nvml.take() {
+        // SAFETY: every NVML session was shut down before its call returned,
+        // and the mutex keeps any new one from starting during the close.
         unsafe {
-            Some(Nvml {
-                init: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlInit_v2")?),
-                shutdown: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlShutdown")?),
-                handle_by_pci: std::mem::transmute::<*mut c_void, HandleByPci>(symbol(
-                    "nvmlDeviceGetHandleByPciBusId_v2",
-                )?),
-                utilization: std::mem::transmute::<*mut c_void, Utilization>(symbol(
-                    "nvmlDeviceGetUtilizationRates",
-                )?),
-                temperature: symbol("nvmlDeviceGetTemperature")
-                    .map(|p| std::mem::transmute::<*mut c_void, Temperature>(p)),
-                memory: symbol("nvmlDeviceGetMemoryInfo").map(|p| std::mem::transmute::<*mut c_void, MemoryInfo>(p)),
-            })
+            libc::dlclose(nvml.handle);
         }
-    })
-    .as_ref()
+    }
+}
+
+/// Load NVML. `None` without the NVIDIA driver.
+fn load_nvml() -> Option<Nvml> {
+    // The NixOS driver directory is not on the default search path of a
+    // process started without the session's LD_LIBRARY_PATH.
+    let handle = ["libnvidia-ml.so.1", "/run/opengl-driver/lib/libnvidia-ml.so.1"].iter().find_map(|name| {
+        let name = CString::new(*name).ok()?;
+        // SAFETY: dlopen on a NUL-terminated name; the handle is kept until
+        // `release`.
+        let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+        (!handle.is_null()).then_some(handle)
+    })?;
+    // SAFETY: a live handle from dlopen above.
+    let nvml = unsafe { nvml_symbols(handle) };
+    if nvml.is_none() {
+        // SAFETY: a handle this function opened and nothing else uses.
+        unsafe {
+            libc::dlclose(handle);
+        }
+    }
+    nvml
+}
+
+/// NVML's entry points in `handle`; `None` when a required one is missing.
+///
+/// # Safety
+/// `handle` must be a live `dlopen` handle on libnvidia-ml.
+unsafe fn nvml_symbols(handle: *mut c_void) -> Option<Nvml> {
+    let symbol = |name: &str| -> Option<*mut c_void> {
+        let name = CString::new(name).ok()?;
+        // SAFETY: dlsym on a live handle and a NUL-terminated name.
+        let ptr = unsafe { libc::dlsym(handle, name.as_ptr()) };
+        (!ptr.is_null()).then_some(ptr)
+    };
+    // SAFETY: each pointer is NVML's exported function of that name, whose C
+    // signature the field's type matches (nvml.h).
+    unsafe {
+        Some(Nvml {
+            handle,
+            init: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlInit_v2")?),
+            shutdown: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlShutdown")?),
+            handle_by_pci: std::mem::transmute::<*mut c_void, HandleByPci>(symbol("nvmlDeviceGetHandleByPciBusId_v2")?),
+            utilization: std::mem::transmute::<*mut c_void, Utilization>(symbol("nvmlDeviceGetUtilizationRates")?),
+            temperature: symbol("nvmlDeviceGetTemperature").map(|p| std::mem::transmute::<*mut c_void, Temperature>(p)),
+            memory: symbol("nvmlDeviceGetMemoryInfo").map(|p| std::mem::transmute::<*mut c_void, MemoryInfo>(p)),
+        })
+    }
 }
 
 /// The NVIDIA GPU at PCI address `slot`: load, temperature and memory. NVML
 /// is initialised for the one query only, so the shell holds no handle that
 /// could keep the GPU from suspending.
 fn nvml_read(slot: &str) -> Option<NvmlReading> {
-    let nvml = nvml()?;
+    let mut loaded = NVML.lock().unwrap_or_else(|p| p.into_inner());
+    if loaded.is_none() {
+        *loaded = load_nvml();
+    }
+    let nvml = loaded.as_ref()?;
     let slot = CString::new(slot).ok()?;
     // SAFETY: init and shutdown are paired (NVML counts them); the device
     // handle is used only between them, and every out-pointer is valid.

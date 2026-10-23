@@ -112,6 +112,8 @@ struct FeedState {
     open: bool,
     /// Set when the dashboard opens, until the sampler has published.
     opened: bool,
+    /// Set when it closes, until the sampler has unloaded NVML.
+    closed: bool,
     /// `None` until the shell has read its config: the sampler waits.
     settings: Option<Settings>,
     /// The player picked on the dashboard; `None` follows whichever plays.
@@ -129,6 +131,7 @@ impl Feed {
         if state.open != open {
             state.open = open;
             state.opened |= open;
+            state.closed |= !open;
             self.wake.notify_all();
         }
     }
@@ -168,6 +171,15 @@ impl Feed {
         loop {
             // Sleep until a sample is due or the dashboard opens.
             let settings = loop {
+                // Closed, GPUs are not read: unload NVML, whose statics
+                // alone keep ~15 MB resident. Here rather than on the UI
+                // thread, which would wait out a reading in progress.
+                if std::mem::take(&mut guard.closed) {
+                    drop(guard);
+                    stratum_sys::managers::gpu::release();
+                    guard = self.lock();
+                    continue;
+                }
                 let active = guard.settings.as_ref().is_some_and(|s| guard.open || s.background);
                 let now = Instant::now();
                 if let Some(settings) = guard.settings.as_ref().filter(|_| guard.opened || (active && now >= next)) {

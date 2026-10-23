@@ -22,6 +22,7 @@ mod ipc;
 mod notification_store;
 mod notifications;
 mod lock;
+mod memory;
 mod osd;
 mod pam;
 mod polkit_dialog;
@@ -64,6 +65,7 @@ fn main() -> ExitCode {
         .init();
 
     info!("stratum-shell starting");
+    memory::tune_allocator();
 
     match wayland::run() {
         Ok(()) => {

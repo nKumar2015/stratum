@@ -146,8 +146,12 @@ impl Screenshot {
     pub fn close(&mut self) {
         self.phase = Phase::Closed;
         // A full frame per output is tens of megabytes; nothing keeps them.
+        let had_frames = !self.frames.is_empty();
         self.frames.clear();
         self.reset_selection();
+        if had_frames {
+            crate::memory::release_freed();
+        }
     }
 
     fn reset_selection(&mut self) {
