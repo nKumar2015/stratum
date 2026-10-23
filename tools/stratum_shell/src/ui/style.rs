@@ -87,8 +87,6 @@ pub struct Typography {
     pub title_bar: f32,
     /// Packaged tray glyphs and small labels.
     pub tray: f32,
-    /// Page and section headings.
-    pub heading: f32,
     /// Default body text.
     pub body: f32,
     /// Secondary text and captions.
@@ -113,7 +111,6 @@ impl Default for Typography {
             title: 14.0,
             title_bar: 13.0,
             tray: 13.0,
-            heading: 18.0,
             body: 13.0,
             caption: 11.0,
             label: 12.0,
@@ -906,11 +903,13 @@ impl Default for ScreenshotViewerMetrics {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EqualizerMetrics {
-    /// Text and caption sizes, and the height of a line of either.
+    /// The name and value fields' text, and the slider labels.
     pub text: f32,
     pub caption: f32,
-    pub line: f32,
+    /// Between the selected band's header and its sliders, and between
+    /// sliders.
     pub gap: f32,
+    /// The value and name fields: corner radius and border.
     pub radius: f32,
     pub border: f32,
     /// The response graph.
@@ -922,15 +921,14 @@ pub struct EqualizerMetrics {
     /// Samples along the curve, and its stroke width.
     pub curve_steps: usize,
     pub curve_width: f32,
-    pub button_height: f32,
-    /// The band's On/Off and Remove buttons, and its filter-type button.
-    pub small_button: f32,
-    pub type_button: f32,
     /// A labelled slider row: its height, label column, and value column.
     pub slider_row: f32,
     pub label_width: f32,
     pub value_width: f32,
-    pub preset_row: f32,
+    /// Preset cards: the narrowest before the grid drops a column, and
+    /// their height.
+    pub preset_min_width: f32,
+    pub preset_height: f32,
 }
 
 impl Default for EqualizerMetrics {
@@ -938,23 +936,20 @@ impl Default for EqualizerMetrics {
         Self {
             text: 13.0,
             caption: 11.0,
-            line: 18.0,
             gap: 8.0,
-            radius: 6.0,
+            radius: 8.0,
             border: 1.0,
-            graph_height: 150.0,
-            graph_padding: 8.0,
+            graph_height: 180.0,
+            graph_padding: 12.0,
             point: 8.0,
             point_reach: 14.0,
             curve_steps: 96,
             curve_width: 2.0,
-            button_height: 28.0,
-            small_button: 64.0,
-            type_button: 86.0,
-            slider_row: 24.0,
-            label_width: 52.0,
-            value_width: 64.0,
-            preset_row: 26.0,
+            slider_row: 28.0,
+            label_width: 56.0,
+            value_width: 76.0,
+            preset_min_width: 150.0,
+            preset_height: 56.0,
         }
     }
 }
@@ -1152,8 +1147,6 @@ pub struct WindowMetrics {
     pub nav_label_x: f32,
     /// Padding inside the content area.
     pub content_padding: f32,
-    /// Height reserved for a page heading.
-    pub heading_height: f32,
     /// Distance one wheel notch scrolls a page.
     pub scroll_step: f32,
 }
@@ -1176,7 +1169,6 @@ impl Default for WindowMetrics {
             nav_icon_x: 10.0,
             nav_label_x: 36.0,
             content_padding: 24.0,
-            heading_height: 40.0,
             scroll_step: 48.0,
         }
     }
@@ -1190,20 +1182,12 @@ pub struct PageMetrics {
     pub card_padding: f32,
     /// Radius of a card or tile.
     pub card_radius: f32,
-    /// Height of a normal list row.
-    pub row_height: f32,
-    /// Vertical pitch between list rows.
-    pub row_spacing: f32,
-    /// Height of a stat row.
+    /// Height of a stat row (the Display page's preview).
     pub stat_height: f32,
-    /// Vertical pitch between stat rows.
-    pub stat_spacing: f32,
     /// Height of a button.
     pub button_height: f32,
     /// Radius of a button.
     pub button_radius: f32,
-    /// Width of a wide button.
-    pub button_width: f32,
     /// Track height of a slider.
     pub slider_track: f32,
     /// Diameter of a slider knob.
@@ -1274,13 +1258,9 @@ impl Default for PageMetrics {
         Self {
             card_padding: 14.0,
             card_radius: 10.0,
-            row_height: 40.0,
-            row_spacing: 44.0,
             stat_height: 32.0,
-            stat_spacing: 38.0,
             button_height: 32.0,
             button_radius: 8.0,
-            button_width: 140.0,
             slider_track: 6.0,
             slider_knob: 14.0,
             toggle_width: 44.0,

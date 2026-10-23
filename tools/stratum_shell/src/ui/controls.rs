@@ -5,7 +5,7 @@
 //! interacting. Page code stays linear and there is no second widget tree.
 
 use crate::render::display_list::{DisplayList, Rect};
-use crate::ui::{self, InputState, PaintCtx};
+use crate::ui::{InputState, PaintCtx};
 
 /// Draw a horizontal slider. Returns a new 0..=1 value while dragging.
 pub fn slider(
@@ -102,53 +102,6 @@ pub fn switch(
         .map(|(x, y)| sw.contains(crate::render::display_list::Point::new(x, y)))
         .unwrap_or(false);
     (hit && clicked).then_some(!on)
-}
-
-/// Draw a full-width button. Returns true when clicked.
-pub fn button(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    rect: Rect,
-    label: &str,
-    input: &InputState,
-    clicked: bool,
-    accent: bool,
-) -> bool {
-    let fill = if accent {
-        ctx.theme.primary
-    } else {
-        ctx.theme.bg_widget
-    };
-    list.push_rect(Rect { color: fill, ..rect });
-
-    let text_color = if accent {
-        ctx.theme.bg_main
-    } else {
-        ctx.theme.text_main
-    };
-    let style = crate::text::TextStyle {
-        family: std::sync::Arc::from(ctx.theme.font.as_str()),
-        size: ctx.metrics.typography.body,
-        weight: ctx.metrics.typography.weight_bold,
-        color: text_color,
-    };
-    let width = ctx.text.measure(label, &style).0;
-    ui::paint_text_vcentered(
-        ctx,
-        list,
-        label,
-        rect.x + (rect.width - width) * 0.5,
-        rect,
-        ctx.metrics.typography.body,
-        ctx.metrics.typography.weight_bold,
-        text_color,
-    );
-
-    let hit = input
-        .pointer
-        .map(|(x, y)| rect.contains(crate::render::display_list::Point::new(x, y)))
-        .unwrap_or(false);
-    hit && clicked
 }
 
 /// Convert a pointer position inside `rect` to a 0..=1 fraction along x.

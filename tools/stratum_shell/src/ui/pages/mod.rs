@@ -281,8 +281,6 @@ impl Pages {
 
     /// Paint `page` into `area`. Returns the bottom of what it drew, which
     /// may lie below `area`: the window scrolls the page by the difference.
-    /// Pages not yet built on [`layout`] fit their own content and report
-    /// the area's bottom.
     pub fn paint(
         &mut self,
         page: Page,
@@ -293,72 +291,30 @@ impl Pages {
     ) -> f32 {
         let clicked = self.clicked;
         let pending = &mut self.pending;
-        let fitted = area.y + area.height;
         match page {
             Page::Overview => {
                 let (bottom, navigate) =
                     self.overview.paint(ctx, list, area, input, clicked, pending);
                 self.navigate = navigate.or(self.navigate);
-                return bottom;
+                bottom
             }
-            Page::Power => {
-                return self.power.paint(ctx, list, area, input, clicked, pending);
-            }
-            Page::Audio => {
-                return self.audio.paint(ctx, list, area, input, clicked, pending);
-            }
+            Page::Power => self.power.paint(ctx, list, area, input, clicked, pending),
+            Page::Audio => self.audio.paint(ctx, list, area, input, clicked, pending),
             Page::Equalizer => self.equalizer.paint(ctx, list, area, input, clicked, pending),
-            Page::Bluetooth => {
-                return self.bluetooth.paint(ctx, list, area, input, clicked, pending);
-            }
-            Page::Wifi => {
-                return self.wifi.paint(ctx, list, area, input, clicked, pending);
-            }
-            Page::Battery => {
-                return self.battery.paint(ctx, list, area, input, clicked, pending);
-            }
+            Page::Bluetooth => self.bluetooth.paint(ctx, list, area, input, clicked, pending),
+            Page::Wifi => self.wifi.paint(ctx, list, area, input, clicked, pending),
+            Page::Battery => self.battery.paint(ctx, list, area, input, clicked, pending),
             Page::Notifications => {
-                return self.notifications.paint(ctx, list, area, input, clicked, pending);
+                self.notifications.paint(ctx, list, area, input, clicked, pending)
             }
-            Page::Display => {
-                return self.display.paint(ctx, list, area, input, clicked, pending);
-            }
+            Page::Display => self.display.paint(ctx, list, area, input, clicked, pending),
         }
-        fitted
     }
 }
 
 impl Default for Pages {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Draw a page heading and return the content rect below it.
-pub(crate) fn heading(
-    ctx: &mut PaintCtx<'_>,
-    list: &mut DisplayList,
-    area: Rect,
-    title: &str,
-) -> Rect {
-    crate::ui::paint_text_vcentered(
-        ctx,
-        list,
-        title,
-        area.x,
-        Rect {
-            height: ctx.metrics.page.button_height,
-            ..area
-        },
-        ctx.metrics.typography.heading,
-        ctx.metrics.typography.weight_bold,
-        ctx.theme.text_main,
-    );
-    let height = ctx.metrics.window.heading_height;
-    Rect {
-        y: area.y + height,
-        height: (area.height - height).max(0.0),
-        ..area
     }
 }
 

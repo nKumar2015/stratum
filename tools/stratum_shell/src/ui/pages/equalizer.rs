@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 
 use crate::actions::SystemAction;
 use crate::render::display_list::{Color, DisplayList, Paint, Path, PathCommand, Point, Rect};
-use crate::ui::pages::heading;
+use crate::ui::pages::layout::{self, rect, Card};
 use crate::ui::text_field::{self, FieldKey, FieldStyle, TextField};
 use crate::ui::{self, controls, InputState, PaintCtx};
 
@@ -440,6 +440,15 @@ fn format_freq(hz: f64) -> String {
     }
 }
 
+/// A band's chip: "62", "1k", "1.4k", "16k".
+fn chip_label(hz: f64) -> String {
+    if hz < 1000.0 {
+        return format!("{}", hz.round());
+    }
+    let khz = (hz / 100.0).round() / 10.0;
+    if khz.fract() == 0.0 { format!("{khz}k") } else { format!("{khz:.1}k") }
+}
+
 fn filter_label(kind: &str) -> &'static str {
     match kind {
         "low_shelf" => "Low shelf",
@@ -579,6 +588,7 @@ impl EqualizerPage {
         }
     }
 
+    /// Returns the bottom of the page.
     pub fn paint(
         &mut self,
         ctx: &mut PaintCtx<'_>,
@@ -587,9 +597,11 @@ impl EqualizerPage {
         input: &InputState,
         clicked: bool,
         pending: &mut Vec<SystemAction>,
-    ) {
+    ) -> f32 {
         let m = ctx.metrics.equalizer.clone();
-        let area = heading(ctx, list, area, "Equalizer");
+        let page = ctx.metrics.page.clone();
+        let typo = ctx.metrics.typography.clone();
+        let theme = ctx.theme.clone();
 
         // Follow the current output.
         let audio = ctx.state.audio.get();
@@ -621,165 +633,209 @@ impl EqualizerPage {
         if clicked && self.editing.is_some() && !pointer.zip(self.edit_rect).is_some_and(|(p, r)| r.contains(p)) {
             self.commit_editing();
         }
-        let mut cursor = Cursor { x: area.x, y: area.y, width: area.width };
-        let caption = |ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, text: &str, color: Color| {
-            ui::paint_text_vcentered(ctx, list, text, rect.x, rect, m.caption, ctx.metrics.typography.weight_regular, color);
+        let area = layout::column(area, page.max_width);
+        let summary = if device.is_empty() {
+            "No output device".to_string()
+        } else {
+            format!("{device_label} \u{b7} {}", self.model.preset)
         };
-
+        // Reset and Apply sit at the header's right; Apply leads.
+        let gap = page.grid_gap * 0.5;
+        let reset_w = layout::text_button_width(ctx, "Reset");
+        let apply_w = layout::text_button_width(ctx, "Apply");
+        let buttons_w = if device.is_empty() { 0.0 } else { reset_w + gap + apply_w + page.grid_gap };
+        let (head, body) = layout::header(ctx, list, Rect { width: area.width - buttons_w, ..area }, "Equalizer", &summary);
+        let body = Rect { width: area.width, ..body };
         if device.is_empty() {
-            caption(ctx, list, cursor.take(m.line), "No output device", ctx.theme.text_muted);
-            return;
+            return head.y + head.height;
         }
-        let row = cursor.take(m.line);
-        caption(ctx, list, row, &format!("{device_label} \u{b7} {}", self.model.preset), ctx.theme.text_muted);
-        cursor.gap(m.gap);
-
-        // The graph.
-        let graph = cursor.take(m.graph_height);
-        self.paint_graph(ctx, list, graph, pointer, input, clicked);
-        cursor.gap(m.gap);
-
-        // Apply / Reset / + Band.
-        let row = cursor.take(m.button_height);
-        let w = (row.width - m.gap * 2.0) / 3.0;
-        let button = |i: f32| Rect { x: row.x + i * (w + m.gap), width: w, radius: m.radius, ..row };
-        if controls::button(ctx, list, button(0.0), "Apply", input, clicked, true) {
-            pending.extend(self.model.apply());
-        }
-        if controls::button(ctx, list, button(1.0), "Reset", input, clicked, false) {
+        let button_y = head.y + (head.height - page.badge) * 0.5;
+        let apply_x = area.x + area.width - apply_w;
+        if layout::text_button(ctx, list, apply_x - gap - reset_w, button_y, "Reset", true, input, clicked) {
             pending.extend(self.model.reset());
         }
-        if controls::button(ctx, list, button(2.0), "+ Band", input, clicked, false) {
-            self.model.add_band();
+        if layout::chip(ctx, list, apply_x, button_y, "Apply", true, input, clicked) {
+            pending.extend(self.model.apply());
         }
-        cursor.gap(m.gap);
 
-        // Preamp.
-        let preamp = self.model.preamp_db;
-        let limits = self.model.limits;
-        if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Preamp", &format!("{preamp:+.1} dB"), format!("{preamp:.1}"), ((preamp - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32, Drag::Preamp, input, clicked) {
-            self.model.set_preamp(limits.min_gain + v as f64 * (limits.max_gain - limits.min_gain));
-        }
-        cursor.gap(m.gap);
+        // The response.
+        let mut y = layout::section(ctx, list, body, body.y, "Response");
+        let graph = rect(body.x, y, body.width, m.graph_height);
+        self.paint_graph(ctx, list, graph, pointer, input, clicked);
+        y += m.graph_height + page.section_spacing;
+
+        // A chip per band, then "+ Band".
+        y = layout::section(ctx, list, body, y, &format!("Bands \u{b7} {}", self.model.bands.len()));
+        y = self.paint_band_chips(ctx, list, body, y, input, clicked) + page.grid_gap;
 
         // The selected band.
+        let limits = self.model.limits;
         let index = self.model.selected.min(self.model.bands.len().saturating_sub(1));
+        let pad = page.card_padding;
         if let Some(band) = self.model.bands.get(index).cloned() {
-            let row = cursor.take(m.button_height);
-            caption(ctx, list, row, &format!("Band {} of {}", index + 1, self.model.bands.len()), ctx.theme.text_main);
-            let small = |i: f32, width: f32| Rect {
-                x: row.x + row.width - (i + 1.0) * (width + m.gap) + m.gap,
-                width,
-                radius: m.radius,
-                ..row
-            };
-            if self.model.bands.len() > 1 {
-                if controls::button(ctx, list, small(0.0, m.small_button), "Remove", input, clicked, false) {
-                    self.model.remove_band(index);
-                }
-            } else {
-                disabled_button(ctx, list, small(0.0, m.small_button), "Remove");
+            let height = pad * 2.0 + page.badge + m.gap + m.slider_row * 3.0 + m.gap * 2.0;
+            let card = rect(body.x, y, body.width, height);
+            layout::card(ctx, list, card, Card::Plain);
+            let top = card.y + pad;
+
+            // Its type, whether it is on, and Remove, at the right.
+            let kind = filter_label(&band.filter_type);
+            let on = if band.enabled { "On" } else { "Off" };
+            let kind_w = layout::text_button_width(ctx, kind);
+            let on_w = layout::text_button_width(ctx, on);
+            let remove_w = layout::text_button_width(ctx, "Remove");
+            let mut x = card.x + card.width - pad - remove_w;
+            if layout::text_button(ctx, list, x, top, "Remove", self.model.bands.len() > 1, input, clicked) {
+                self.model.remove_band(index);
             }
-            if controls::button(ctx, list, small(1.0, m.small_button), if band.enabled { "On" } else { "Off" }, input, clicked, band.enabled) {
+            x -= gap + on_w;
+            if layout::chip(ctx, list, x, top, on, band.enabled, input, clicked) {
                 self.model.toggle_enabled(index);
             }
-            if controls::button(ctx, list, small(2.0, m.type_button), filter_label(&band.filter_type), input, clicked, false) {
+            x -= gap + kind_w;
+            if layout::text_button(ctx, list, x, top, kind, true, input, clicked) {
                 self.model.cycle_type(index);
             }
-            cursor.gap(m.gap);
+            let title = format!("Band {} of {}", index + 1, self.model.bands.len());
+            let detail = format!("{} \u{b7} {kind}", format_freq(band.frequency_hz));
+            layout::two_lines(ctx, list, rect(card.x + pad, top, x - page.grid_gap - card.x - pad, page.badge), &title, &detail, theme.text_muted);
+
+            let row = |i: f32| rect(card.x + pad, top + page.badge + m.gap + i * (m.slider_row + m.gap), card.width - pad * 2.0, m.slider_row);
             let norm = limits.norm_of(band.frequency_hz) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Freq", &format_freq(band.frequency_hz), format!("{}", band.frequency_hz.round()), norm, Drag::Frequency, input, clicked) {
+            if let Some(v) = self.slider_row(ctx, list, row(0.0), "Freq", &format_freq(band.frequency_hz), format!("{}", band.frequency_hz.round()), norm, Drag::Frequency, input, clicked) {
                 self.model.set_frequency(index, limits.freq_at(v as f64).round());
             }
             let gain_norm = ((band.gain_db - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Gain", &format!("{:+.1} dB", band.gain_db), format!("{:.1}", band.gain_db), gain_norm, Drag::Gain, input, clicked) {
+            if let Some(v) = self.slider_row(ctx, list, row(1.0), "Gain", &format!("{:+.1} dB", band.gain_db), format!("{:.1}", band.gain_db), gain_norm, Drag::Gain, input, clicked) {
                 // Half-decibel steps.
                 let gain = limits.min_gain + v as f64 * (limits.max_gain - limits.min_gain);
                 self.model.set_gain(index, (gain * 2.0).round() / 2.0);
             }
             let q_norm = ((band.q - limits.min_q) / (limits.max_q - limits.min_q)) as f32;
-            if let Some(v) = self.slider_row(ctx, list, &mut cursor, "Q", &format!("{:.2}", band.q), format!("{:.2}", band.q), q_norm, Drag::Q, input, clicked) {
+            if let Some(v) = self.slider_row(ctx, list, row(2.0), "Q", &format!("{:.2}", band.q), format!("{:.2}", band.q), q_norm, Drag::Q, input, clicked) {
                 self.model.set_q(index, ((limits.min_q + v as f64 * (limits.max_q - limits.min_q)) * 100.0).round() / 100.0);
             }
+            y = card.y + card.height;
         }
-        cursor.gap(m.gap);
 
-        // Presets.
-        let row = cursor.take(m.line);
-        caption(ctx, list, row, "Presets", ctx.theme.text_muted);
+        // Preamp.
+        y += page.section_spacing;
+        y = layout::section(ctx, list, body, y, "Preamp");
+        let card = rect(body.x, y, body.width, pad * 2.0 + m.slider_row);
+        layout::card(ctx, list, card, Card::Plain);
+        let preamp = self.model.preamp_db;
+        let preamp_norm = ((preamp - limits.min_gain) / (limits.max_gain - limits.min_gain)) as f32;
+        let row = rect(card.x + pad, card.y + pad, card.width - pad * 2.0, m.slider_row);
+        if let Some(v) = self.slider_row(ctx, list, row, "Level", &format!("{preamp:+.1} dB"), format!("{preamp:.1}"), preamp_norm, Drag::Preamp, input, clicked) {
+            self.model.set_preamp(limits.min_gain + v as f64 * (limits.max_gain - limits.min_gain));
+        }
+        y = card.y + card.height + page.section_spacing;
+
+        // Presets: a card each, the current one tinted.
+        y = layout::section(ctx, list, body, y, "Presets");
         let presets = self.model.presets.clone();
-        for preset in &presets {
-            let row = cursor.take(m.preset_row);
-            if row.y + row.height > area.y + area.height - m.button_height - m.line - m.gap {
-                break;
-            }
-            let selected = preset.name == self.model.preset;
-            let hovered = pointer.is_some_and(|p| row.contains(p));
-            if selected || hovered {
-                list.push_rect(Rect { radius: m.radius, color: ctx.theme.bg_hover, ..row });
-            }
-            let label = Rect { x: row.x + m.gap, ..row };
-            ui::paint_text_vcentered(ctx, list, &preset.name, label.x, label, m.text, if selected { ctx.metrics.typography.weight_bold } else { ctx.metrics.typography.weight_regular }, ctx.theme.text_main);
-            if preset.builtin {
-                let style = crate::text::TextStyle {
-                    family: std::sync::Arc::from(ctx.theme.font.as_str()),
-                    size: m.caption,
-                    weight: ctx.metrics.typography.weight_regular,
-                    color: ctx.theme.text_muted,
-                };
-                let w = ctx.text.measure("built-in", &style).0;
-                ui::paint_text_vcentered(ctx, list, "built-in", row.x + row.width - w - m.gap, row, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
-            }
-            if clicked && hovered {
+        let cols = layout::columns(body.width, m.preset_min_width, page.grid_gap, 4);
+        let cells = layout::cells(body.x, y, body.width, presets.len(), cols, m.preset_height, page.grid_gap);
+        for (preset, cell) in presets.iter().zip(&cells) {
+            let current = preset.name == self.model.preset;
+            layout::card(ctx, list, *cell, layout::clickable(input, *cell, current));
+            let kind = if preset.builtin { "Built-in" } else { "Custom" };
+            let text = rect(cell.x + pad, cell.y, cell.width - pad * 2.0, cell.height);
+            layout::two_lines(ctx, list, text, &preset.name, kind, if current { theme.primary } else { theme.text_muted });
+            if clicked && layout::hovered(input, *cell) {
                 pending.extend(self.model.apply_preset(&preset.name));
             }
         }
-        cursor.gap(m.gap);
+        y += layout::grid_height(presets.len(), cols, m.preset_height, page.grid_gap);
+        if !presets.is_empty() {
+            y += page.grid_gap;
+        }
 
-        // Save / Delete, or the name field while saving.
-        let row = cursor.take(m.button_height);
-        if let Some(field) = &self.naming {
-            let name_rect = Rect { width: row.width - m.small_button - m.gap, radius: m.radius, ..row };
-            text_field::paint_frame(list, name_rect, m.border, ctx.theme.border_active, ctx.theme.bg_widget);
-            field.paint(ctx, list, name_rect, FieldStyle { text: m.text, padding: m.gap, caret_width: m.border * 1.5, masked: false, placeholder: Some("Preset name") }, false);
-            let save = Rect { x: row.x + row.width - m.small_button, width: m.small_button, radius: m.radius, ..row };
-            if controls::button(ctx, list, save, "Save", input, clicked, true) {
+        // Save as and Delete, or the name field while saving.
+        if self.naming.is_some() {
+            let save_w = layout::text_button_width(ctx, "Save");
+            let cancel_w = layout::text_button_width(ctx, "Cancel");
+            let save_x = body.x + body.width - save_w;
+            let cancel_x = save_x - gap - cancel_w;
+            let name_rect = Rect {
+                radius: m.radius,
+                ..rect(body.x, y, cancel_x - page.grid_gap - body.x, page.badge)
+            };
+            text_field::paint_frame(list, name_rect, m.border, theme.primary, theme.surface);
+            if let Some(field) = &self.naming {
+                let style = FieldStyle { text: m.text, padding: page.card_padding, caret_width: m.border * 1.5, masked: false, placeholder: Some("Preset name") };
+                field.paint(ctx, list, name_rect, style, false);
+            }
+            if layout::text_button(ctx, list, cancel_x, y, "Cancel", true, input, clicked) {
+                self.naming = None;
+            }
+            if layout::chip(ctx, list, save_x, y, "Save", true, input, clicked) {
                 if let Some(name) = self.naming.as_mut().and_then(TextField::take) {
                     pending.extend(self.model.save(name.expose()));
                 }
                 self.naming = None;
             }
         } else {
-            let w = (row.width - m.gap) / 2.0;
-            if controls::button(ctx, list, Rect { width: w, radius: m.radius, ..row }, "Save as\u{2026}", input, clicked, false) {
+            if layout::text_button(ctx, list, body.x, y, "Save as\u{2026}", true, input, clicked) {
                 self.naming = Some(TextField::new());
             }
             // Built-in presets cannot be deleted.
-            let delete = Rect { x: row.x + w + m.gap, width: w, radius: m.radius, ..row };
-            if !self.model.can_delete() {
-                disabled_button(ctx, list, delete, "Delete");
-            } else if controls::button(ctx, list, delete, "Delete", input, clicked, false) {
+            let delete_x = body.x + layout::text_button_width(ctx, "Save as\u{2026}") + gap;
+            if layout::text_button(ctx, list, delete_x, y, "Delete", self.model.can_delete(), input, clicked) {
                 pending.extend(self.model.delete_current());
             }
         }
-        cursor.gap(m.gap);
+        y += page.badge;
 
+        // How the last EQ action went.
         let status = snapshot["status"].as_str().unwrap_or_default();
         if !status.is_empty() && snapshot["device_id"].as_str() == Some(&device) {
             let ok = snapshot["ok"].as_bool() != Some(false);
-            caption(ctx, list, cursor.take(m.line), status, if ok { ctx.theme.text_muted } else { ctx.theme.error });
+            let line = rect(body.x, y + page.label_gap, body.width, page.section_label_height);
+            let status = ui::elide(ctx, status, typo.caption, typo.weight_regular, body.width);
+            ui::paint_text_vcentered(ctx, list, &status, body.x, line, typo.caption, typo.weight_regular, if ok { theme.text_muted } else { theme.error });
+            y = line.y + line.height;
         }
+        y
     }
 
-    /// A labelled slider with its value in a box that can be typed into:
-    /// clicking the box opens it holding `prefill`. Returns the new 0..=1
-    /// value while the slider is dragged.
+    /// A chip per band, wrapping, then "+ Band". Returns the bottom.
+    fn paint_band_chips(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, body: Rect, y: f32, input: &InputState, clicked: bool) -> f32 {
+        let page = ctx.metrics.page.clone();
+        let gap = page.grid_gap * 0.5;
+        let (mut x, mut y) = (body.x, y);
+        let count = self.model.bands.len();
+        for i in 0..=count {
+            let label = match self.model.bands.get(i) {
+                Some(band) => chip_label(band.frequency_hz),
+                None => "+ Band".to_string(),
+            };
+            let width = layout::text_button_width(ctx, &label);
+            if x > body.x && x + width > body.x + body.width {
+                x = body.x;
+                y += page.badge + gap;
+            }
+            if i < count {
+                if layout::chip(ctx, list, x, y, &label, i == self.model.selected, input, clicked) {
+                    self.model.selected = i;
+                }
+            } else if layout::text_button(ctx, list, x, y, &label, count < self.model.limits.max_bands, input, clicked) {
+                self.model.add_band();
+            }
+            x += width + gap;
+        }
+        y + page.badge
+    }
+
+    /// A labelled slider in `row` with its value in a box that can be typed
+    /// into: clicking the box opens it holding `prefill`. Returns the new
+    /// 0..=1 value while the slider is dragged.
     #[allow(clippy::too_many_arguments)]
     fn slider_row(
         &mut self,
         ctx: &mut PaintCtx<'_>,
         list: &mut DisplayList,
-        cursor: &mut Cursor,
+        row: Rect,
         label: &str,
         value: &str,
         prefill: String,
@@ -789,7 +845,6 @@ impl EqualizerPage {
         clicked: bool,
     ) -> Option<f32> {
         let m = ctx.metrics.equalizer.clone();
-        let row = cursor.take(m.slider_row);
         ui::paint_text_vcentered(ctx, list, label, row.x, row, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
 
         let value_box = Rect {
@@ -803,8 +858,8 @@ impl EqualizerPage {
             self.editing = Some(Editing { which, band: self.model.selected, field: TextField::with_text(&prefill) });
         }
         let editing = self.editing.as_ref().filter(|e| e.which == which);
-        let border = if editing.is_some() || pointer_on_box { ctx.theme.border_active } else { ctx.theme.border_inactive };
-        text_field::paint_frame(list, value_box, m.border, border, ctx.theme.bg_widget);
+        let border = if editing.is_some() || pointer_on_box { ctx.theme.primary } else { ctx.theme.outline };
+        text_field::paint_frame(list, value_box, m.border, border, ctx.theme.surface);
         match editing {
             Some(editing) => {
                 editing.field.paint(ctx, list, value_box, FieldStyle { text: m.caption, padding: m.gap, caret_width: m.border * 1.5, masked: false, placeholder: None }, false);
@@ -846,7 +901,7 @@ impl EqualizerPage {
     ) {
         let m = ctx.metrics.equalizer.clone();
         let limits = self.model.limits;
-        text_field::paint_frame(list, Rect { radius: m.radius, ..graph }, m.border, ctx.theme.border_inactive, ctx.theme.bg_widget);
+        layout::card(ctx, list, graph, Card::Plain);
         let plot = Rect {
             x: graph.x + m.graph_padding,
             y: graph.y + m.graph_padding,
@@ -861,10 +916,10 @@ impl EqualizerPage {
 
         // Grid: 0 dB, half the range either way, and decade lines.
         for db in [limits.min_gain / 2.0, 0.0, limits.max_gain / 2.0] {
-            list.push_rect(Rect { x: plot.x, y: y_of(db), width: plot.width, height: m.border, radius: 0.0, color: if db == 0.0 { ctx.theme.border_active.with_alpha(0.5) } else { ctx.theme.border_inactive } });
+            list.push_rect(Rect { x: plot.x, y: y_of(db), width: plot.width, height: m.border, radius: 0.0, color: if db == 0.0 { ctx.theme.primary.with_alpha(0.5) } else { ctx.theme.outline } });
         }
         for freq in [100.0, 1000.0, 10_000.0] {
-            list.push_rect(Rect { x: x_of(freq), y: plot.y, width: m.border, height: plot.height, radius: 0.0, color: ctx.theme.border_inactive });
+            list.push_rect(Rect { x: x_of(freq), y: plot.y, width: m.border, height: plot.height, radius: 0.0, color: ctx.theme.outline });
             let label = if freq >= 1000.0 { format!("{}k", freq / 1000.0) } else { format!("{freq}") };
             ui::paint_text_vcentered(ctx, list, &label, x_of(freq) + m.border * 3.0, Rect { y: plot.y + plot.height - m.caption * 1.3, height: m.caption * 1.3, ..plot }, m.caption * 0.85, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
         }
@@ -913,7 +968,8 @@ impl EqualizerPage {
             let color = if !band.enabled {
                 ctx.theme.text_muted
             } else if selected {
-                ctx.theme.secondary
+                // Bright against the curve, as its chip is filled.
+                ctx.theme.text_main
             } else {
                 ctx.theme.primary
             };
@@ -928,33 +984,17 @@ impl Default for EqualizerPage {
     }
 }
 
-/// A button that cannot be pressed now, drawn so it reads that way.
-fn disabled_button(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, rect: Rect, label: &str) {
-    list.push_rect(Rect { color: ctx.theme.bg_widget.with_alpha(0.5), ..rect });
-    ui::paint_text_centered(ctx, list, label, rect, ctx.metrics.typography.body, ctx.theme.text_muted.with_alpha(0.6));
-}
-
-struct Cursor {
-    x: f32,
-    y: f32,
-    width: f32,
-}
-
-impl Cursor {
-    fn take(&mut self, height: f32) -> Rect {
-        let rect = Rect { x: self.x, y: self.y, width: self.width, height, radius: 0.0, color: Color::TRANSPARENT };
-        self.y += height;
-        rect
-    }
-
-    fn gap(&mut self, height: f32) {
-        self.y += height;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn band_chips_are_short() {
+        assert_eq!(chip_label(62.0), "62");
+        assert_eq!(chip_label(1000.0), "1k");
+        assert_eq!(chip_label(1350.0), "1.4k");
+        assert_eq!(chip_label(16000.0), "16k");
+    }
 
     #[test]
     fn typed_values_take_optional_units() {

@@ -250,15 +250,49 @@ pub fn text_button(
     input: &InputState,
     clicked: bool,
 ) -> bool {
+    pill(ctx, list, x, y, label, enabled, false, input, clicked)
+}
+
+/// A [`text_button`] that can be selected, which fills it with the accent:
+/// one of a set of choices, or the action a section leads with. Returns
+/// whether it was clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn chip(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    x: f32,
+    y: f32,
+    label: &str,
+    selected: bool,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
+    pill(ctx, list, x, y, label, true, selected, input, clicked)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pill(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    x: f32,
+    y: f32,
+    label: &str,
+    enabled: bool,
+    selected: bool,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
     let m = ctx.metrics.page.clone();
     let typo = ctx.metrics.typography.clone();
     let theme = ctx.theme.clone();
     let area = rect(x, y, text_button_width(ctx, label), m.badge);
     let hot = enabled && hovered(input, area);
-    let fill = match (enabled, hot) {
-        (false, _) => theme.surface_high,
-        (true, true) => mix(theme.surface_highest, theme.text_main, 0.08),
-        (true, false) => theme.surface_highest,
+    let fill = match (enabled, selected, hot) {
+        (false, _, _) => theme.surface_high,
+        (true, true, true) => mix(theme.primary, theme.text_main, 0.12),
+        (true, true, false) => theme.primary,
+        (true, false, true) => mix(theme.surface_highest, theme.text_main, 0.08),
+        (true, false, false) => theme.surface_highest,
     };
     list.push_rect(Rect {
         radius: m.badge * 0.5,
@@ -272,10 +306,11 @@ pub fn text_button(
         area,
         typo.caption,
         typo.weight_bold,
-        match (enabled, hot) {
-            (false, _) => mix(theme.text_muted, theme.surface_high, 0.5),
-            (true, true) => theme.text_main,
-            (true, false) => theme.text_muted,
+        match (enabled, selected, hot) {
+            (false, _, _) => mix(theme.text_muted, theme.surface_high, 0.5),
+            (true, true, _) => theme.on_primary,
+            (true, false, true) => theme.text_main,
+            (true, false, false) => theme.text_muted,
         },
     );
     hot && clicked
