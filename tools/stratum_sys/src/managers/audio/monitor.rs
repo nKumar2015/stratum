@@ -8,7 +8,7 @@ use pipewire::types::ObjectType;
 use serde_json::json;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -55,39 +55,84 @@ pub(crate) async fn run_monitor(publisher: Publisher) {
     }
 }
 
+/// How long PipeWire events are gathered before one refresh. A volume key or a
+/// slider drag sends a burst of them, and each refresh opens new Pulse
+/// connections.
+const REFRESH_DELAY: Duration = Duration::from_millis(40);
+
+/// A bound object whose changes are not registry events, with its listener.
+/// The listener is declared first so that it is removed before the proxy.
+/// Only held: dropping an entry stops following that object.
+#[allow(dead_code)]
+enum Watched {
+    /// A sink or source: its `Props` param carries volume and mute.
+    Node(pipewire::node::NodeListener, pipewire::node::Node),
+    /// The `default` metadata: the default sink and source.
+    Metadata(pipewire::metadata::MetadataListener, pipewire::metadata::Metadata),
+}
+
 fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
-    let mainloop = pipewire::main_loop::MainLoopBox::new(None)
-        .map_err(|err| format!("failed to create pipewire mainloop: {}", err))?;
-    let context = pipewire::context::ContextBox::new(mainloop.loop_(), None)
+    // Leaked: this thread runs the loop for the life of the process, and the
+    // refresh timer, which borrows the loop, is armed from `'static` callbacks.
+    let mainloop: &'static pipewire::main_loop::MainLoopRc = Box::leak(Box::new(
+        pipewire::main_loop::MainLoopRc::new(None)
+            .map_err(|err| format!("failed to create pipewire mainloop: {}", err))?,
+    ));
+    let context = pipewire::context::ContextRc::new(mainloop, None)
         .map_err(|err| format!("failed to create pipewire context: {}", err))?;
     let core = context
-        .connect(None)
+        .connect_rc(None)
         .map_err(|err| format!("failed to connect to pipewire core: {}", err))?;
     let registry = core
-        .get_registry()
+        .get_registry_rc()
         .map_err(|err| format!("failed to get pipewire registry: {}", err))?;
 
     info!("listening for PipeWire registry events");
 
-    let global_publisher = publisher.clone();
-    let remove_publisher = publisher.clone();
+    let timer_publisher = publisher.clone();
+    let timer = Rc::new(
+        mainloop
+            .loop_()
+            .add_timer(move |_| refresh_from_system(&timer_publisher)),
+    );
+    // Re-arming moves the refresh to the end of the burst.
+    let schedule: Rc<dyn Fn()> = Rc::new(move || {
+        let _ = timer.update_timer(Some(REFRESH_DELAY), None);
+    });
+
+    // Registry events say only that objects came or went. Volume, mute and
+    // the default devices change on objects that already exist, so sinks,
+    // sources and the default metadata are bound and followed too; without
+    // that, a volume key changed nothing until some stream appeared.
+    let watched = Rc::new(RefCell::new(HashMap::<u32, Watched>::new()));
     let relevant_ids = Rc::new(RefCell::new(HashSet::<u32>::new()));
     let relevant_ids_on_global = Rc::clone(&relevant_ids);
     let relevant_ids_on_remove = Rc::clone(&relevant_ids);
+    let watched_on_global = Rc::clone(&watched);
+    let watched_on_remove = Rc::clone(&watched);
+    let schedule_on_global = Rc::clone(&schedule);
+    let schedule_on_remove = Rc::clone(&schedule);
+    let registry_weak = registry.downgrade();
     let _listener = registry
         .add_listener_local()
         .global(move |global| {
+            if let Some(registry) = registry_weak.upgrade() {
+                if let Some(entry) = watch(&registry, global, &schedule_on_global) {
+                    watched_on_global.borrow_mut().insert(global.id, entry);
+                }
+            }
             if should_refresh_on_global(global) {
                 relevant_ids_on_global.borrow_mut().insert(global.id);
-                refresh_from_system(&global_publisher);
+                schedule_on_global();
             } else {
                 // If this id is re-announced with non-audio props, stop tracking it.
                 relevant_ids_on_global.borrow_mut().remove(&global.id);
             }
         })
         .global_remove(move |id| {
+            watched_on_remove.borrow_mut().remove(&id);
             if relevant_ids_on_remove.borrow_mut().remove(&id) {
-                refresh_from_system(&remove_publisher);
+                schedule_on_remove();
             }
         })
         .register();
@@ -98,6 +143,49 @@ fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
     // Runs indefinitely and dispatches registry callbacks in this worker thread.
     mainloop.run();
     Ok(())
+}
+
+/// Bind `global` and follow its changes if it is a sink, a source, or the
+/// `default` metadata.
+fn watch(
+    registry: &pipewire::registry::RegistryRc,
+    global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+    schedule: &Rc<dyn Fn()>,
+) -> Option<Watched> {
+    match global.type_ {
+        ObjectType::Node
+            if prop_starts_with(global, &keys::MEDIA_CLASS, "Audio/Sink")
+                || prop_starts_with(global, &keys::MEDIA_CLASS, "Audio/Source") =>
+        {
+            let node: pipewire::node::Node = registry.bind(global).ok()?;
+            let schedule = Rc::clone(schedule);
+            let listener = node
+                .add_listener_local()
+                .param(move |_, kind, _, _, _| {
+                    if kind == pipewire::spa::param::ParamType::Props {
+                        schedule();
+                    }
+                })
+                .register();
+            node.subscribe_params(&[pipewire::spa::param::ParamType::Props]);
+            Some(Watched::Node(listener, node))
+        }
+        ObjectType::Metadata if prop_value(global, "metadata.name") == Some("default") => {
+            let metadata: pipewire::metadata::Metadata = registry.bind(global).ok()?;
+            let schedule = Rc::clone(schedule);
+            let listener = metadata
+                .add_listener_local()
+                .property(move |_, key, _, _| {
+                    if key.is_none_or(|key| key.starts_with("default.audio.")) {
+                        schedule();
+                    }
+                    0
+                })
+                .register();
+            Some(Watched::Metadata(listener, metadata))
+        }
+        _ => None,
+    }
 }
 
 fn should_refresh_on_global_type(kind: &ObjectType) -> bool {
