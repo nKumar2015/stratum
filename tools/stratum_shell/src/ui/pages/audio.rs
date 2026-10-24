@@ -23,6 +23,7 @@ use crate::ui::controls;
 use crate::ui::pages::devices::{Marquee, Status};
 use crate::ui::pages::layout::{self, rect, Card};
 use crate::ui::pages::Optimistic;
+use crate::ui::style::{AudioPageMetrics, PageMetrics};
 use crate::ui::{self, InputState, PaintCtx};
 
 const SPEAKER: &str = "\u{f04c3}";
@@ -247,7 +248,7 @@ impl AudioPage {
         // Now playing.
         y += page.section_spacing;
         y = layout::section(ctx, list, body, y, "Now playing");
-        let card = rect(body.x, y, body.width, page.card_padding * 2.0 + m.art);
+        let card = rect(body.x, y, body.width, page.card_padding * 2.0 + music_height(&m, &page));
         self.paint_music(ctx, list, card, &ctx.state.music.get(), input, clicked, pending);
         y += card.height;
 
@@ -325,7 +326,7 @@ impl AudioPage {
         let art = Rect {
             radius: page.card_radius * 0.75,
             color: theme.surface_highest,
-            ..rect(card.x + pad, card.y + pad, m.art, m.art)
+            ..rect(card.x + pad, card.y + (card.height - m.art) * 0.5, m.art, m.art)
         };
         // `art_path` is the art as a local file, remote covers included.
         let image = music["art_path"]
@@ -350,7 +351,7 @@ impl AudioPage {
 
         let x = art.x + art.width + pad;
         let w = card.x + card.width - pad - x;
-        let mut y = art.y;
+        let mut y = card.y + pad;
         let title = if playable {
             music["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Unknown Title")
         } else {
@@ -430,6 +431,13 @@ impl Default for AudioPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The now-playing card's content height: the taller of the art and the text
+/// column, which stacks title, artist and album, then the seek row and the
+/// buttons.
+fn music_height(m: &AudioPageMetrics, page: &PageMetrics) -> f32 {
+    m.art.max(m.line * 4.0 + m.gap * 2.0 + page.badge)
 }
 
 /// A volume card: the device and mute on the top line, the slider and its
