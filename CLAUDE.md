@@ -24,7 +24,8 @@ or "QML did" refer to the git history before that removal.
   on, grew to ~16 MB as the system managers were embedded, and was ~13.1 MB
   on 2026-10-22; after the dashboard overhaul and a cleanup pass it is
   14.26 MB (2026-10-23; chrono is ~71 KB of that, jiff ~16 KB, and naga,
-  zbus and wgpu remain the largest pieces). The CLI is 0.41 MB.
+  zbus and wgpu remain the largest pieces), and 14.58 MB once `image` gained
+JPEG decoding for album art (~320 KB). The CLI is 0.41 MB.
   Before adding a dependency, check its default features:
   resvg's defaults alone cost 1.9 MB. To find what is big, relink with
   `CARGO_PROFILE_RELEASE_STRIP=false` and sum `nm -S -C` sizes by crate.
@@ -50,9 +51,6 @@ tools/stratum_cli/     CLI, a socket client only; its IPC targets are the
                        contract external keybinds use
 tools/stratum_shell/   the native shell
 module.nix             Home Manager module: shell, CLI, runtime tools, user unit
-docs/native-shell-parity.md
-                       behavioural acceptance checklist; mark a row `verified`
-                       only after exercising it in the running native shell
 ```
 
 ## Current state
@@ -119,7 +117,11 @@ message), fetches with `curl` only while open, and keeps copies in
 `$XDG_STATE_HOME/stratum/calendar/` (mode 700). Time zones come from `jiff`
 over the system zoneinfo; series repeat in their own zone's wall time. Test
 with fixture feeds as `file://` addresses, never the user's calendar. The sampler also refreshes
-`SystemState::music` while open. The calendar grid is computed locally. Media
+`SystemState::music` while open. Views draw album art from the snapshot's
+`art_path`, never `art_url`: `music::status_for` percent-decodes `file://`
+addresses and downloads `http(s)` ones (web players such as Orchard send
+those) with `curl` into `$XDG_CACHE_HOME/stratum/art/`, keeping only the
+current cover and not retrying a failed address. The calendar grid is computed locally. Media
 controls run `playerctl` on the action worker. The Focus tab
 (`dashboard/focus.rs`, `note.rs`, `timer.rs`) keeps to-dos and a note in
 `$XDG_STATE_HOME/stratum/focus.json`, loaded at start rather than in
@@ -179,8 +181,7 @@ its desktop entry's `Icon` (`desktop.rs`) before trying the class as an icon
 name. Icon themes and desktop entries are searched in `icons::data_dirs()`,
 which always includes the NixOS profile directories: a shell started without
 the session's `XDG_DATA_DIRS` (a devshell, a systemd unit) otherwise finds no
-user icon theme at all. See
-`docs/native-shell-parity.md`.
+user icon theme at all.
 
 **Tray activation** works: left click sends `Activate`, middle click
 `SecondaryActivate`, and right click fetches the item's `com.canonical.dbusmenu`
@@ -298,9 +299,9 @@ the shell binding its pointer.
 - **Hover menus are kept.** The control centre stays a real window, *and* the
   compact hover menus (audio, Bluetooth, Wi-Fi, battery) are built alongside it,
   with the QML hover-intent delay and close grace period.
-- **Cutover requires every surface.** Quickshell is removed only when every row
-  in `docs/native-shell-parity.md` exists in the native shell, so the switch is
-  seamless. No surface is optional, including screenshots and the dashboard.
+- **Cutover requires every surface.** Quickshell was removed only once every
+  QML surface existed in the native shell, so the switch was seamless. No
+  surface was optional, including screenshots and the dashboard.
 
 ## Build and run
 
@@ -510,8 +511,6 @@ presents into, because Rust drops fields in declaration order and destroying the
 - Prefer measuring over guessing: `hyprctl -j layers` gives exact layer
   geometry, `grim -o` captures one output, `magick` can report pixel values and
   ink bounding boxes.
-- Keep `docs/native-shell-parity.md` honest. `verified` means exercised in the
-  native shell against real devices, not "the code exists".
 - Commit messages should say **why**. The user has asked that no
   `Co-Authored-By` trailer be added.
 - Tests exist for parsing, animation, layout maths, and text metrics; run
@@ -525,5 +524,12 @@ presents into, because Rust drops fields in declaration order and destroying the
 - The machine has both an AMD iGPU and an NVIDIA dGPU; some ICDs in the system
   Vulkan directory fail to load (GLIBC mismatch) and log noise at startup. That
   is expected and not fatal.
+- Never run `systemctl --user import-environment` or
+  `dbus-update-activation-environment --all` inside `nix develop`: it copies
+  the devshell's environment (`CC`, `LD_LIBRARY_PATH`, a `TMPDIR` under
+  `/tmp/nix-shell-*` that is deleted on exit) into every user unit,
+  including the installed shell. A dead `TMPDIR` made `wl-copy` exit 1
+  silently; the shell now unsets a temp variable naming a missing directory
+  at start (`drop_missing_temp_dirs`).
 - Nerd Font codepoints are used for all icons. The theme's `font` must resolve to
   a Nerd Font or icons render as boxes.

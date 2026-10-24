@@ -7,7 +7,7 @@ state). It replaced a Quickshell/QML shell on 2026-10-22.
 ## Status
 
 Every surface of the QML shell is ported, and the native shell replaced it on
-2026-10-22. See `docs/native-shell-parity.md` at the repository root.
+2026-10-22.
 
 ## IPC
 
