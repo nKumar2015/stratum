@@ -2,8 +2,8 @@
 
 A desktop shell for [Hyprland](https://hyprland.org), written from scratch in
 Rust. It draws its own bar, control centre, notifications, lock screen,
-dashboard and screenshot tools with its own renderer — no GTK, no Qt, no QML —
-and keeps the footprint small: one 14 MB binary, where the Quickshell setup it
+dashboard and screenshot tools with its own renderer and keeps the 
+footprint small: one 14 MB binary, where the Quickshell setup it
 replaced pulled in a closure of about 1.1 GiB.
 
 ## What it does
