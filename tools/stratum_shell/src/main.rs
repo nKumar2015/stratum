@@ -56,6 +56,7 @@ fn main() -> ExitCode {
         .init();
 
     info!("stratum-shell starting");
+    drop_missing_temp_dirs();
     memory::tune_allocator();
 
     match wayland::run() {
@@ -66,6 +67,20 @@ fn main() -> ExitCode {
         Err(err) => {
             error!("stratum-shell failed: {err}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Unset a temp directory variable that names a directory which is gone,
+/// so the programs the shell runs fall back to `/tmp`. A `nix develop`
+/// environment imported into the systemd user manager leaves `TMPDIR` at
+/// a deleted `/tmp/nix-shell-*`, and `wl-copy` then fails (exit 1) without
+/// saying why. Called before any thread starts.
+fn drop_missing_temp_dirs() {
+    for name in ["TMPDIR", "TMP", "TEMP", "TEMPDIR"] {
+        if let Some(dir) = std::env::var_os(name).filter(|dir| !std::path::Path::new(dir).is_dir()) {
+            tracing::warn!("{name} names a missing directory ({}); unsetting it", dir.to_string_lossy());
+            std::env::remove_var(name);
         }
     }
 }
