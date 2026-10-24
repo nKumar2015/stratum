@@ -1,7 +1,110 @@
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
-use crate::managers::common::{command_available, run_capture_optional};
+use crate::managers::common::{command_available, run_capture_optional, run_command_with_timeout};
+
+/// How long one cover download may take. It runs on the caller's thread
+/// (the action worker or the dashboard sampler), once per address.
+const ART_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Remote addresses whose download failed, so a poll does not retry them.
+static FAILED_ART: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// A local file for `mpris:artUrl`, or "" when there is none (yet). Players
+/// in a browser or a web client (Orchard, YouTube Music) give an `https`
+/// address, which is downloaded once into `$XDG_CACHE_HOME/stratum/art`.
+fn art_path(url: &str) -> String {
+    if let Some(path) = url.strip_prefix("file://") {
+        return percent_decode(path);
+    }
+    if url.starts_with('/') {
+        return url.to_string();
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return String::new();
+    }
+    let Some(dir) = art_cache_dir() else { return String::new() };
+    let file = dir.join(format!("{:016x}", stable_hash(url)));
+    if file.is_file() {
+        return file.to_string_lossy().into_owned();
+    }
+    let mut failed = FAILED_ART.lock().unwrap_or_else(|e| e.into_inner());
+    if failed.as_ref().is_some_and(|set| set.contains(url)) {
+        return String::new();
+    }
+    match download_art(url, &dir, &file) {
+        Ok(()) => file.to_string_lossy().into_owned(),
+        Err(err) => {
+            tracing::warn!("album art download failed: {err}");
+            failed.get_or_insert_with(HashSet::new).insert(url.to_string());
+            String::new()
+        }
+    }
+}
+
+/// `$XDG_CACHE_HOME/stratum/art`, else `~/.cache/stratum/art`.
+fn art_cache_dir() -> Option<PathBuf> {
+    let base = match std::env::var("XDG_CACHE_HOME") {
+        Ok(dir) if !dir.trim().is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(std::env::var("HOME").ok()?).join(".cache"),
+    };
+    Some(base.join("stratum").join("art"))
+}
+
+/// Fetch `url` into `file`, then drop every other cover: only the current
+/// track's is shown, and a cache that only grows would fill the disk.
+fn download_art(url: &str, dir: &Path, file: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|err| format!("failed to create {}: {err}", dir.display()))?;
+    let partial = file.with_extension("part");
+    let partial_arg = partial.to_string_lossy();
+    let seconds = ART_TIMEOUT.as_secs().to_string();
+    // `--proto` keeps a redirect from reaching `file://` or anything else.
+    let args = ["-sS", "--fail", "--proto", "=http,https", "--max-time", &seconds, "--max-filesize", "20M", "-o", &partial_arg, url];
+    if let Err(err) = run_command_with_timeout("curl", &args, ART_TIMEOUT + Duration::from_secs(1)) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(err);
+    }
+    std::fs::rename(&partial, file).map_err(|err| format!("failed to save cover: {err}"))?;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.path() != file {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// FNV-1a: a cache name that stays the same across builds, which
+/// `DefaultHasher` does not promise.
+fn stable_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// `%20` and the like in a `file://` path. Bytes that do not decode are
+/// kept as written.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        match (bytes[i], bytes.get(i + 1).copied().and_then(hex), bytes.get(i + 2).copied().and_then(hex)) {
+            (b'%', Some(high), Some(low)) => {
+                out.push((high * 16 + low) as u8);
+                i += 3;
+            }
+            (byte, _, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
 
 fn parse_int_from_text(text: &str) -> i64 {
     text.trim()
@@ -117,6 +220,7 @@ pub fn status_for(preferred: Option<&str>) -> Value {
             "position_sec": 0,
             "length_sec": 0,
             "art_url": "",
+            "art_path": "",
             "player_title": "N/A",
         });
     }
@@ -137,6 +241,7 @@ pub fn status_for(preferred: Option<&str>) -> Value {
             "position_sec": 0,
             "length_sec": 0,
             "art_url": "",
+            "art_path": "",
             "player_title": "None",
             "players": listed,
             "shuffle": "",
@@ -190,6 +295,7 @@ pub fn status_for(preferred: Option<&str>) -> Value {
         "length": format_mmss(len_seconds),
         "length_sec": len_seconds,
         "art_url": art_url,
+        "art_path": art_path(&art_url),
         "player_title": player_title,
     })
 }
@@ -214,6 +320,16 @@ mod tests {
         let idle = vec![("a".to_string(), "Paused".to_string())];
         assert_eq!(pick_player(&idle, None).map(|(n, _)| n).as_deref(), Some("a"), "else the first");
         assert_eq!(pick_player(&[], None), None);
+    }
+
+    #[test]
+    fn local_art_addresses_become_paths() {
+        assert_eq!(art_path("file:///home/me/My%20Music/cover.jpg"), "/home/me/My Music/cover.jpg");
+        assert_eq!(art_path("/tmp/cover.png"), "/tmp/cover.png");
+        assert_eq!(art_path(""), "");
+        assert_eq!(art_path("data:image/png;base64,AAAA"), "", "only files and http(s) are shown");
+        assert_eq!(percent_decode("100%"), "100%", "a stray % is kept");
+        assert_eq!(stable_hash("a"), 0xaf63_dc4c_8601_ec8c, "FNV-1a, the same in every build");
     }
 
     #[test]

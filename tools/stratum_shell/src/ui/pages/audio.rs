@@ -327,10 +327,10 @@ impl AudioPage {
             color: theme.surface_highest,
             ..rect(card.x + pad, card.y + pad, m.art, m.art)
         };
-        let url = music["art_url"].as_str().unwrap_or_default();
-        let image = url
-            .strip_prefix("file://")
-            .or_else(|| url.starts_with('/').then_some(url))
+        // `art_path` is the art as a local file, remote covers included.
+        let image = music["art_path"]
+            .as_str()
+            .filter(|path| !path.is_empty())
             .and_then(|path| ctx.icons.load_icon(path, (m.art * 2.0) as u32, 1));
         match image.filter(|_| playable) {
             Some(img) => list.push_image(crate::render::display_list::Image {

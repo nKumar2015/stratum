@@ -253,10 +253,11 @@ pub fn rotate_ccw(icon: &IconImage) -> IconImage {
 
 fn render_file(path: &Path, size: u32) -> Option<IconImage> {
     let data = std::fs::read(path).ok()?;
+    // Anything but SVG is decoded by its content: album art often has no
+    // extension (a downloaded cover, a player's temp file) or is a JPEG.
     match path.extension().and_then(|e| e.to_str()) {
         Some("svg") => render_svg(&data, size),
-        Some("png") => render_png(&data, size),
-        _ => None,
+        _ => render_png(&data, size),
     }
 }
 

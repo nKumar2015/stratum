@@ -814,10 +814,10 @@ impl Dashboard {
         let w = panel.width - m.inner * 2.0;
         let art = Rect { x: x + (w - m.art) * 0.5, y, width: m.art, height: m.art, radius: m.radius, color: Color::TRANSPARENT };
         ui::paint_frame(list, art, m.border, ctx.theme.border_inactive, ctx.theme.bg_main);
-        let url = music["art_url"].as_str().unwrap_or_default();
-        let image = url
-            .strip_prefix("file://")
-            .or_else(|| url.starts_with('/').then_some(url))
+        // `art_path` is the art as a local file, remote covers included.
+        let image = music["art_path"]
+            .as_str()
+            .filter(|path| !path.is_empty())
             .and_then(|path| ctx.icons.load_icon(path, (m.art * 2.0) as u32, 1));
         match image {
             Some(img) => list.push_image(crate::render::display_list::Image {

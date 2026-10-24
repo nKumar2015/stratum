@@ -33,7 +33,7 @@ swash = "0.2"
 # No default features: they add SVG <text> layout with its own font stack,
 # and GIF, WebP and JPEG decoders for embedded rasters. Icons need none of it.
 resvg = { version = "0.48", default-features = false }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 serde = { workspace = true }
 chrono = { workspace = true }
