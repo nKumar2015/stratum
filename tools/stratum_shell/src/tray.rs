@@ -181,6 +181,47 @@ impl Tray {
         }
         self.publish();
     }
+
+    /// Fold property reads into the live list. The reads are slow (an app
+    /// that is shutting down answers late), so items can come and go while
+    /// they run: one removed meanwhile stays removed, one added meanwhile is
+    /// kept. Writing the snapshot back whole revived the items of apps that
+    /// had just quit, with every property empty, which drew as a `?`.
+    fn apply_reads(&self, reads: Vec<(String, String, Result<ItemProperties, ReadError>)>) {
+        if let Ok(mut items) = self.items.lock() {
+            items.retain_mut(|item| {
+                let Some((_, _, read)) = reads
+                    .iter()
+                    .find(|(service, path, _)| *service == item.service && *path == item.path)
+                else {
+                    return true;
+                };
+                match read {
+                    Ok(fresh) => {
+                        item.id = fresh.0.clone();
+                        item.title = fresh.1.clone();
+                        item.status = fresh.2.clone();
+                        item.icon_name = fresh.3.clone();
+                        item.icon_pixmaps = fresh.4.clone();
+                        item.tooltip_title = fresh.5.clone();
+                        item.tooltip_body = fresh.6.clone();
+                        item.menu = fresh.7.clone();
+                        true
+                    }
+                    Err(ReadError::Gone(err)) => {
+                        info!("tray item unreachable, dropped: {} ({err})", item.service);
+                        false
+                    }
+                    Err(ReadError::Failed(err)) => {
+                        // Keep what was last read; it may answer next time.
+                        debug!("tray item {} unavailable: {err}", item.service);
+                        true
+                    }
+                }
+            });
+        }
+        self.publish();
+    }
 }
 
 /// The served watcher interface.
@@ -564,28 +605,38 @@ async fn refresh_items(tray: &Arc<Tray>, connection: &Connection) {
         return;
     }
 
-    let mut updated = Vec::with_capacity(current.len());
-    for mut item in current {
-        match read_item(connection, &item.service, &item.path).await {
-            Ok(fresh) => {
-                item.id = fresh.0;
-                item.title = fresh.1;
-                item.status = fresh.2;
-                item.icon_name = fresh.3;
-                item.icon_pixmaps = fresh.4;
-                item.tooltip_title = fresh.5;
-                item.tooltip_body = fresh.6;
-                item.menu = fresh.7;
-                updated.push(item);
-            }
-            Err(err) => {
-                debug!("tray item {} unavailable: {err}", item.service);
-                // Keep it; a restart may make it reachable again.
-                updated.push(item);
-            }
+    let mut reads = Vec::with_capacity(current.len());
+    for item in current {
+        let read = read_item(connection, &item.service, &item.path).await;
+        reads.push((item.service, item.path, read));
+    }
+    tray.apply_reads(reads);
+}
+
+/// Why an item's properties could not be read.
+#[derive(Debug)]
+enum ReadError {
+    /// Its connection or object no longer exists, so it never will answer.
+    /// This also catches an app whose exit was missed.
+    Gone(String),
+    /// Anything else, such as a timeout from a busy app.
+    Failed(String),
+}
+
+impl ReadError {
+    fn from_zbus(err: zbus::Error) -> Self {
+        use zbus::fdo::Error as Fdo;
+        match zbus::fdo::Error::from(err) {
+            // GDBus (libappindicator, Steam) answers `UnknownMethod` for an
+            // object path it no longer serves.
+            err @ (Fdo::ServiceUnknown(_)
+            | Fdo::NameHasNoOwner(_)
+            | Fdo::UnknownObject(_)
+            | Fdo::UnknownInterface(_)
+            | Fdo::UnknownMethod(_)) => Self::Gone(err.to_string()),
+            err => Self::Failed(err.to_string()),
         }
     }
-    tray.set_items(updated);
 }
 
 type ItemProperties = (
@@ -604,15 +655,16 @@ async fn read_item(
     connection: &Connection,
     service: &str,
     path: &str,
-) -> Result<ItemProperties, String> {
-    let proxy = zbus::Proxy::new(
-        connection,
-        service,
-        path,
-        "org.kde.StatusNotifierItem",
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+) -> Result<ItemProperties, ReadError> {
+    let proxy = zbus::proxy::Builder::<zbus::Proxy>::new(connection)
+        .destination(service)
+        .and_then(|builder| builder.path(path))
+        .and_then(|builder| builder.interface("org.kde.StatusNotifierItem"))
+        .map_err(ReadError::from_zbus)?
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+        .await
+        .map_err(ReadError::from_zbus)?;
 
     let get = |name: &'static str| {
         let proxy = &proxy;
@@ -624,9 +676,15 @@ async fn read_item(
         }
     };
 
+    // `Status` is required by the spec, so an item that cannot answer it is
+    // not there; reading it first also spares a dead item the other calls.
+    let status = proxy
+        .get_property::<OwnedValue>("Status")
+        .await
+        .map_err(ReadError::from_zbus)?;
+    let status = str_prop(Ok(status)).unwrap_or_else(|| "Active".into());
     let id = str_prop(get("Id").await).unwrap_or_default();
     let title = str_prop(get("Title").await).unwrap_or_default();
-    let status = str_prop(get("Status").await).unwrap_or_else(|| "Active".into());
     let icon_name = str_prop(get("IconName").await).unwrap_or_default();
 
     let icon_pixmaps = match get("IconPixmap").await {
@@ -979,6 +1037,35 @@ mod tests {
     }
 
     #[test]
+    fn property_reads_never_revive_or_keep_dead_items() {
+        let item = |service: &str| TrayItem {
+            service: service.into(),
+            path: "/item".into(),
+            ..Default::default()
+        };
+        let tray = Tray::new(Arc::new(|_| {}));
+        tray.set_items(vec![item(":1.1"), item(":1.2"), item(":1.3")]);
+        let props = |title: &str| -> ItemProperties {
+            (String::new(), title.into(), "Active".into(), String::new(), Vec::new(), String::new(), String::new(), None)
+        };
+        let read = |service: &str, result| (service.to_string(), "/item".to_string(), result);
+        let reads = vec![
+            read(":1.1", Ok(props("kept"))),
+            read(":1.2", Err(ReadError::Gone("ServiceUnknown".into()))),
+            read(":1.3", Err(ReadError::Failed("timeout".into()))),
+            // Its app quit while the reads ran.
+            read(":1.9", Ok(props("revived"))),
+        ];
+        // Registered while the reads ran.
+        tray.items.lock().unwrap().push(item(":1.4"));
+        tray.apply_reads(reads);
+
+        let services: Vec<_> = tray.snapshot().into_iter().map(|item| item.service).collect();
+        assert_eq!(services, [":1.1", ":1.3", ":1.4"]);
+        assert_eq!(tray.snapshot()[0].title, "kept");
+    }
+
+    #[test]
     fn registered_items_stay_until_their_app_leaves() {
         let tray = Tray::new(Arc::new(|_| {}));
         // A name of its own, so the test never takes the session's watcher.
@@ -1031,5 +1118,8 @@ mod tests {
             eventually(|| tray.snapshot().is_empty()),
             "an app that left the bus keeps its icon"
         );
+        // Should its exit be missed, the next read drops it.
+        let read = pollster::block_on(read_item(&watcher, &sender, "/org/ayatana/NotificationItem/test"));
+        assert!(matches!(read, Err(ReadError::Gone(_))), "{read:?}");
     }
 }
