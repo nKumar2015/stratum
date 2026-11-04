@@ -11,6 +11,8 @@
 //!
 //! Now-playing data is refreshed with each published sample, as the QML
 //! dashboard's `watch` did, because `music::status` runs `playerctl`.
+//! Settings pages that show it (Overview, Audio) ask for it alone with
+//! [`Feed::set_music_watched`], refreshed at the same interval.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -118,6 +120,10 @@ struct FeedState {
     settings: Option<Settings>,
     /// The player picked on the dashboard; `None` follows whichever plays.
     player: Option<String>,
+    /// Whether a settings page shows now-playing data.
+    music: bool,
+    /// Set when `music` turns on, until the sampler has refreshed it.
+    music_started: bool,
 }
 
 impl Feed {
@@ -132,6 +138,17 @@ impl Feed {
             state.open = open;
             state.opened |= open;
             state.closed |= !open;
+            self.wake.notify_all();
+        }
+    }
+
+    /// Called every frame: whether a settings page shows now-playing data.
+    /// Only a change wakes the sampler.
+    pub fn set_music_watched(&self, watched: bool) {
+        let mut state = self.lock();
+        if state.music != watched {
+            state.music = watched;
+            state.music_started |= watched;
             self.wake.notify_all();
         }
     }
@@ -167,6 +184,7 @@ impl Feed {
         let mut history = History::default();
         let mut last: Option<Sample> = None;
         let mut next = Instant::now();
+        let mut music_next = Instant::now();
         let mut guard = self.lock();
         loop {
             // Sleep until a sample is due or the dashboard opens.
@@ -181,18 +199,32 @@ impl Feed {
                     continue;
                 }
                 let active = guard.settings.as_ref().is_some_and(|s| guard.open || s.background);
+                // Open, the dashboard refreshes music with each sample.
+                let music = guard.music && !guard.open && guard.settings.is_some();
                 let now = Instant::now();
-                if let Some(settings) = guard.settings.as_ref().filter(|_| guard.opened || (active && now >= next)) {
+                let due = guard.opened
+                    || (active && now >= next)
+                    || (music && (guard.music_started || now >= music_next));
+                if let Some(settings) = guard.settings.as_ref().filter(|_| due) {
                     break settings.clone();
                 }
-                guard = if active {
-                    self.wake.wait_timeout(guard, next - now).map_or_else(|p| p.into_inner().0, |r| r.0)
+                let deadline = match (active, music) {
+                    (true, true) => Some(next.min(music_next)),
+                    (true, false) => Some(next),
+                    (false, true) => Some(music_next),
+                    (false, false) => None,
+                };
+                guard = if let Some(deadline) = deadline {
+                    let timeout = deadline.saturating_duration_since(now);
+                    self.wake.wait_timeout(guard, timeout).map_or_else(|p| p.into_inner().0, |r| r.0)
                 } else {
                     self.wake.wait(guard).unwrap_or_else(|p| p.into_inner())
                 };
             };
             let opened = std::mem::take(&mut guard.opened);
             let open = guard.open;
+            let music_started = std::mem::take(&mut guard.music_started);
+            let music = guard.music && !open;
             let player = guard.player.clone();
             drop(guard);
 
@@ -203,7 +235,14 @@ impl Feed {
             }
             // Opening samples at once: background samples carry no GPUs.
             let now = Instant::now();
-            if now >= next || opened || last.is_none() {
+            if music && (music_started || now >= music_next) {
+                if state.music.set(stratum_sys::managers::music::status_for(player.as_deref())) {
+                    state.notify();
+                }
+                music_next = now + Duration::from_millis(settings.sample_ms);
+            }
+            let active = open || settings.background;
+            if active && (now >= next || opened || last.is_none()) {
                 let mut sample = sampler.sample(open);
                 history.push(&sample, settings.history);
                 // Sampled just after a background sample, CPU time may not

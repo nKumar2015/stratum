@@ -439,6 +439,10 @@ impl App {
         feed.configure(crate::dashboard::feed::Settings::from_config(&self.config.dashboard));
         feed.set_open(self.dashboard.is_open());
         feed.set_player(self.dashboard.player());
+        let page = self.control_center.page;
+        feed.set_music_watched(
+            self.control_center.open && matches!(page, crate::ui::control_center::Page::Overview | crate::ui::control_center::Page::Audio),
+        );
         let now = std::time::Instant::now();
         if let Some(ended) = self.dashboard.tick_timer(now) {
             let (summary, body) = ended.message();
