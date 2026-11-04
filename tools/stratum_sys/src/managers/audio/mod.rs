@@ -1,4 +1,3 @@
-use pulsectl::controllers::types::DeviceInfo;
 use pulsectl::controllers::DeviceControl;
 use pulsectl::ControllerError;
 use serde_json::{json, Value};
@@ -90,9 +89,9 @@ fn volume_result(result: Result<i64, ControllerError>, kind: &str) -> Value {
     }
 }
 
-fn set_default_volume<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, percent: i64) -> Result<i64, ControllerError> {
+fn set_default_volume<C: pulse::DefaultDevice>(ctrl: &mut C, percent: i64) -> Result<i64, ControllerError> {
     let target = percent.clamp(0, 150) as f64;
-    let default_device = ctrl.get_default_device()?;
+    let default_device = ctrl.default_device()?;
 
     let current = parser::extract_first_percent(&default_device.volume.print())
         .and_then(|v| v.trim_end_matches('%').parse::<f64>().ok())
@@ -131,12 +130,12 @@ fn mute_result(result: Result<(), ControllerError>, kind: &str, muted: bool) -> 
     }
 }
 
-fn set_default_mute<C: DeviceControl<DeviceInfo>>(ctrl: &mut C, muted: bool) -> Result<(), ControllerError> {
-    let default_device = ctrl.get_default_device()?;
-    // `set_device_mute_by_index` returns `()`, so a failure to look the device
+fn set_default_mute<C: pulse::DefaultDevice>(ctrl: &mut C, muted: bool) -> Result<(), ControllerError> {
+    let default_device = ctrl.default_device()?;
+    // Setting the mute returns `()`, so a failure to look the device
     // up beforehand is the only signal that the device is unreachable.
     ctrl.get_device_by_index(default_device.index)?;
-    ctrl.set_device_mute_by_index(default_device.index, muted);
+    ctrl.set_mute(default_device.index, muted);
     Ok(())
 }
 

@@ -11,7 +11,8 @@
 
 use std::cell::RefCell;
 
-use pulsectl::controllers::{SinkController, SourceController};
+use pulsectl::controllers::types::DeviceInfo;
+use pulsectl::controllers::{DeviceControl, SinkController, SourceController};
 use pulsectl::{ControllerError, Handler};
 
 thread_local! {
@@ -38,6 +39,42 @@ pub(crate) fn with_source<T>(
         let result = f(&mut ctrl);
         (ctrl.handler, result)
     })
+}
+
+/// The default device of a controller's kind, and its mute.
+///
+/// pulsectl 0.3.2 gets both wrong for sources: `get_default_device` looks the
+/// default *sink*'s name up among the sources, so it fails for every source,
+/// and `set_device_mute_by_index` mutes the *sink* with that index (PipeWire
+/// gives a monitor source its sink's id, so that muted the speakers).
+pub(crate) trait DefaultDevice: DeviceControl<DeviceInfo> {
+    fn default_device(&mut self) -> Result<DeviceInfo, ControllerError>;
+    fn set_mute(&mut self, index: u32, muted: bool);
+}
+
+impl DefaultDevice for SinkController {
+    fn default_device(&mut self) -> Result<DeviceInfo, ControllerError> {
+        self.get_default_device()
+    }
+
+    fn set_mute(&mut self, index: u32, muted: bool) {
+        self.set_device_mute_by_index(index, muted);
+    }
+}
+
+impl DefaultDevice for SourceController {
+    fn default_device(&mut self) -> Result<DeviceInfo, ControllerError> {
+        let name = self
+            .get_server_info()?
+            .default_source_name
+            .ok_or_else(|| ControllerError::GetInfo("no default source".to_string()))?;
+        self.get_device_by_name(&name)
+    }
+
+    fn set_mute(&mut self, index: u32, muted: bool) {
+        let op = self.handler.introspect.set_source_mute_by_index(index, muted, None);
+        self.handler.wait_for_operation(op).ok();
+    }
 }
 
 /// The server's default sink name, as it reports it (possibly the EQ sink).
