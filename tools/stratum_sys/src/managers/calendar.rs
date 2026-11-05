@@ -7,7 +7,10 @@
 //! daily to yearly, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (with ordinals in
 //! monthly and yearly rules), `BYMONTHDAY` and `BYMONTH`. `BYSETPOS`,
 //! `BYWEEKNO`, `BYYEARDAY` and sub-daily frequencies are ignored, so such a
-//! series shows its first instance or a superset.
+//! series shows its first instance or a superset. For showing one event,
+//! `DESCRIPTION` (or Outlook's HTML `X-ALT-DESC` when it has none), `URL`,
+//! `ORGANIZER`, `ATTENDEE`s and the feed's `X-WR-CALNAME` are kept as
+//! written, in [`Details`].
 //!
 //! Times are converted to the system's zone. A `TZID` is looked up in the
 //! system's zoneinfo, then as a Windows name (Outlook's `Eastern Standard
@@ -102,6 +105,24 @@ pub struct Event {
     pub calendar: usize,
     /// Its feed's zone definitions, shared by every event of the feed.
     pub zones: Arc<ZoneDefs>,
+    /// What only its detail view shows, shared by every instance.
+    pub details: Arc<Details>,
+}
+
+/// An event's description and the rest of what its source says about it,
+/// which only the event's detail view shows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Details {
+    /// Plain text with its line breaks, or HTML (Google writes links as
+    /// `<a>`, Outlook's `X-ALT-DESC` is a whole document).
+    pub description: String,
+    /// The event's own page (`URL`).
+    pub url: String,
+    /// A name, else an address.
+    pub organizer: String,
+    pub attendees: Vec<String>,
+    /// The feed's name (`X-WR-CALNAME`), if it gives one.
+    pub calendar_name: String,
 }
 
 /// One instance of an event, in local time.
@@ -114,6 +135,7 @@ pub struct Occurrence {
     pub end: NaiveDateTime,
     pub all_day: bool,
     pub calendar: usize,
+    pub details: Arc<Details>,
 }
 
 /// Download `url` into `dest`. `webcal://` is fetched as `https://`.
@@ -215,8 +237,15 @@ fn parse_property(line: &str) -> Option<Property> {
     Some(Property { name, params, value: value.to_string() })
 }
 
-/// A TEXT value with its escapes undone.
+/// A TEXT value with its escapes undone, line breaks as spaces: for
+/// one-line fields.
 fn unescape(value: &str) -> String {
+    unescape_text(value, false)
+}
+
+/// A TEXT value with its escapes undone; `\n` is a line break when
+/// `newlines`, else a space.
+fn unescape_text(value: &str, newlines: bool) -> String {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars();
     while let Some(c) = chars.next() {
@@ -225,7 +254,7 @@ fn unescape(value: &str) -> String {
             continue;
         }
         match chars.next() {
-            Some('n' | 'N') => out.push(' '),
+            Some('n' | 'N') => out.push(if newlines { '\n' } else { ' ' }),
             Some(other) => out.push(other),
             None => {}
         }
@@ -429,6 +458,12 @@ fn build_observance(props: &[Property]) -> Option<Observance> {
 pub fn parse(text: &str, calendar: usize) -> Vec<Event> {
     let lines = unfold(text);
     let zones = Arc::new(parse_zones(&lines));
+    let calendar_name = lines
+        .iter()
+        .filter(|l| l.to_ascii_uppercase().starts_with("X-WR-CALNAME"))
+        .find_map(|l| parse_property(l))
+        .map(|p| unescape(&p.value).trim().to_string())
+        .unwrap_or_default();
     let mut events = Vec::new();
     let mut current: Option<Vec<Property>> = None;
     // VALARMs nest inside events; their properties are not the event's.
@@ -440,7 +475,7 @@ pub fn parse(text: &str, calendar: usize) -> Vec<Event> {
             nested = 0;
         } else if upper == "END:VEVENT" {
             if let Some(props) = current.take() {
-                events.extend(build_event(&props, calendar, &zones));
+                events.extend(build_event(&props, calendar, &zones, &calendar_name));
             }
         } else if let Some(props) = current.as_mut() {
             if upper.starts_with("BEGIN:") {
@@ -487,8 +522,31 @@ fn parse_zones(lines: &[String]) -> ZoneDefs {
     zones
 }
 
-fn build_event(props: &[Property], calendar: usize, zones: &Arc<ZoneDefs>) -> Option<Event> {
+/// Who a `ORGANIZER` or `ATTENDEE` names: its `CN`, else its address.
+fn person(prop: &Property) -> String {
+    match prop.param("CN").map(str::trim).filter(|cn| !cn.is_empty()) {
+        Some(name) => name.to_string(),
+        None => {
+            let value = prop.value.trim();
+            value.get(..7).filter(|s| s.eq_ignore_ascii_case("mailto:")).map_or(value, |_| &value[7..]).to_string()
+        }
+    }
+}
+
+fn build_event(props: &[Property], calendar: usize, zones: &Arc<ZoneDefs>, calendar_name: &str) -> Option<Event> {
     let get = |name: &str| props.iter().find(|p| p.name == name);
+    let text = |name: &str| get(name).map(|p| unescape_text(&p.value, true).trim().to_string()).unwrap_or_default();
+    let mut description = text("DESCRIPTION");
+    if description.is_empty() {
+        description = text("X-ALT-DESC");
+    }
+    let details = Details {
+        description,
+        url: get("URL").map(|p| p.value.trim().to_string()).unwrap_or_default(),
+        organizer: get("ORGANIZER").map(person).unwrap_or_default(),
+        attendees: props.iter().filter(|p| p.name == "ATTENDEE").map(person).filter(|p| !p.is_empty()).collect(),
+        calendar_name: calendar_name.to_string(),
+    };
     let start_prop = get("DTSTART")?;
     let start = parse_when(start_prop).into_iter().next()?;
     Some(Event {
@@ -504,6 +562,7 @@ fn build_event(props: &[Property], calendar: usize, zones: &Arc<ZoneDefs>) -> Op
         start,
         calendar,
         zones: Arc::clone(zones),
+        details: Arc::new(details),
     })
 }
 
@@ -744,6 +803,7 @@ pub fn occurrences(events: &[Event], from: NaiveDate, to: NaiveDate) -> Vec<Occu
                     end,
                     all_day,
                     calendar: event.calendar,
+                    details: Arc::clone(&event.details),
                 });
             }
         }
@@ -779,6 +839,31 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].summary, "Lunch, with friends and more");
         assert_eq!(events[0].calendar, 3);
+    }
+
+    #[test]
+    fn details_keep_line_breaks_people_and_the_feed_name() {
+        let text = "BEGIN:VCALENDAR\r\nX-WR-CALNAME:Work\\, mostly\r\nBEGIN:VEVENT\r\nUID:1\r\nSUMMARY:Sync\r\n\
+                    DTSTART:20261023T120000\r\nDESCRIPTION:Agenda:\\n- one\\, two\\nJoin https://example.com/j\r\n\
+                    URL:https://example.com/event\r\nORGANIZER;CN=\"Doe, Jane\":mailto:jane@example.com\r\n\
+                    ATTENDEE;CN=Sam:mailto:sam@example.com\r\nATTENDEE:MAILTO:kim@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let event = &parse(text, 0)[0];
+        let details = event.details.as_ref();
+        assert_eq!(details.description, "Agenda:\n- one, two\nJoin https://example.com/j");
+        assert_eq!(details.url, "https://example.com/event");
+        assert_eq!(details.organizer, "Doe, Jane");
+        assert_eq!(details.attendees, ["Sam", "kim@example.com"]);
+        assert_eq!(details.calendar_name, "Work, mostly");
+        let shown = occurrences(std::slice::from_ref(event), date(2026, 10, 23), date(2026, 10, 24));
+        assert!(Arc::ptr_eq(&shown[0].details, &event.details), "instances share the event's details");
+    }
+
+    #[test]
+    fn outlook_html_stands_in_for_a_missing_description() {
+        let text = ics("BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261023T120000\r\nX-ALT-DESC;FMTTYPE=text/html:<p>Hi</p>\r\nEND:VEVENT\r\n");
+        assert_eq!(parse(&text, 0)[0].details.description, "<p>Hi</p>");
+        let text = ics("BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261023T120000\r\nDESCRIPTION:Plain\r\nX-ALT-DESC;FMTTYPE=text/html:<p>Hi</p>\r\nEND:VEVENT\r\n");
+        assert_eq!(parse(&text, 0)[0].details.description, "Plain");
     }
 
     #[test]

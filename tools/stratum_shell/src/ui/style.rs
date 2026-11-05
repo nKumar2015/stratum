@@ -422,6 +422,10 @@ pub struct DashboardMetrics {
     pub timer_face: f32,
     pub check: f32,
     pub caret: f32,
+    /// An event's details: how far a wheel notch or ↑ ↓ scrolls them, and
+    /// their scroll bar's width.
+    pub scroll_step: f32,
+    pub scrollbar: f32,
     /// Dimming behind the card (QML `#90000000`).
     pub scrim_alpha: f32,
 }
@@ -464,6 +468,8 @@ impl DashboardMetrics {
             timer_face,
             check,
             caret,
+            scroll_step,
+            scrollbar,
             scrim_alpha,
         } = self.clone();
         Self {
@@ -500,6 +506,8 @@ impl DashboardMetrics {
             timer_face: timer_face * s,
             check: check * s,
             caret: caret * s,
+            scroll_step: scroll_step * s,
+            scrollbar: scrollbar * s,
             scrim_alpha,
         }
     }

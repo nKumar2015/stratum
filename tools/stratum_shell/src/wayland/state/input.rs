@@ -333,6 +333,11 @@ impl PointerHandler for App {
                     settings.dirty = true;
                 }
                 changed = true;
+            } else if self.dashboard_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                // An event's details scroll.
+                let action = self.dashboard.on_scroll(delta);
+                changed |= action != crate::dashboard::DashboardAction::None;
+                self.apply_dashboard_action(action);
             } else if let Some(output_name) = self
                 .surfaces
                 .iter()

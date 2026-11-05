@@ -3,7 +3,7 @@
 //! shows the selected day alone. The first day is
 //! always shown, empty or not; later days only when they hold something.
 //! Today's next event says how soon it starts, and so does the glance
-//! strip's chip for it.
+//! strip's chip for it. Clicking an event shows its details ([`super::event`]).
 
 use chrono::{Days, NaiveDate, NaiveDateTime};
 use stratum_sys::managers::calendar::Occurrence;
@@ -142,6 +142,9 @@ impl Dashboard {
                     continue;
                 }
                 let row = line(y);
+                // A click shows its details.
+                self.buttons.push((row, super::Button::Event(self.shown_events.len())));
+                self.shown_events.push(event.clone());
                 let stripe = Rect {
                     x,
                     y: y + m.line * 0.15,
@@ -192,7 +195,7 @@ mod tests {
     }
 
     fn event(summary: &str, start: NaiveDateTime, end: NaiveDateTime, all_day: bool) -> Occurrence {
-        Occurrence { summary: summary.into(), location: String::new(), start, end, all_day, calendar: 0 }
+        Occurrence { summary: summary.into(), location: String::new(), start, end, all_day, calendar: 0, details: Default::default() }
     }
 
     #[test]

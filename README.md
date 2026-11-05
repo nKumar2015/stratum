@@ -21,7 +21,8 @@ replaced pulled in a closure of about 1.1 GiB.
   PAM. It refuses to lock rather than lock you out when PAM cannot work.
 - **polkit agent** with its own password dialog.
 - **Dashboard** — a fullscreen overlay with tabs: today (weather, agenda, now
-  playing), a calendar fed from ICS addresses, system graphs (CPU, memory,
+  playing), a calendar fed from ICS addresses (click an event for its
+  description and links), system graphs (CPU, memory,
   disks, GPUs), and a focus tab with to-dos, a note and a timer.
 - **Screenshots** — region, window or screen, then a viewer to draw on the
   capture and copy, save, or save as.

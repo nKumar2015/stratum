@@ -484,6 +484,8 @@ art = 110.0             # album art
 timer_face = 48.0       # the Focus tab's timer
 check = 14.0            # a to-do's checkbox
 caret = 1.5             # in the Focus tab's fields
+scroll_step = 40.0      # an event's details, per wheel notch or arrow key
+scrollbar = 3.0         # beside them while they overflow
 scrim_alpha = 0.56
 
 [metrics.screenshot]    # the capture overlay

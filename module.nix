@@ -74,6 +74,7 @@ in {
         playerctl # media controls
         upower # battery details
         wl-clipboard # copying screenshots
+        xdg-utils # xdg-open, for links in calendar events
       ]);
 
     xdg.configFile."stratum/config.toml".source =

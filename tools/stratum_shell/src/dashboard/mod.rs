@@ -16,7 +16,9 @@
 //!   bar coloured by load (≥ 90 % error, ≥ 75 % warning, else success).
 //! - Calendar: the month grid (Sunday first, neighbouring months' days
 //!   dimmed, today marked), with «« « Today » »» for year and month, and
-//!   ← → while a tab with a calendar is shown.
+//!   ← → while a tab with a calendar is shown. Clicking an event in the
+//!   agenda or day panel shows its details over the panels ([`event`]),
+//!   whose links open in the browser; Escape or a click outside goes back.
 //! - Now playing: art, title, artist, album, position and length, and
 //!   previous / play-pause / next.
 //! - Focus: to-dos, a note and a timer ([`focus`]). A focused field takes
@@ -31,6 +33,7 @@
 
 mod agenda;
 pub mod calendar;
+mod event;
 pub mod feed;
 mod focus;
 mod note;
@@ -69,6 +72,9 @@ pub enum DashboardAction {
     MediaSet { player: String, property: &'static str, value: String },
     /// Show this player from now on, and read it at once.
     ChoosePlayer(String),
+    /// Open an event's link (only `http`, `https` or `mailto`) with
+    /// `xdg-open`; the dashboard has closed so it shows.
+    OpenUrl(String),
 }
 
 /// The 6×7 grid of dates for `year`/`month`, weeks starting on
@@ -261,6 +267,10 @@ pub struct Dashboard {
     occurrences: (u64, std::collections::HashMap<(NaiveDate, NaiveDate), Vec<Occurrence>>),
     /// The Focus tab's to-dos, note and timer, which outlive closing.
     focus: focus::Focus,
+    /// The events the agenda painted, which `Button::Event` indexes, and
+    /// the one whose details are shown over the panels.
+    shown_events: Vec<Occurrence>,
+    detail: Option<event::EventDetail>,
     /// Playing after a play/pause press, until the player reports it: read
     /// straight after the command, it usually still says the old status.
     playing: crate::ui::pages::Optimistic<bool>,
@@ -299,6 +309,11 @@ enum Button {
     TimerReset,
     TimerAdd,
     TimerStop,
+    /// An agenda row, by index into `shown_events`; a link in the shown
+    /// event's details, by index into its links; and closing them.
+    Event(usize),
+    Link(usize),
+    CloseDetail,
 }
 
 impl Dashboard {
@@ -313,6 +328,8 @@ impl Dashboard {
             player: None,
             occurrences: (0, std::collections::HashMap::new()),
             focus: focus::Focus::default(),
+            shown_events: Vec::new(),
+            detail: None,
             playing: crate::ui::pages::Optimistic::new(),
             card: None,
             buttons: Vec::new(),
@@ -326,9 +343,10 @@ impl Dashboard {
         }
     }
 
-    /// Whether it needs frames: an open dashboard with a scrolling title.
+    /// Whether it needs frames: an open dashboard with a scrolling title
+    /// (which an event's details hide).
     pub fn animating(&self) -> bool {
-        self.open && self.title.moving()
+        self.open && self.detail.is_none() && self.title.moving()
     }
 
     /// Follow a reload. A tab that no longer exists falls back to the first.
@@ -377,6 +395,8 @@ impl Dashboard {
         self.tab = 0;
         self.title = Marquee::ticker();
         self.focus.field = None;
+        self.shown_events.clear();
+        self.detail = None;
         let today = today();
         (self.year, self.month, self.selected) = (today.year(), today.month(), today);
         crate::memory::release_freed();
@@ -413,6 +433,7 @@ impl Dashboard {
         self.tab = tab;
         self.buttons.clear();
         self.focus.field = None;
+        self.detail = None;
         DashboardAction::Redraw
     }
 
@@ -431,6 +452,27 @@ impl Dashboard {
         use smithay_client_toolkit::seat::keyboard::Keysym;
         if !self.open {
             return DashboardAction::None;
+        }
+        // An event's details scroll, and Escape goes back to the panels.
+        if self.detail.is_some() {
+            let page = self.detail.as_ref().map_or(0.0, |d| d.page());
+            let step = self.metrics.scroll_step;
+            let delta = match keysym {
+                Keysym::Escape => {
+                    self.detail = None;
+                    return DashboardAction::Redraw;
+                }
+                Keysym::Up => -step,
+                Keysym::Down => step,
+                Keysym::Page_Up => -page,
+                Keysym::Page_Down | Keysym::space => page,
+                Keysym::Home => f32::NEG_INFINITY,
+                Keysym::End => f32::INFINITY,
+                _ => 0.0,
+            };
+            if delta != 0.0 {
+                return self.scroll_detail(delta);
+            }
         }
         let count = self.config.tabs.len();
         // A focused field types everything but Tab, which moves between
@@ -488,6 +530,24 @@ impl Dashboard {
         (self.year, self.month, self.selected) = (date.year(), date.month(), date);
     }
 
+    /// Scroll an event's details by `delta` logical pixels.
+    fn scroll_detail(&mut self, delta: f32) -> DashboardAction {
+        if self.detail.as_mut().is_some_and(|d| d.scroll_by(delta)) {
+            DashboardAction::Redraw
+        } else {
+            DashboardAction::None
+        }
+    }
+
+    /// The wheel over the dashboard's surface: it scrolls an event's
+    /// details, a step per notch in its direction.
+    pub fn on_scroll(&mut self, delta: f32) -> DashboardAction {
+        if !self.open || delta == 0.0 {
+            return DashboardAction::None;
+        }
+        self.scroll_detail(delta.signum() * self.metrics.scroll_step)
+    }
+
     /// A click on the dashboard's surface; `music` is `SystemState::music`.
     pub fn on_click(&mut self, point: Point, music: &Value) -> DashboardAction {
         if !self.open {
@@ -499,6 +559,18 @@ impl Dashboard {
         // Later buttons are drawn over earlier ones (a to-do's delete over
         // its row), so the last hit wins.
         let hit = self.buttons.iter().rev().find(|(r, _)| r.contains(point)).copied();
+        // Over an event's details, only their buttons are painted: a click
+        // anywhere else goes back to the panels.
+        if let Some(detail) = &self.detail {
+            return match hit {
+                Some((_, button)) => self.press(button, 0.0, music),
+                None if detail.rect.is_some_and(|r| r.contains(point)) => DashboardAction::None,
+                None => {
+                    self.detail = None;
+                    DashboardAction::Redraw
+                }
+            };
+        }
         // Anything but a field takes the focus away from the field.
         if !matches!(hit, Some((_, Button::TodoInput | Button::NoteArea))) {
             self.focus.field = None;
@@ -557,6 +629,27 @@ impl Dashboard {
                 None => DashboardAction::None,
             },
             Button::Dnd => DashboardAction::ToggleDnd,
+            Button::Event(i) => match self.shown_events.get(i) {
+                Some(occurrence) => {
+                    self.detail = Some(event::EventDetail::new(occurrence.clone()));
+                    // The panels' buttons are under the details now.
+                    self.buttons.clear();
+                    DashboardAction::Redraw
+                }
+                None => DashboardAction::None,
+            },
+            Button::Link(i) => match self.detail.as_ref().and_then(|d| d.link(i)) {
+                Some(url) => {
+                    // Closed, so the browser it opens in is not behind it.
+                    self.close();
+                    DashboardAction::OpenUrl(url)
+                }
+                None => DashboardAction::None,
+            },
+            Button::CloseDetail => {
+                self.detail = None;
+                DashboardAction::Redraw
+            }
             other => self.focus_click(other).unwrap_or_else(|| self.navigate(other)),
         }
     }
@@ -586,6 +679,7 @@ impl Dashboard {
         };
         ui::paint_frame(list, card, m.border, ctx.theme.border_active, ctx.theme.bg_main);
         self.buttons.clear();
+        self.shown_events.clear();
 
         let mut y = card.y + m.padding;
         let bar = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.tab_height, radius: 0.0, color: Color::TRANSPARENT };
@@ -601,6 +695,13 @@ impl Dashboard {
             return;
         };
         let body = Rect { x: card.x + m.padding, y, width: card.width - m.padding * 2.0, height: m.panel_height, radius: m.radius, color: Color::TRANSPARENT };
+        // An event's details take the panels' place.
+        if self.detail.is_some() {
+            self.paint_detail(ctx, list, body);
+            self.painted_timer(std::time::Instant::now());
+            self.card = Some(card);
+            return;
+        }
         let row_weights: Vec<f32> = tab.rows.iter().map(|r| r.weight).collect();
         for (spec, row) in tab.rows.iter().zip(split_down(body, &row_weights, m.gap)) {
             let weights: Vec<f32> = spec.panels.iter().map(|p| p.weight).collect();
@@ -661,6 +762,9 @@ impl Dashboard {
 
     /// The keys that do something on the shown tab, shortest first to last.
     fn key_hint(&self) -> String {
+        if self.detail.is_some() {
+            return "\u{2191}\u{2193} scroll \u{b7} Esc back".into();
+        }
         let mut keys = Vec::new();
         if self.shows(PanelKind::Calendar) {
             keys.push("\u{2190}\u{2192} month \u{b7} \u{21e7} year");
@@ -1235,6 +1339,65 @@ mod tests {
         d.tab_hits = vec![(Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 0.0, color: Color::TRANSPARENT }, 2)];
         assert_eq!(d.on_click(Point::new(5.0, 5.0), &Value::Null), DashboardAction::Redraw);
         assert_eq!(d.tab, 2);
+    }
+
+    #[test]
+    fn an_event_opens_its_details_whose_links_open_and_escape_goes_back() {
+        let mut d = dashboard();
+        d.open_on("a", None);
+        let rect = |x: f32, y: f32, w: f32, h: f32| Rect { x, y, width: w, height: h, radius: 0.0, color: Color::TRANSPARENT };
+        d.card = Some(rect(0.0, 0.0, 800.0, 500.0));
+        let start = today().and_hms_opt(9, 0, 0).unwrap();
+        let details = stratum_sys::managers::calendar::Details { url: "https://example.com/e".into(), ..Default::default() };
+        let occurrence = Occurrence {
+            summary: "Sync".into(),
+            location: String::new(),
+            start,
+            end: start + chrono::Duration::hours(1),
+            all_day: false,
+            calendar: 0,
+            details: std::sync::Arc::new(details),
+        };
+        // As the agenda paints a row.
+        d.shown_events.push(occurrence);
+        d.buttons.push((rect(10.0, 100.0, 300.0, 20.0), Button::Event(0)));
+        assert_eq!(d.on_click(Point::new(50.0, 110.0), &Value::Null), DashboardAction::Redraw);
+        assert!(d.detail.is_some() && d.buttons.is_empty(), "the rows under the details stop taking clicks");
+        assert_eq!(d.key_hint(), "\u{2191}\u{2193} scroll \u{b7} Esc back");
+        assert!(!d.animating());
+
+        // Escape leaves the details, not the dashboard.
+        assert_eq!(d.key(Keysym::Escape, None, Modifiers::default(), &Value::Null), DashboardAction::Redraw);
+        assert!(d.detail.is_none() && d.is_open());
+
+        // As the details paint: a click inside them does nothing, one
+        // outside goes back, a link opens and closes the dashboard.
+        d.press(Button::Event(0), 0.0, &Value::Null);
+        let detail = d.detail.as_mut().unwrap();
+        detail.rect = Some(rect(10.0, 50.0, 700.0, 400.0));
+        detail.links = vec!["https://example.com/e".into()];
+        d.buttons.push((rect(40.0, 200.0, 120.0, 20.0), Button::Link(0)));
+        assert_eq!(d.on_click(Point::new(500.0, 300.0), &Value::Null), DashboardAction::None);
+        assert!(d.detail.is_some());
+        assert_eq!(d.on_click(Point::new(50.0, 210.0), &Value::Null), DashboardAction::OpenUrl("https://example.com/e".into()));
+        assert!(!d.is_open() && d.detail.is_none());
+
+        d.open_on("a", None);
+        d.press(Button::Event(0), 0.0, &Value::Null);
+        assert!(d.detail.is_none(), "closing forgot the painted rows");
+    }
+
+    #[test]
+    fn details_scroll_within_what_overflows() {
+        let start = today().and_hms_opt(9, 0, 0).unwrap();
+        let o = Occurrence { summary: "S".into(), location: String::new(), start, end: start, all_day: false, calendar: 0, details: Default::default() };
+        let mut detail = event::EventDetail::new(o);
+        assert!(!detail.scroll_by(40.0), "nothing to scroll before a paint finds an overflow");
+        detail.max_scroll = 100.0;
+        assert!(detail.scroll_by(40.0) && detail.scroll_by(400.0));
+        assert_eq!(detail.scroll, 100.0);
+        assert!(!detail.scroll_by(1.0) && detail.scroll_by(f32::NEG_INFINITY));
+        assert_eq!(detail.scroll, 0.0);
     }
 
     #[test]

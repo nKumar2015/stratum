@@ -513,10 +513,16 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             let Some((program, args)) = argv.split_first() else {
                 return Err("empty command".into());
             };
-            std::process::Command::new(program)
+            let mut child = std::process::Command::new(program)
                 .args(args)
                 .spawn()
                 .map_err(|err| format!("failed to spawn {program}: {err}"))?;
+            // Waited for on a thread of its own: unwaited, every child that
+            // exits (`xdg-open` at once) stays a zombie of the shell.
+            let reaper = std::thread::Builder::new().name("stratum-reap".into()).stack_size(64 * 1024);
+            if reaper.spawn(move || child.wait()).is_err() {
+                tracing::warn!("cannot wait for {program}: it will linger as a zombie");
+            }
             serde_json::json!({ "ok": true })
         }
         SystemAction::Notify { app, icon, urgency, summary, body } => {

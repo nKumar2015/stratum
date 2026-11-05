@@ -186,6 +186,9 @@ impl App {
             DashboardAction::ChoosePlayer(player) => {
                 self.actions.push(crate::actions::SystemAction::MusicRefresh(Some(player)));
             }
+            DashboardAction::OpenUrl(url) => {
+                self.actions.push(crate::actions::SystemAction::Spawn(vec!["xdg-open".into(), url]));
+            }
         }
         self.mark_dashboard_dirty();
     }

@@ -116,7 +116,14 @@ the addresses must never reach the Nix store, the logs, or an error
 message), fetches with `curl` only while open, and keeps copies in
 `$XDG_STATE_HOME/stratum/calendar/` (mode 700). Time zones come from `jiff`
 over the system zoneinfo; series repeat in their own zone's wall time. Test
-with fixture feeds as `file://` addresses, never the user's calendar. The sampler also refreshes
+with fixture feeds as `file://` addresses, never the user's calendar.
+Clicking an agenda or day row shows the event's details over the panels
+(`dashboard/event.rs`): location, calendar name, organizer, attendees, `URL`
+and the description, which may be plain text or HTML (Google's `<a>` links,
+Outlook's `X-ALT-DESC` document). Only `http`, `https` and `mailto` links
+are clickable, and a click runs `xdg-open` and closes the dashboard; live
+tests put a stub `xdg-open` first in `PATH`. `SystemAction::Spawn` waits for
+its child on a thread, or each finished one stays a zombie. The sampler also refreshes
 `SystemState::music` while open. Views draw album art from the snapshot's
 `art_path`, never `art_url`: `music::status_for` percent-decodes `file://`
 addresses and downloads `http(s)` ones (web players such as Orchard send
