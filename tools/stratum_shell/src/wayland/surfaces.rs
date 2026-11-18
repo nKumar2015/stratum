@@ -18,6 +18,9 @@ pub struct SurfaceEntry {
     /// segfaulted inside the NVIDIA driver (`vkDestroySwapchainKHR` writing
     /// through a released `wl_proxy`).
     pub renderer: Option<SurfaceRenderer>,
+    /// The renderer `unmap` took off, until [`Self::release_retired`] drops
+    /// it. Declared before `layer` for the same reason as `renderer`.
+    retired: Option<SurfaceRenderer>,
     pub layer: LayerSurface,
     /// Integer buffer scale reported by SCTK, used for `set_buffer_scale`,
     /// buffer sizing, and glyph rasterization. Fractional outputs (e.g. 1.6)
@@ -58,6 +61,7 @@ impl SurfaceEntry {
     pub fn new(layer: LayerSurface, scale: i32, output_name: String) -> Self {
         Self {
             renderer: None,
+            retired: None,
             layer,
             scale,
             logical_width: 0,
@@ -139,14 +143,29 @@ impl SurfaceEntry {
     /// leaving it mapped keeps a stale frame on screen forever, which is the
     /// "black rectangle after fading away" bug.
     ///
-    /// The renderer (and its Vulkan swapchain) is kept. Tearing it down and
-    /// rebuilding it on the next show races the compositor's buffer release and
-    /// surfaces as a `Timeout` from `get_current_texture`.
+    /// The renderer, and with it the swapchain, is retired once the null
+    /// buffer is committed, dropped by [`Self::release_retired`] at the end
+    /// of the frame, and rebuilt on the next show. A full-screen
+    /// overlay's swapchain is four output-sized images (60 MB at 2560x1440,
+    /// 150 MB at 4000x2400), which a hidden overlay kept forever. (It was kept
+    /// once because rebuilding timed out in `get_current_texture`; that was
+    /// under Fifo, which waits on frame callbacks a hidden surface never gets.
+    /// Presenting is Mailbox now, and a rebuild costs only the swapchain: the
+    /// pipeline and atlas are shared.)
     ///
     /// Keyboard focus is dropped in the same commit. Changing it in a commit
     /// of its own first makes wlroots send a configure, which the unmap then
     /// invalidates; SCTK's late `ack_configure` for it is a fatal "wrong
     /// configure serial" error. (Hyprland tolerates it; sway does not.)
+    /// Drop the renderer `unmap` retired, and its swapchain. Called once a
+    /// frame has painted or unmapped every surface: Mesa's swapchain teardown
+    /// waits on a roundtrip, and the compositor's configures that arrive
+    /// meanwhile must be dispatched before another surface unmaps. An unmap
+    /// after them made wlroots reject a stale ack ("wrong configure serial").
+    pub fn release_retired(&mut self) {
+        self.retired = None;
+    }
+
     pub fn unmap(&mut self) {
         if !self.mapped {
             return;
@@ -159,6 +178,7 @@ impl SurfaceEntry {
         }
         self.layer.attach(None, 0, 0);
         self.layer.commit();
+        self.retired = self.renderer.take();
         self.mapped = false;
         self.dirty = false;
         // The surface must be configured again before a buffer may be attached.

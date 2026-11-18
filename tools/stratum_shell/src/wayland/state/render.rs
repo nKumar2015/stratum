@@ -51,17 +51,38 @@ impl App {
         self.tick_theme_switcher(dt);
 
         let theme = self.config.active_theme();
-        self.render_osd(&theme, dt)?;
-        self.render_toasts(&theme, dt)?;
-        self.render_power_menu(&theme, dt)?;
-        self.render_polkit_dialog(&theme, dt, state_changed)?;
-        self.render_hover_menu(&theme, dt, state_changed)?;
-        self.render_dashboard(&theme, dt, state_changed)?;
-        self.render_screenshot(&theme, dt)?;
-        self.render_viewer(&theme, dt);
-        self.render_theme_switcher(&theme, dt, state_changed)?;
-        self.render_tray_menu(&theme, dt)?;
-        self.render_bars(&theme, dt)
+        let result = self.render_surfaces(&theme, dt, state_changed);
+        // Last, after every surface has drawn or unmapped; see
+        // `SurfaceEntry::release_retired`.
+        for entry in self
+            .osd_surfaces
+            .iter_mut()
+            .chain(&mut self.toast_surfaces)
+            .chain(&mut self.power_surfaces)
+            .chain(&mut self.polkit_surfaces)
+            .chain(&mut self.hover_surfaces)
+            .chain(&mut self.dashboard_surfaces)
+            .chain(&mut self.screenshot_surfaces)
+            .chain(&mut self.theme_surfaces)
+            .chain(&mut self.tray_menu_surfaces)
+        {
+            entry.release_retired();
+        }
+        result
+    }
+
+    fn render_surfaces(&mut self, theme: &Theme, dt: f32, state_changed: bool) -> Result<(), String> {
+        self.render_osd(theme, dt)?;
+        self.render_toasts(theme, dt)?;
+        self.render_power_menu(theme, dt)?;
+        self.render_polkit_dialog(theme, dt, state_changed)?;
+        self.render_hover_menu(theme, dt, state_changed)?;
+        self.render_dashboard(theme, dt, state_changed)?;
+        self.render_screenshot(theme, dt)?;
+        self.render_viewer(theme, dt);
+        self.render_theme_switcher(theme, dt, state_changed)?;
+        self.render_tray_menu(theme, dt)?;
+        self.render_bars(theme, dt)
     }
 
     /// Feed the OSD and the toasts what changed, and mark their surfaces for

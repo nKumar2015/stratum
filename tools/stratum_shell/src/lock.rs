@@ -486,12 +486,11 @@ fn load_backdrop(path: &Path, width: u32, blur: f32) -> Option<Image> {
     let height = ((decoded.height() as f32 / decoded.width().max(1) as f32) * width as f32)
         .round()
         .max(1.0) as u32;
-    let small = image::imageops::resize(
-        &decoded.to_rgba8(),
-        width,
-        height,
-        image::imageops::FilterType::Triangle,
-    );
+    // Downsampled in the decoded format, so the full-size picture is never
+    // copied to RGBA or through `resize`'s float buffer: those were 24 MB of
+    // a 40 MB startup peak for a 2560x1600 wallpaper. Box filtering is
+    // indistinguishable once blurred.
+    let small = decoded.thumbnail_exact(width, height).into_rgba8();
     let blurred = if blur > 0.0 {
         image::imageops::fast_blur(&small, blur)
     } else {
@@ -527,12 +526,9 @@ fn load_avatar(path: &Path, size: u32) -> Option<Image> {
         side,
         side,
     );
-    let scaled = image::imageops::resize(
-        &square.to_rgba8(),
-        size,
-        size,
-        image::imageops::FilterType::Lanczos3,
-    );
+    let scaled = square
+        .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
+        .into_rgba8();
     let pixels = circle_mask(scaled.into_raw(), size);
     Some(Image {
         width: size,

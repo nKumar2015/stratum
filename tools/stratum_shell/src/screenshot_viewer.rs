@@ -738,7 +738,7 @@ pub fn rasterize(pixels: &mut [u8], width: u32, height: u32, strokes: &[Stroke])
 
 /// Load a capture for the viewer.
 pub fn load(path: &str) -> Result<Image, String> {
-    let decoded = image::open(path).map_err(|err| format!("Failed to load image: {err}"))?.to_rgba8();
+    let decoded = image::open(path).map_err(|err| format!("Failed to load image: {err}"))?.into_rgba8();
     let (width, height) = decoded.dimensions();
     Ok(Image { width, height, pixels: Arc::from(decoded.into_raw()) })
 }

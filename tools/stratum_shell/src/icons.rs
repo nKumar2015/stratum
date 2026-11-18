@@ -282,11 +282,11 @@ fn render_png(data: &[u8], size: u32) -> Option<IconImage> {
     // Fit inside the square, keeping the aspect ratio, and centre it: a
     // notification's picture is often not square, and stretching it showed.
     let fitted = if image.width() == size && image.height() == size {
-        image.to_rgba8()
+        image.into_rgba8()
     } else {
         image
             .resize(size, size, image::imageops::FilterType::Lanczos3)
-            .to_rgba8()
+            .into_rgba8()
     };
     let mut canvas = image::RgbaImage::new(size, size);
     image::imageops::overlay(

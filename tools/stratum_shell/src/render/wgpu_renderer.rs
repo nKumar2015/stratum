@@ -12,6 +12,7 @@
 //!
 //! Everything shares one vertex format, so most frames are a single draw call.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ptr::NonNull;
 
@@ -194,6 +195,134 @@ const VERTEX_ATTRS: [wgpu::VertexAttribute; 13] = wgpu::vertex_attr_array![
     12 => Float32,  // stroke
 ];
 
+/// What every surface draws with, built once with the device.
+///
+/// Each surface used to compile its own shader and pipeline and keep its own
+/// atlas: a 4 MiB texture and a 4 MiB CPU copy apiece, for twenty-odd
+/// surfaces. One atlas serves them all because nothing in it outlives a
+/// frame: each surface repacks it from the top, and wgpu runs a
+/// `write_texture` after the work submitted before it and before the work
+/// submitted after, so one surface's uploads never reach another's draw.
+pub struct Shared {
+    shader: wgpu::ShaderModule,
+    globals_layout: wgpu::BindGroupLayout,
+    /// The layout the atlas binds with, reused for backdrops and textures.
+    texture_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    sampler: wgpu::Sampler,
+    /// One pipeline per surface format; there is rarely more than one.
+    pipelines: RefCell<Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>>,
+    atlas: RefCell<Atlas>,
+}
+
+impl Shared {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("stratum shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("stratum globals layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("stratum atlas layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("stratum pipeline layout"),
+            bind_group_layouts: &[Some(&globals_layout), Some(&texture_layout)],
+            immediate_size: 0,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("stratum sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let atlas = Atlas::new(device, &texture_layout, &sampler);
+        Self {
+            shader,
+            globals_layout,
+            texture_layout,
+            pipeline_layout,
+            sampler,
+            pipelines: RefCell::new(Vec::new()),
+            atlas: RefCell::new(atlas),
+        }
+    }
+
+    /// The pipeline drawing into `format`, compiled on first use.
+    fn pipeline(&self, device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+        let mut pipelines = self.pipelines.borrow_mut();
+        if let Some((_, pipeline)) = pipelines.iter().find(|(f, _)| *f == format) {
+            return pipeline.clone();
+        }
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("stratum pipeline"),
+            layout: Some(&self.pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &VERTEX_ATTRS,
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            // No culling: a -90 degree transform reverses winding, and the
+            // vectorheart styling will rotate shapes freely.
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        pipelines.push((format, pipeline.clone()));
+        pipeline
+    }
+}
+
 /// Per-surface presentation state.
 pub struct SurfaceRenderer {
     surface: wgpu::Surface<'static>,
@@ -201,14 +330,11 @@ pub struct SurfaceRenderer {
     pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
-    atlas: Atlas,
     vertex_buffer: wgpu::Buffer,
     vertex_capacity: u64,
     size: (u32, u32),
     scale: f32,
     path_cache: HashMap<u64, Vec<Vertex>>,
-    /// The layout the atlas binds with, reused for the backdrop texture.
-    texture_layout: wgpu::BindGroupLayout,
     backdrop: Option<BackdropTexture>,
     /// `TexturedQuad`s on the GPU, by key; dropped once a frame no longer
     /// draws them.
@@ -311,26 +437,7 @@ impl SurfaceRenderer {
         };
         surface.configure(&gpu.device, &config);
 
-        let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("stratum shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
-
-        let globals_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("stratum globals layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+        let pipeline = gpu.shared.pipeline(&gpu.device, format);
 
         let globals_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("stratum globals"),
@@ -338,86 +445,14 @@ impl SurfaceRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
         let globals_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("stratum globals bind group"),
-            layout: &globals_layout,
+            layout: &gpu.shared.globals_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: globals_buffer.as_entire_binding(),
             }],
         });
-
-        let atlas_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("stratum atlas layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
-
-        let atlas = Atlas::new(gpu, &atlas_layout);
-
-        let pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("stratum pipeline layout"),
-                bind_group_layouts: &[Some(&globals_layout), Some(&atlas_layout)],
-                immediate_size: 0,
-            });
-
-        let pipeline = gpu
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("stratum pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<Vertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &VERTEX_ATTRS,
-                    })],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                // No culling: a -90 degree transform reverses winding, and the
-                // vectorheart styling will rotate shapes freely.
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: None,
-                    ..Default::default()
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview_mask: None,
-                cache: None,
-            });
 
         let vertex_capacity = std::mem::size_of::<Vertex>() as u64 * 6 * 256;
         let vertex_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -438,13 +473,11 @@ impl SurfaceRenderer {
             pipeline,
             globals_buffer,
             globals_bind_group,
-            atlas,
             vertex_buffer,
             vertex_capacity,
             size,
             scale,
             path_cache: HashMap::new(),
-            texture_layout: atlas_layout,
             backdrop: None,
             textures: HashMap::new(),
         })
@@ -487,18 +520,12 @@ impl SurfaceRenderer {
             size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some(label),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
         gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(label),
-            layout: &self.texture_layout,
+            layout: &gpu.shared.texture_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&gpu.shared.sampler) },
             ],
         })
     }
@@ -538,7 +565,8 @@ impl SurfaceRenderer {
     /// Draw and present one frame.
     pub fn submit(&mut self, gpu: &Gpu, list: &DisplayList, text: &mut TextEngine) -> Result<(), String> {
         let mut batch = Batch::new();
-        self.atlas.begin_frame();
+        let mut atlas = gpu.shared.atlas.borrow_mut();
+        atlas.begin_frame();
         let mut used_paths = std::collections::HashSet::new();
         let mut used_textures = std::collections::HashSet::new();
         match &list.backdrop {
@@ -577,7 +605,7 @@ impl SurfaceRenderer {
         for command in &list.commands {
             match command {
                 DrawCommand::Layer => {
-                    self.append_text(gpu, &mut batch, list, layer, text);
+                    self.append_text(&gpu.queue, &mut atlas, &mut batch, list, layer, text);
                     batch.set_clip(clip);
                     layer += 1;
                 }
@@ -595,8 +623,8 @@ impl SurfaceRenderer {
                     }
                 }
                 DrawCommand::Image(image) => {
-                    if let Some(uv) = self.atlas.upload_rgba(
-                        gpu,
+                    if let Some(uv) = atlas.upload_rgba(
+                        &gpu.queue,
                         &image.pixels,
                         image.width,
                         image.height,
@@ -646,7 +674,7 @@ impl SurfaceRenderer {
                 }
             }
         }
-        self.append_text(gpu, &mut batch, list, layer, text);
+        self.append_text(&gpu.queue, &mut atlas, &mut batch, list, layer, text);
 
         // Paths whose geometry changes every frame (a dragged curve) would
         // otherwise add a cache entry per frame forever. Past a bound, keep
@@ -746,13 +774,13 @@ impl SurfaceRenderer {
             if !batch.is_empty() {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+                pass.set_bind_group(1, &atlas.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 let mut bound = None;
                 for segment in &batch.segments {
                     if segment.texture != bound {
                         let group = segment.texture.and_then(|key| self.textures.get(&key));
-                        pass.set_bind_group(1, group.unwrap_or(&self.atlas.bind_group), &[]);
+                        pass.set_bind_group(1, group.unwrap_or(&atlas.bind_group), &[]);
                         bound = segment.texture;
                     }
                     match segment.clip {
@@ -782,7 +810,15 @@ impl SurfaceRenderer {
     /// A rect, filled, or outlined `stroke` logical pixels thick.
     /// The glyphs of `layer`'s text, over what is already in `batch`. Each
     /// run carries the clip that was active when it was pushed.
-    fn append_text(&mut self, gpu: &Gpu, batch: &mut Batch, list: &DisplayList, layer: u32, text: &mut TextEngine) {
+    fn append_text(
+        &mut self,
+        queue: &wgpu::Queue,
+        atlas: &mut Atlas,
+        batch: &mut Batch,
+        list: &DisplayList,
+        layer: u32,
+        text: &mut TextEngine,
+    ) {
         let mut glyph_uploads = Vec::new();
         for run in list.texts.iter().filter(|run| run.layer == layer) {
             // Upright text is placed in surface pixels, so its bitmaps sit on
@@ -801,7 +837,7 @@ impl SurfaceRenderer {
             }
         }
         for (color, transform, clip, raster) in glyph_uploads {
-            if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
+            if let Some(uv) = atlas.upload_mask(queue, &raster) {
                 // The raster is placed in whole physical pixels from the
                 // origin: `(left, -top)`.
                 let scale = self.scale;
@@ -1070,11 +1106,14 @@ fn path_hash(path: &Path) -> u64 {
     hasher.finish()
 }
 
-/// A shared RGBA atlas for glyph masks and images.
+/// The RGBA atlas glyph masks and images are drawn from, shared by every
+/// surface (`Shared`).
+///
+/// There is no CPU copy of it: an entry is written once, uploaded with its
+/// gutter from a staging buffer, and never read back.
 pub(crate) struct Atlas {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
-    data: Vec<u8>,
     packer: ShelfPacker,
 }
 
@@ -1121,8 +1160,8 @@ impl ShelfPacker {
 }
 
 impl Atlas {
-    pub(crate) fn new(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Self {
-        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, sampler: &wgpu::Sampler) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("stratum atlas"),
             size: wgpu::Extent3d {
                 width: ATLAS_SIZE,
@@ -1137,13 +1176,7 @@ impl Atlas {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("stratum atlas sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("stratum atlas bind group"),
             layout,
             entries: &[
@@ -1153,7 +1186,7 @@ impl Atlas {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(sampler),
                 },
             ],
         });
@@ -1161,7 +1194,6 @@ impl Atlas {
         Self {
             texture,
             bind_group,
-            data: vec![0; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize],
             packer: ShelfPacker::default(),
         }
     }
@@ -1169,39 +1201,29 @@ impl Atlas {
     /// Upload an RGBA image and return its UV rect.
     pub(crate) fn upload_rgba(
         &mut self,
-        gpu: &Gpu,
+        queue: &wgpu::Queue,
         pixels: &[u8],
         width: u32,
         height: u32,
     ) -> Option<(f32, f32, f32, f32)> {
-        let (x, y) = self.allocate(width, height)?;
-        for row in 0..height {
-            let src = (row * width * 4) as usize;
-            let dst = ((y + row) * ATLAS_SIZE + x) as usize * 4;
-            let len = (width * 4) as usize;
-            if src + len <= pixels.len() {
-                self.data[dst..dst + len].copy_from_slice(&pixels[src..src + len]);
+        let row_len = (width * 4) as usize;
+        self.upload(queue, width, height, |row, dst| {
+            let src = row as usize * row_len;
+            if let Some(src) = pixels.get(src..src + row_len) {
+                dst.copy_from_slice(src);
             }
-        }
-        self.flush_entry(gpu, x, y, width, height);
-        Some(self.uv(x, y, width, height))
+        })
     }
 
     /// Upload an 8-bit glyph mask as white-with-coverage RGBA.
-    pub(crate) fn upload_mask(&mut self, gpu: &Gpu, glyph: &RasterGlyph) -> Option<(f32, f32, f32, f32)> {
-        let (x, y) = self.allocate(glyph.width, glyph.height)?;
-        for row in 0..glyph.height {
-            for col in 0..glyph.width {
-                let a = glyph.data[(row * glyph.width + col) as usize];
-                let dst = (((y + row) * ATLAS_SIZE + x + col) * 4) as usize;
-                self.data[dst] = 255;
-                self.data[dst + 1] = 255;
-                self.data[dst + 2] = 255;
-                self.data[dst + 3] = a;
+    pub(crate) fn upload_mask(&mut self, queue: &wgpu::Queue, glyph: &RasterGlyph) -> Option<(f32, f32, f32, f32)> {
+        let width = glyph.width as usize;
+        self.upload(queue, glyph.width, glyph.height, |row, dst| {
+            let src = &glyph.data[row as usize * width..(row as usize + 1) * width];
+            for (px, &a) in dst.chunks_exact_mut(4).zip(src) {
+                px.copy_from_slice(&[255, 255, 255, a]);
             }
-        }
-        self.flush_entry(gpu, x, y, glyph.width, glyph.height);
-        Some(self.uv(x, y, glyph.width, glyph.height))
+        })
     }
 
     /// Rewind to the top of the atlas; see `ShelfPacker`.
@@ -1209,62 +1231,37 @@ impl Atlas {
         self.packer.begin_frame();
     }
 
-    /// Room for a `w`×`h` entry inside a cleared gutter of `ATLAS_GUTTER`
-    /// texels. Returns the entry's origin; upload it, then flush with
-    /// [`Self::flush_entry`] so the gutter reaches the GPU too.
+    /// Place a `w`×`h` entry inside a gutter of `ATLAS_GUTTER` clear texels
+    /// and upload it, `fill` writing each of its rows (`w * 4` bytes).
     ///
     /// The sampler filters linearly, so a quad at a fractional position reads
     /// a little past its entry's edge. Without a gutter that was the next
     /// entry, or a stale one from an earlier frame (the atlas is repacked
     /// every frame and never cleared), which drew as a faint line beside the
-    /// glyph.
-    fn allocate(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
-        let g = ATLAS_GUTTER;
-        let ((x, y), wrapped) = self.packer.allocate(w + 2 * g, h + 2 * g)?;
-        if wrapped {
-            // Out of room within a single frame. A real atlas would evict by LRU.
-            self.data.fill(0);
-        }
-        for row in y..y + h + 2 * g {
-            let start = ((row * ATLAS_SIZE + x) * 4) as usize;
-            self.data[start..start + ((w + 2 * g) * 4) as usize].fill(0);
-        }
-        Some((x + g, y + g))
-    }
-
-    /// Flush an entry placed by [`Self::allocate`], with its gutter.
-    fn flush_entry(&mut self, gpu: &Gpu, x: u32, y: u32, w: u32, h: u32) {
-        let g = ATLAS_GUTTER;
-        self.flush_region(gpu, x - g, y - g, w + 2 * g, h + 2 * g);
-    }
-
-    fn uv(&self, x: u32, y: u32, w: u32, h: u32) -> (f32, f32, f32, f32) {
-        (
-            x as f32 / ATLAS_SIZE as f32,
-            y as f32 / ATLAS_SIZE as f32,
-            (x + w) as f32 / ATLAS_SIZE as f32,
-            (y + h) as f32 / ATLAS_SIZE as f32,
-        )
-    }
-
-    /// Upload one rectangle from the CPU atlas to the GPU texture.
+    /// glyph. The gutter goes up in the same copy as the entry.
     ///
     /// `bytes_per_row` must be a multiple of `COPY_BYTES_PER_ROW_ALIGNMENT`
-    /// (256), so the region is copied into a padded scratch buffer first.
-    fn flush_region(&mut self, gpu: &Gpu, x: u32, y: u32, w: u32, h: u32) {
+    /// (256), so rows are padded in the staging buffer.
+    fn upload(
+        &mut self,
+        queue: &wgpu::Queue,
+        w: u32,
+        h: u32,
+        mut fill: impl FnMut(u32, &mut [u8]),
+    ) -> Option<(f32, f32, f32, f32)> {
         const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let unpadded = w * 4;
-        let padded = unpadded.div_ceil(ALIGN) * ALIGN;
-
-        let mut staged = vec![0u8; (padded * h) as usize];
+        let g = ATLAS_GUTTER;
+        // A wrap means one frame outgrew the atlas, and entries placed
+        // earlier in it are overwritten. A real atlas would evict by LRU.
+        let ((x, y), _wrapped) = self.packer.allocate(w + 2 * g, h + 2 * g)?;
+        let (outer_w, outer_h) = (w + 2 * g, h + 2 * g);
+        let padded = (outer_w * 4).div_ceil(ALIGN) * ALIGN;
+        let mut staged = vec![0u8; (padded * outer_h) as usize];
         for row in 0..h {
-            let src = (((y + row) * ATLAS_SIZE + x) * 4) as usize;
-            let dst = (row * padded) as usize;
-            let len = unpadded as usize;
-            staged[dst..dst + len].copy_from_slice(&self.data[src..src + len]);
+            let start = ((row + g) * padded + g * 4) as usize;
+            fill(row, &mut staged[start..start + (w * 4) as usize]);
         }
-
-        gpu.queue.write_texture(
+        queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
@@ -1275,14 +1272,22 @@ impl Atlas {
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(padded),
-                rows_per_image: Some(h),
+                rows_per_image: Some(outer_h),
             },
             wgpu::Extent3d {
-                width: w,
-                height: h,
+                width: outer_w,
+                height: outer_h,
                 depth_or_array_layers: 1,
             },
         );
+        let (x, y) = (x + g, y + g);
+        let size = ATLAS_SIZE as f32;
+        Some((
+            x as f32 / size,
+            y as f32 / size,
+            (x + w) as f32 / size,
+            (y + h) as f32 / size,
+        ))
     }
 }
 

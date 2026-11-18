@@ -114,7 +114,10 @@ tab `dashboard open|toggle <tab>` names. Its data comes from a sampler thread
 history for the graphs, recording in the background but publishing into
 `SystemState::dashboard` only while open, so a closed dashboard never wakes
 the loop. GPUs are sampled only while open: an NVML reading costs ~20 ms
-(held open, NVML would keep the dGPU awake). The System tab's graphs are
+(held open, NVML would keep the dGPU awake). NVML runs in a helper process,
+the shell binary started as `--nvml-read <slot>` (`gpu::nvml_helper`): it
+loads `libcuda`, which can never be unloaded and kept ~4 MB and a thread in
+the shell for the rest of the session. The System tab's graphs are
 `ui/graph.rs`, which spans a fixed number of readings so the line scrolls
 rather than stretches; they fill their panel in a grid. The whole card,
 text included, scales up from `[metrics.dashboard]` to span
@@ -457,8 +460,10 @@ A change reaches the session by pushing to `main`, `nix flake update stratum`
 in `~/nixos-config`, and the user's `nixos-rebuild switch`. Ask before
 pushing.
 
-A devshell build cannot replace it for real use: it renders on the NVIDIA GPU
-(the devshell's glibc cannot load RADV) and refuses to lock. To try a change
+A devshell build cannot replace it for real use, and since the system moved
+to glibc 2.44 it cannot render at all: RADV and the NVIDIA driver both need
+a newer glibc than the devshell's ("no suitable Vulkan adapter"). It still
+builds and runs the tests, and it refuses to lock. To try a change
 in the session, build against the system nixpkgs
 (`nix build .#stratum-shell --override-input nixpkgs path:<system nixpkgs>
 --no-write-lock-file`; the path is `nix registry list`'s `system flake:nixpkgs`),
@@ -554,7 +559,14 @@ slider reflects the input on the next frame and clears when reality agrees.
 `push_clip`/`pop_clip` for scissor clipping. It has no Wayland or wgpu types.
 
 `render/wgpu_renderer.rs` implements `SurfaceRenderer`: one pipeline, one vertex
-format, one draw call split into scissored segments. Notable invariants:
+format, one draw call split into scissored segments. The shader, layouts,
+sampler, a pipeline per surface format, and the 1024² atlas are built once
+in `Gpu::shared` (`Shared`) and used by every surface. The atlas is
+repacked by each surface's frame, which is safe because wgpu orders a
+`write_texture` between the submits around it; it has no CPU copy. The
+device asks for `MemoryHints::MemoryUsage`: the default reserves 192 MiB
+(128 device + 64 host) up front, which on the iGPU is over a third of its
+512 MiB carve-out. Notable invariants:
 
 - **No padding fields in `Vertex`.** `vertex_attr_array!` assigns offsets
   sequentially; an extra field silently corrupts the UVs and makes all text draw
@@ -596,7 +608,10 @@ cached by `(text, family, size, weight)`. Widths come from the shaper's
 `line_w`; deriving them from the last glyph's pen position omits that glyph's
 advance and shifts every centred label to the right.
 
-Each `SurfaceEntry` owns the layer surface and its swapchain. **Field order is
+Each `SurfaceEntry` owns the layer surface and its swapchain. `unmap` drops
+the renderer after committing the null buffer, so a hidden overlay holds no
+swapchain (four output-sized images: 60 MB at 2560x1440, 150 MB at
+4000x2400), and the next show builds one again. **Field order is
 load-bearing**: the renderer must be declared before the Wayland object it
 presents into, because Rust drops fields in declaration order and destroying the
 `wl_surface` first is a use-after-free inside the driver. The same applies to

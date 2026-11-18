@@ -43,6 +43,14 @@ use std::process::ExitCode;
 use tracing::{error, info};
 
 fn main() -> ExitCode {
+    // The dashboard's NVIDIA readings run this binary as a helper, so that
+    // NVML and the libcuda it loads stay out of the shell's process.
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some(stratum_sys::managers::gpu::NVML_HELPER_ARG) {
+        let slot = args.next().unwrap_or_default();
+        return ExitCode::from(stratum_sys::managers::gpu::nvml_helper(&slot) as u8);
+    }
+
     // `Targets` reads the same `target=level` directives as `EnvFilter`
     // without its span and regex matching, which cost ~250 KB of binary.
     use tracing_subscriber::prelude::*;

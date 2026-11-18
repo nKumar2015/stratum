@@ -30,6 +30,10 @@ pub struct RasterGlyph {
 pub struct TextEngine {
     font_system: FontSystem,
     swash: SwashCache,
+    /// Rasterized glyphs, which `SwashCache` would keep forever: every
+    /// window title and notification adds its glyphs, at each size, scale
+    /// and subpixel offset.
+    glyphs: GlyphCache,
     /// Shaping results keyed by `(text, family, size, weight)`.
     ///
     /// Without this, every repaint re-shapes every string on screen. That is
@@ -93,6 +97,7 @@ impl TextEngine {
         Self {
             font_system: FontSystem::new(),
             swash: SwashCache::new(),
+            glyphs: GlyphCache::default(),
             shape_cache: HashMap::new(),
         }
     }
@@ -271,7 +276,8 @@ impl TextEngine {
             cosmic_text::CacheKeyFlags::empty(),
         );
 
-        let image: &Option<SwashImage> = self.swash.get_image(&mut self.font_system, key);
+        let (swash, font_system) = (&mut self.swash, &mut self.font_system);
+        let image = self.glyphs.get(key, || swash.get_image_uncached(font_system, key));
         let image = image.as_ref()?;
         let mut raster = raster_to_mask(image)?;
         raster.left += x_px;
@@ -316,6 +322,39 @@ impl TextEngine {
 impl Default for TextEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Rasterized glyphs in two generations. A lookup that misses the current
+/// one takes the glyph from the previous one, or rasterizes it; when the
+/// current one is full it becomes the previous, and whatever was not used
+/// since is dropped. Glyphs in use are never re-rasterized, as they would be
+/// after clearing a single map, yet the cache stays bounded.
+#[derive(Default)]
+struct GlyphCache {
+    current: HashMap<cosmic_text::CacheKey, Option<SwashImage>>,
+    previous: HashMap<cosmic_text::CacheKey, Option<SwashImage>>,
+}
+
+impl GlyphCache {
+    /// Entries per generation. A busy screen draws a few hundred distinct
+    /// glyphs per output scale; at ~1 KB each this bounds the cache to a
+    /// few megabytes.
+    const GENERATION: usize = 2048;
+
+    fn get(
+        &mut self,
+        key: cosmic_text::CacheKey,
+        rasterize: impl FnOnce() -> Option<SwashImage>,
+    ) -> &Option<SwashImage> {
+        if !self.current.contains_key(&key) {
+            if self.current.len() >= Self::GENERATION {
+                self.previous = std::mem::take(&mut self.current);
+            }
+            let image = self.previous.remove(&key).unwrap_or_else(rasterize);
+            self.current.insert(key, image);
+        }
+        &self.current[&key]
     }
 }
 
@@ -399,6 +438,40 @@ mod tests {
 
         let (w, _) = engine.measure("Hello", &style);
         assert!(w > 0.0, "expected positive width, got {w}");
+    }
+
+    #[test]
+    fn glyph_cache_keeps_glyphs_in_use_and_drops_the_rest() {
+        let key = |glyph: u16| {
+            cosmic_text::CacheKey::new(
+                fontdb::ID::dummy(),
+                glyph,
+                13.0,
+                (0.0, 0.0),
+                cosmic_text::Weight(400),
+                cosmic_text::CacheKeyFlags::empty(),
+            )
+            .0
+        };
+        let mut cache = GlyphCache::default();
+        let rasterized = std::cell::Cell::new(0);
+        let get = |cache: &mut GlyphCache, glyph: u16| {
+            cache.get(key(glyph), || {
+                rasterized.set(rasterized.get() + 1);
+                None
+            });
+        };
+        get(&mut cache, 0);
+        // Fill the generation with other glyphs, using glyph 0 throughout.
+        for glyph in 1..GlyphCache::GENERATION as u16 * 2 {
+            get(&mut cache, glyph);
+            get(&mut cache, 0);
+        }
+        // Glyph 0 was rasterized once, every other glyph once each.
+        assert_eq!(rasterized.get(), GlyphCache::GENERATION * 2);
+        // Bounded: at most two generations are held.
+        assert!(cache.current.len() + cache.previous.len() <= GlyphCache::GENERATION * 2);
+        assert!(cache.current.contains_key(&key(0)) || cache.previous.contains_key(&key(0)));
     }
 
     #[test]

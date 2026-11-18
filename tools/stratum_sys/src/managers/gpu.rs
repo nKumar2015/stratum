@@ -10,12 +10,21 @@
 //! with `dlopen`: `nvidia-smi` is NVML's own client, but it has crashed in
 //! the dynamic loader before `main` on NixOS (595.104.02 with glibc 2.44),
 //! so the shell does not depend on it.
+//!
+//! NVML is never loaded into the shell itself: it loads `libcuda`, which
+//! starts a thread and can never be unloaded, so one reading kept ~4 MB
+//! mapped for the rest of the session. Each reading runs the shell binary
+//! again as `--nvml-read <slot>` ([`nvml_helper`]), which prints it and
+//! exits. NVML was initialised and shut down per reading anyway.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::managers::common::run_capture_optional;
 
@@ -197,8 +206,6 @@ type MemoryInfo = unsafe extern "C" fn(*mut c_void, *mut NvmlMemory) -> c_int;
 /// The NVML entry points used here. Temperature and memory are optional, so
 /// a driver without them still reports load.
 struct Nvml {
-    /// The `dlopen` handle, closed by [`release`].
-    handle: *mut c_void,
     init: NvmlCall,
     shutdown: NvmlCall,
     handle_by_pci: HandleByPci,
@@ -234,36 +241,14 @@ struct NvmlReading {
     vram: Option<(u64, u64)>,
 }
 
-// SAFETY: the handle and function pointers are process-wide and NVML's
-// calls are thread-safe; the mutex below serialises every use anyway.
-unsafe impl Send for Nvml {}
-
-/// NVML while it is loaded: from the first NVIDIA reading until
-/// [`release`]. Loaded, it keeps ~15 MB of zeroed statics resident.
-static NVML: Mutex<Option<Nvml>> = Mutex::new(None);
-
-/// Unload NVML until the next reading, when nothing samples GPUs (the
-/// dashboard closed). Its CUDA helper thread stays, with `libcuda`: that is
-/// ~1.5 MB, and unloading a library a thread runs in is not safe.
-pub fn release() {
-    let mut nvml = NVML.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(nvml) = nvml.take() {
-        // SAFETY: every NVML session was shut down before its call returned,
-        // and the mutex keeps any new one from starting during the close.
-        unsafe {
-            libc::dlclose(nvml.handle);
-        }
-    }
-}
-
 /// Load NVML. `None` without the NVIDIA driver.
 fn load_nvml() -> Option<Nvml> {
     // The NixOS driver directory is not on the default search path of a
     // process started without the session's LD_LIBRARY_PATH.
     let handle = ["libnvidia-ml.so.1", "/run/opengl-driver/lib/libnvidia-ml.so.1"].iter().find_map(|name| {
         let name = CString::new(*name).ok()?;
-        // SAFETY: dlopen on a NUL-terminated name; the handle is kept until
-        // `release`.
+        // SAFETY: dlopen on a NUL-terminated name. The helper process exits
+        // with it open.
         let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
         (!handle.is_null()).then_some(handle)
     })?;
@@ -293,7 +278,6 @@ unsafe fn nvml_symbols(handle: *mut c_void) -> Option<Nvml> {
     // signature the field's type matches (nvml.h).
     unsafe {
         Some(Nvml {
-            handle,
             init: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlInit_v2")?),
             shutdown: std::mem::transmute::<*mut c_void, NvmlCall>(symbol("nvmlShutdown")?),
             handle_by_pci: std::mem::transmute::<*mut c_void, HandleByPci>(symbol("nvmlDeviceGetHandleByPciBusId_v2")?),
@@ -304,15 +288,88 @@ unsafe fn nvml_symbols(handle: *mut c_void) -> Option<Nvml> {
     }
 }
 
-/// The NVIDIA GPU at PCI address `slot`: load, temperature and memory. NVML
-/// is initialised for the one query only, so the shell holds no handle that
-/// could keep the GPU from suspending.
+/// The argument that makes the shell binary print one NVML reading and exit.
+pub const NVML_HELPER_ARG: &str = "--nvml-read";
+
+/// A reading that takes longer than this is abandoned and its helper killed,
+/// so a wedged driver cannot stall the sampler.
+const NVML_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Read the NVIDIA GPU at PCI address `slot` in a helper process (see the
+/// module documentation). `/proc/self/exe` is this binary even after a
+/// rebuild has replaced the file it was started from.
 fn nvml_read(slot: &str) -> Option<NvmlReading> {
-    let mut loaded = NVML.lock().unwrap_or_else(|p| p.into_inner());
-    if loaded.is_none() {
-        *loaded = load_nvml();
+    let mut child = Command::new("/proc/self/exe")
+        .args([NVML_HELPER_ARG, slot])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + NVML_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
     }
-    let nvml = loaded.as_ref()?;
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    parse_reading(&out)
+}
+
+/// `stratum-shell --nvml-read <slot>`: print one reading of the NVIDIA GPU
+/// at `slot` as [`format_reading`] writes it. Exits 1 without NVML or the
+/// device. Call before anything else in `main`.
+pub fn nvml_helper(slot: &str) -> i32 {
+    let Some(nvml) = load_nvml() else {
+        return 1;
+    };
+    match nvml_query(&nvml, slot) {
+        Some(reading) => {
+            println!("{}", format_reading(&reading));
+            0
+        }
+        None => 1,
+    }
+}
+
+/// `load temperature used total`, `-` for each unknown.
+fn format_reading(reading: &NvmlReading) -> String {
+    let field = |value: Option<String>| value.unwrap_or_else(|| "-".into());
+    let (used, total) = match reading.vram {
+        Some((used, total)) => (Some(used.to_string()), Some(total.to_string())),
+        None => (None, None),
+    };
+    format!(
+        "{} {} {} {}",
+        field(reading.load.map(|v| v.to_string())),
+        field(reading.temperature.map(|v| v.to_string())),
+        field(used),
+        field(total),
+    )
+}
+
+/// The inverse of [`format_reading`].
+fn parse_reading(line: &str) -> Option<NvmlReading> {
+    let mut fields = line.split_whitespace().map(|f| (f != "-").then_some(f));
+    let mut next = || fields.next();
+    let load = next()?.map(str::parse).transpose().ok()?;
+    let temperature = next()?.map(str::parse).transpose().ok()?;
+    let used: Option<u64> = next()?.map(str::parse).transpose().ok()?;
+    let total: Option<u64> = next()?.map(str::parse).transpose().ok()?;
+    Some(NvmlReading { load, temperature, vram: used.zip(total) })
+}
+
+/// The NVIDIA GPU at PCI address `slot`: load, temperature and memory. NVML
+/// is initialised for the one query only, so no handle is held that could
+/// keep the GPU from suspending.
+fn nvml_query(nvml: &Nvml, slot: &str) -> Option<NvmlReading> {
     let slot = CString::new(slot).ok()?;
     // SAFETY: init and shutdown are paired (NVML counts them); the device
     // handle is used only between them, and every out-pointer is valid.
@@ -344,6 +401,21 @@ fn nvml_read(slot: &str) -> Option<NvmlReading> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_helper_reading_survives_the_round_trip() {
+        let full = NvmlReading { load: Some(37), temperature: Some(51.0), vram: Some((1 << 30, 8 << 30)) };
+        let parsed = parse_reading(&format_reading(&full)).expect("parses");
+        assert_eq!(parsed.load, Some(37));
+        assert_eq!(parsed.temperature, Some(51.0));
+        assert_eq!(parsed.vram, Some((1 << 30, 8 << 30)));
+
+        let empty = parse_reading(&format_reading(&NvmlReading::default())).expect("parses");
+        assert_eq!((empty.load, empty.temperature, empty.vram), (None, None, None));
+
+        assert!(parse_reading("").is_none());
+        assert!(parse_reading("12 x - -").is_none());
+    }
 
     #[test]
     fn lspci_fields_split_quoted_and_bare_words() {

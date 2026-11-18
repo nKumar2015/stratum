@@ -90,8 +90,8 @@ impl Sampler {
 
     /// Read the counters, and the GPUs when `gpus` is set. Without them a
     /// sample is a handful of file reads, well under a millisecond; an
-    /// NVIDIA reading initialises and shuts down NVML (held open, it would
-    /// keep the card awake), about 20 ms each time.
+    /// NVIDIA reading runs a helper process that initialises and shuts down
+    /// NVML (held open, it would keep the card awake), tens of ms each time.
     pub fn sample(&mut self, gpus: bool) -> Sample {
         let cpu = fs::read_to_string("/proc/stat").ok().as_deref().and_then(parse_cpu_times);
         let cpu_percent = match (self.last_cpu, cpu) {

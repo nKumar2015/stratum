@@ -74,6 +74,8 @@ async fn probe(
 
 /// GPU context shared by every surface.
 pub struct Gpu {
+    /// Pipelines, layouts and the atlas every surface draws with.
+    pub shared: wgpu_renderer::Shared,
     pub instance: Instance,
     pub adapter: Adapter,
     pub device: Device,
@@ -120,12 +122,19 @@ impl Gpu {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("stratum-shell device"),
+                // The default, `Performance`, reserves a 128 MiB device block
+                // and a 64 MiB host block on the first allocation: 192 MiB of
+                // an iGPU's carve-out (512 MiB on the Legion) for a shell whose
+                // own resources are a few atlases and vertex buffers. Measured
+                // idle VRAM fell from 203 to 35 MB, with the same CPU time.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await
             .map_err(|err| format!("failed to create device: {err}"))?;
 
         Ok(Self {
+            shared: wgpu_renderer::Shared::new(&device),
             instance,
             adapter,
             device,
