@@ -56,8 +56,9 @@ module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 ## Current state
 
 Implemented and working: sidebar (workspaces, app title, tray, quick panel,
-status icons, battery, clock), control centre as an xdg-shell window with eight
-pages (overview, audio, bluetooth, wifi, battery, notifications, display, power),
+status icons, battery, clock), control centre as an xdg-shell window with ten
+pages (overview, audio, equalizer, bluetooth, wifi, battery, notifications,
+display, theme, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
 the IPC socket, the lock screen, and the polkit dialog (both verified only
@@ -146,13 +147,27 @@ Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`. Restored notifications are
 marked as already toasted.
 
-A theme picked live (switcher, Display page, `theme set`) is saved to
+A theme picked live (switcher, Theme page, `theme set`) is saved to
 `$XDG_STATE_HOME/stratum/theme.json` with the config's `theme` at the time
 (`theme_choice.rs`), since the config is usually a read-only store link. It
 overrides the config across reloads and restarts until the config's own
 `theme` changes, which wins and removes the file. A dev build shares that
 file with the installed shell, so live tests that switch themes set
 `XDG_STATE_HOME` to a scratch directory.
+
+**Custom themes** are made on the Theme page (`ui/pages/theme.rs`, editor in
+`ui/pages/theme_editor.rs`) and saved one per file as
+`$XDG_STATE_HOME/stratum/themes/<name>.toml` (`custom_themes.rs`): a bare
+`ThemeConfig`, named by the file. They are merged into `config.themes` at
+start and on every reload, before the saved pick is applied; a configured
+theme of the same name wins, and an unreadable file is logged and skipped.
+The editor sets the fourteen core colours and the font; the Material aliases
+stay derived. An edit is shown live through `SystemAction::PreviewTheme`:
+`App::theme_preview` holds the config from before it, and every preview is
+applied over that, so Discard, leaving the page or closing the window
+restores it exactly (`render_settings_window` ends any preview that
+outlives the editor). A preview never writes `theme.json`; Save does, via
+`switch_theme`. The Display page now holds only the font and output.
 
 The **equalizer** is a settings page (`ui/pages/equalizer.rs`). `EqModel` is
 the pure, tested state (QML's editing rules and curve model); the blocking

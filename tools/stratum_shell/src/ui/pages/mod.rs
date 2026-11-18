@@ -23,6 +23,8 @@ pub mod layout;
 pub mod notifications;
 pub mod overview;
 pub mod power;
+pub mod theme;
+pub mod theme_editor;
 pub mod wifi;
 
 /// A control-centre page.
@@ -36,12 +38,13 @@ pub enum Page {
     Battery,
     Notifications,
     Display,
+    Theme,
     Power,
 }
 
 impl Page {
     /// Pages shown in the navigation rail, in order.
-    pub const ALL: [Page; 9] = [
+    pub const ALL: [Page; 10] = [
         Page::Overview,
         Page::Audio,
         Page::Equalizer,
@@ -50,6 +53,7 @@ impl Page {
         Page::Battery,
         Page::Notifications,
         Page::Display,
+        Page::Theme,
         Page::Power,
     ];
 
@@ -63,6 +67,7 @@ impl Page {
             Page::Battery => "Battery",
             Page::Notifications => "Notifications",
             Page::Display => "Display",
+            Page::Theme => "Theme",
             Page::Power => "Power",
         }
     }
@@ -90,6 +95,7 @@ impl Page {
             Page::Battery => "\u{f007a}",
             Page::Notifications => "\u{f009a}",
             Page::Display => "\u{f108}",
+            Page::Theme => "\u{f03d8}",
             Page::Power => "\u{f011}",
         }
     }
@@ -181,6 +187,7 @@ pub struct Pages {
     pub battery: battery::BatteryPage,
     pub notifications: notifications::NotificationsPage,
     pub display: display::DisplayPage,
+    pub theme: theme::ThemePage,
     pub power: power::PowerPage,
 }
 
@@ -200,6 +207,7 @@ impl Pages {
             battery: battery::BatteryPage::new(),
             notifications: notifications::NotificationsPage::new(),
             display: display::DisplayPage::new(),
+            theme: theme::ThemePage::new(),
             power: power::PowerPage::new(),
         }
     }
@@ -219,14 +227,16 @@ impl Pages {
         self.bluetooth.tick(dt);
         self.wifi.tick(dt);
         self.battery.tick(dt);
-        self.display.tick(dt);
+        self.theme.tick(dt);
         self.power.tick(dt);
     }
 
     /// Called when the visible page changes, before `on_page_shown`.
     pub fn on_page_hidden(&mut self, page: Page) {
-        if page == Page::Power {
-            self.power.disarm();
+        match page {
+            Page::Power => self.power.disarm(),
+            Page::Theme => self.theme.on_hidden(),
+            _ => {}
         }
     }
 
@@ -249,6 +259,7 @@ impl Pages {
         match page {
             Page::Equalizer => self.equalizer.wants_keys(),
             Page::Wifi => self.wifi.wants_keys(),
+            Page::Theme => self.theme.wants_keys(),
             _ => false,
         }
     }
@@ -264,6 +275,7 @@ impl Pages {
         match page {
             Page::Equalizer => self.equalizer.key(keysym, text, ctrl, &mut self.pending),
             Page::Wifi => self.wifi.key(keysym, text, ctrl),
+            Page::Theme => self.theme.key(keysym, text, ctrl),
             _ => {}
         }
     }
@@ -275,6 +287,7 @@ impl Pages {
             Page::Wifi => self.wifi.animating(),
             Page::Audio => self.audio.animating(),
             Page::Power => self.power.animating(),
+            Page::Theme => self.theme.animating(),
             _ => false,
         }
     }
@@ -308,6 +321,7 @@ impl Pages {
                 self.notifications.paint(ctx, list, area, input, clicked, pending)
             }
             Page::Display => self.display.paint(ctx, list, area, input, clicked, pending),
+            Page::Theme => self.theme.paint(ctx, list, area, input, clicked, pending),
         }
     }
 }
@@ -334,6 +348,12 @@ mod tests {
         // Reality catches up and the overlay clears.
         assert!(value.view(true));
         assert_eq!(value.pending(), None);
+    }
+
+    #[test]
+    fn the_theme_page_has_a_name() {
+        assert_eq!(Page::from_name("theme"), Some(Page::Theme));
+        assert_eq!(Page::from_name("Display"), Some(Page::Display));
     }
 
     #[test]

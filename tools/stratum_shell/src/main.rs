@@ -6,6 +6,7 @@
 
 mod actions;
 mod config;
+mod custom_themes;
 mod dashboard;
 mod desktop;
 mod hyprland;

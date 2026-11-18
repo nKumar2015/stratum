@@ -101,6 +101,16 @@ pub enum SystemAction {
     MusicRefresh(Option<String>),
     /// Switch the active theme by name.
     SetTheme(String),
+    /// Show an unsaved theme live, under this name, until it is saved or the
+    /// preview ends. Boxed: a palette is large next to the other actions.
+    PreviewTheme(Box<(String, crate::config::ThemeConfig)>),
+    /// Save a custom theme to its file and switch to it. `replaces` is the
+    /// name it was saved under before, when it was renamed.
+    SaveTheme { name: String, theme: Box<crate::config::ThemeConfig>, replaces: Option<String> },
+    /// Drop the live preview and go back to the theme before it.
+    EndThemePreview,
+    /// Delete a custom theme and its file.
+    DeleteTheme(String),
     /// Left-click a tray item.
     TrayActivate { service: String, path: String },
     /// Middle-click a tray item.
@@ -408,9 +418,13 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         SystemAction::Dismiss(_)
         | SystemAction::DismissAll
         | SystemAction::InvokeNotification(..)
-        | SystemAction::SetTheme(_) => {
-            // Handled by the shell, which owns the notification server; the
-            // worker has nothing to do.
+        | SystemAction::SetTheme(_)
+        | SystemAction::PreviewTheme(_)
+        | SystemAction::SaveTheme { .. }
+        | SystemAction::EndThemePreview
+        | SystemAction::DeleteTheme(_) => {
+            // Handled by the shell, which owns the notification server and
+            // the theme; the worker has nothing to do.
             return Ok(());
         }
         SystemAction::TrayActivate { service, path }

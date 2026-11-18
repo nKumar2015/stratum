@@ -197,9 +197,26 @@ impl App {
                             self.mark_all_dirty();
                         }
                     }
+                    crate::actions::SystemAction::PreviewTheme(preview) => {
+                        let (name, theme) = *preview;
+                        self.preview_theme(name, theme);
+                    }
+                    crate::actions::SystemAction::SaveTheme { name, theme, replaces } => {
+                        self.save_custom_theme(name, *theme, replaces);
+                    }
+                    crate::actions::SystemAction::EndThemePreview => self.end_theme_preview(),
+                    crate::actions::SystemAction::DeleteTheme(name) => self.delete_custom_theme(&name),
                     other => self.actions.push(other),
                 }
             }
+        }
+        // A theme shown live never outlives its editor: closing the window or
+        // leaving the page discards it, whether or not the page's own
+        // discard was dispatched.
+        let editor_shown =
+            self.control_center.open && self.control_center.page == crate::ui::pages::Page::Theme;
+        if self.theme_preview.is_some() && !editor_shown {
+            self.end_theme_preview();
         }
     }
 

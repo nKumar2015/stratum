@@ -266,7 +266,7 @@ fn user_path() -> Option<PathBuf> {
 }
 
 /// One named theme.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeConfig {
     pub bg_main: String,
@@ -298,7 +298,7 @@ pub struct ThemeConfig {
 
 impl ThemeConfig {
     /// The palette, or the first colour that does not parse.
-    fn to_theme(&self) -> Result<Theme, String> {
+    pub(crate) fn to_theme(&self) -> Result<Theme, String> {
         let c = |field: &str, value: &str| {
             parse_color(value).ok_or_else(|| format!("{field}: `{value}` is not a colour"))
         };
@@ -727,7 +727,7 @@ pub struct Theme {
 }
 
 /// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa`.
-fn parse_color(value: &str) -> Option<Color> {
+pub(crate) fn parse_color(value: &str) -> Option<Color> {
     let hex = value.trim().strip_prefix('#')?;
     if !hex.is_ascii() {
         return None;

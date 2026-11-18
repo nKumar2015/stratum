@@ -329,6 +329,9 @@ impl App {
     /// Switch the active theme live. Returns false for an unknown name, which
     /// must not blank the shell.
     pub(super) fn switch_theme(&mut self, name: &str) -> bool {
+        // A switch from anywhere ends a live preview: the draft must not be
+        // carried into the config the switch keeps.
+        self.end_theme_preview();
         if !self.config.themes.contains_key(name) {
             return false;
         }
@@ -343,5 +346,100 @@ impl App {
         // Keep the panel's page and open state across the swap.
         self.control_center.set_config(Arc::clone(&self.config));
         true
+    }
+
+    /// Show `theme` live under `name` without saving it. The config before
+    /// the first preview is kept, and every preview is applied over it, so
+    /// ending the preview restores it exactly.
+    pub(super) fn preview_theme(&mut self, name: String, theme: crate::config::ThemeConfig) {
+        let base = Arc::clone(self.theme_preview.get_or_insert_with(|| Arc::clone(&self.config)));
+        let mut updated = (*base).clone();
+        updated.themes.insert(name.clone(), theme);
+        updated.theme = name;
+        self.replace_theme_config(updated);
+    }
+
+    /// Go back to the theme shown before the preview, if one is showing.
+    pub(super) fn end_theme_preview(&mut self) {
+        if let Some(base) = self.theme_preview.take() {
+            self.config = base;
+            self.control_center.set_config(Arc::clone(&self.config));
+            self.mark_all_dirty();
+            self.mark_themes_dirty();
+        }
+    }
+
+    /// Save a custom theme to its file and switch to it. A failed write
+    /// keeps the preview, so the edit is not lost.
+    pub(super) fn save_custom_theme(
+        &mut self,
+        name: String,
+        theme: crate::config::ThemeConfig,
+        replaces: Option<String>,
+    ) {
+        let base = self.theme_preview.take().unwrap_or_else(|| Arc::clone(&self.config));
+        let checked = crate::custom_themes::check_name(&name, &base.themes, &self.custom_themes, replaces.as_deref())
+            .map_err(str::to_string)
+            .and_then(|()| crate::custom_themes::save(&name, &theme));
+        if let Err(err) = checked {
+            tracing::error!("could not save theme `{name}`: {err}");
+            if !Arc::ptr_eq(&base, &self.config) {
+                self.theme_preview = Some(base);
+            }
+            return;
+        }
+        let mut updated = (*base).clone();
+        if let Some(old) = replaces.filter(|old| *old != name) {
+            if let Err(err) = crate::custom_themes::delete(&old) {
+                tracing::warn!("could not remove the renamed theme `{old}`: {err}");
+            }
+            updated.themes.remove(&old);
+            self.custom_themes.remove(&old);
+        }
+        updated.themes.insert(name.clone(), theme);
+        self.custom_themes.insert(name.clone());
+        self.config = Arc::new(updated);
+        if self.switch_theme(&name) {
+            self.mark_all_dirty();
+        }
+        self.mark_themes_dirty();
+    }
+
+    /// Delete a custom theme. When it was showing, fall back to the
+    /// config's own theme, else the first one.
+    pub(super) fn delete_custom_theme(&mut self, name: &str) {
+        if !self.custom_themes.contains(name) {
+            return;
+        }
+        self.end_theme_preview();
+        if let Err(err) = crate::custom_themes::delete(name) {
+            tracing::error!("could not delete theme `{name}`: {err}");
+            return;
+        }
+        self.custom_themes.remove(name);
+        let mut updated = (*self.config).clone();
+        updated.themes.remove(name);
+        let was_active = updated.theme == name;
+        self.replace_theme_config(updated);
+        if was_active {
+            let config_theme = self.theme_choice.as_ref().map(|s| s.config_theme.clone());
+            let fallback = config_theme
+                .filter(|t| self.config.themes.contains_key(t))
+                .or_else(|| self.config.themes.keys().next().cloned());
+            if let Some(fallback) = fallback {
+                self.switch_theme(&fallback);
+            }
+        }
+        self.mark_all_dirty();
+        self.mark_themes_dirty();
+    }
+
+    /// Use `config`, which differs from the current one only in its themes.
+    /// The bar holds no theme state, so it is not rebuilt.
+    fn replace_theme_config(&mut self, config: crate::config::Config) {
+        self.config = Arc::new(config);
+        self.control_center.set_config(Arc::clone(&self.config));
+        self.mark_all_dirty();
+        self.mark_themes_dirty();
     }
 }

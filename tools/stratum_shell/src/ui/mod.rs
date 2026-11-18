@@ -36,6 +36,8 @@ pub struct PaintCtx<'a> {
     pub state: &'a crate::sys_state::SystemState,
     /// Theme definitions, for the theme picker.
     pub themes: &'a std::collections::BTreeMap<String, crate::config::ThemeConfig>,
+    /// Which of `themes` are custom themes the user made (and may edit).
+    pub custom_themes: &'a std::collections::BTreeSet<String>,
     /// Which output's bar is being painted (for per-monitor workspace focus).
     pub output_name: &'a str,
     /// Orientation of the bar being painted.

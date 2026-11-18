@@ -61,6 +61,7 @@ macro_rules! paint_ctx {
             icons: &mut $app.icons,
             state: &$app.state,
             themes: &$app.config.themes,
+            custom_themes: &$app.custom_themes,
             output_name: $output,
             axis: $app.config.sidebar.axis(),
             dt: $dt,
@@ -227,6 +228,11 @@ pub struct App {
     last_reload_check: std::time::Instant,
     /// The theme picked live, while it overrides the config's `theme`.
     theme_choice: Option<crate::theme_choice::Saved>,
+    /// The themes in `config.themes` that came from the custom theme files.
+    custom_themes: std::collections::BTreeSet<String>,
+    /// The configuration before a theme being edited was shown live, to go
+    /// back to when the edit ends unsaved.
+    theme_preview: Option<Arc<crate::config::Config>>,
     /// Poke used by worker threads to wake the event loop out of its poll.
     /// Held so the ping source's channel stays open for the shell's lifetime.
     _wake: Option<calloop::ping::Ping>,
@@ -254,6 +260,8 @@ impl App {
                 config_source.load_defaults().map_err(|err| err.to_string())?
             }
         };
+        // Before the saved pick is applied, which may name a custom theme.
+        let custom_themes = crate::custom_themes::merge_into(&mut config);
         let saved_theme = crate::theme_choice::load();
         let had_saved_theme = saved_theme.is_some();
         let theme_choice = crate::theme_choice::apply(&mut config, saved_theme);
@@ -376,6 +384,8 @@ impl App {
             config_stamp,
             last_reload_check: std::time::Instant::now(),
             theme_choice,
+            custom_themes,
+            theme_preview: None,
             _wake: None,
             _ipc: None,
         };
@@ -512,8 +522,9 @@ impl App {
     }
 
     /// Theme names in display order (the config's map is sorted).
+    /// The themes to offer, without a theme being edited live.
     fn theme_names(&self) -> Vec<String> {
-        self.config.themes.keys().cloned().collect()
+        self.theme_preview.as_ref().unwrap_or(&self.config).themes.keys().cloned().collect()
     }
 
 }

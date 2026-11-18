@@ -826,7 +826,7 @@ pub struct PageMetrics {
     pub card_padding: f32,
     /// Radius of a card or tile.
     pub card_radius: f32,
-    /// Height of a stat row (the Display page's preview).
+    /// Height of a stat row (the Theme page's preview).
     pub stat_height: f32,
     /// Height of a button.
     pub button_height: f32,
@@ -848,7 +848,7 @@ pub struct PageMetrics {
     pub swatch: f32,
     /// Gap between swatches.
     pub swatch_gap: f32,
-    /// Height of the Display page's theme preview card.
+    /// Height of the Theme page's preview card.
     pub preview_height: f32,
     /// Widest the page column grows; a wider window centres it.
     pub max_width: f32,
@@ -887,9 +887,18 @@ pub struct PageMetrics {
     pub hero_height: f32,
     pub hero_value: f32,
     pub hero_meter: f32,
-    /// Display page theme cards: narrowest card, and its height.
+    /// Theme page cards: narrowest card, and its height.
     pub theme_min_width: f32,
     pub theme_height: f32,
+    /// Theme editor: a colour's row, the label column, a text field's
+    /// height, a colour channel slider's height, the number of steps its
+    /// gradient track is drawn in, and that track's thickness.
+    pub editor_row_height: f32,
+    pub editor_label_width: f32,
+    pub field_height: f32,
+    pub channel_height: f32,
+    pub channel_segments: u32,
+    pub channel_track: f32,
     /// The card a page shows when it has nothing to list.
     pub empty_height: f32,
     /// How long an action tile waits for its confirming second click.

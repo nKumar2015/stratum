@@ -210,6 +210,9 @@ impl App {
         match self.config_source.load() {
             Ok(mut config) => {
                 info!("reloaded configuration");
+                self.custom_themes = crate::custom_themes::merge_into(&mut config);
+                // An unsaved theme shown live belongs to the old config.
+                self.theme_preview = None;
                 // A live pick survives the reload unless the file changed its
                 // own theme since.
                 let had_saved_theme = self.theme_choice.is_some();
