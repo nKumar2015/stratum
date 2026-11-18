@@ -317,13 +317,53 @@ impl App {
         match action {
             SwitcherAction::None => return,
             SwitcherAction::Redraw => {}
+            SwitcherAction::Preview(name) => {
+                let base = self.theme_preview.as_ref().unwrap_or(&self.config);
+                if let Some(theme) = base.themes.get(&name).cloned() {
+                    self.preview_theme(name, theme);
+                }
+            }
+            SwitcherAction::PreviewWallpaper(name) => {
+                let linked = self.wallpaper_links.get(&name).cloned();
+                self.preview_wallpaper(linked);
+            }
             SwitcherAction::Apply(name) => {
                 if self.switch_theme(&name) {
                     self.mark_all_dirty();
                 }
+                self.drop_wallpaper_previews();
+            }
+            SwitcherAction::Cancel => {
+                self.end_theme_preview();
+                self.drop_wallpaper_previews();
             }
         }
         self.mark_themes_dirty();
+    }
+
+    /// Open the theme switcher on `output`. A theme being edited is put
+    /// back first: the switcher previews over the theme really in use. The
+    /// linked wallpapers are decoded large for its slices.
+    pub(super) fn open_theme_switcher(&mut self, output: &str) {
+        self.end_theme_preview();
+        let themes = self.theme_names();
+        let current = self.config.theme.clone();
+        self.theme_switcher.open_on(output, &themes, &current);
+        let mut linked: Vec<_> = self.wallpaper_links.values().cloned().collect();
+        linked.sort();
+        linked.dedup();
+        if let Some(tx) = &self.wallpaper_tx {
+            let _ = tx.send(crate::wallpapers::Command::Previews(linked));
+        }
+        self.mark_themes_dirty();
+    }
+
+    /// The switcher's large wallpapers are megabytes each: free them as soon
+    /// as it closes.
+    fn drop_wallpaper_previews(&mut self) {
+        if let Some(tx) = &self.wallpaper_tx {
+            let _ = tx.send(crate::wallpapers::Command::DropPreviews);
+        }
     }
 
     /// Switch the active theme live. Returns false for an unknown name, which
@@ -345,7 +385,55 @@ impl App {
         self.sidebar = Sidebar::new(Arc::clone(&self.config));
         // Keep the panel's page and open state across the swap.
         self.control_center.set_config(Arc::clone(&self.config));
+        // A theme linked to a wallpaper brings it along.
+        if let Some(wallpaper) = self.wallpaper_links.get(name).cloned() {
+            self.show_wallpaper(wallpaper);
+        }
         true
+    }
+
+    /// Show `wallpaper`, unless it already is.
+    ///
+    /// Compared with what was last *asked* for, not what the worker last
+    /// published: a restore that is queued but not yet shown would
+    /// otherwise make showing the wallpaper it replaces look redundant, and
+    /// the restore would win.
+    fn show_wallpaper(&mut self, wallpaper: std::path::PathBuf) {
+        let shown = self.wallpaper_requested.clone().or_else(|| self.state.wallpapers.get().current);
+        if shown.as_ref() == Some(&wallpaper) {
+            return;
+        }
+        if let Some(tx) = &self.wallpaper_tx {
+            let _ = tx.send(crate::wallpapers::Command::Apply(wallpaper.clone()));
+            self.wallpaper_requested = Some(wallpaper);
+        }
+    }
+
+    /// Link `theme` to `wallpaper`, or unlink it. Linking the theme shown
+    /// shows the wallpaper now, as switching to it would.
+    pub(super) fn link_wallpaper(&mut self, theme: &str, wallpaper: Option<std::path::PathBuf>) {
+        match &wallpaper {
+            Some(path) => self.wallpaper_links.insert(theme.to_string(), path.clone()),
+            None => self.wallpaper_links.remove(theme),
+        };
+        crate::wallpapers::store_links(&self.wallpaper_links);
+        self.state.theme_wallpapers.set(self.wallpaper_links.clone());
+        if let Some(path) = wallpaper.filter(|_| self.config.theme == theme) {
+            self.show_wallpaper(path);
+        }
+    }
+
+    /// Show a wallpaper while a theme is edited (`None`: the one from
+    /// before). The one from before is remembered the first time.
+    pub(super) fn preview_wallpaper(&mut self, wallpaper: Option<std::path::PathBuf>) {
+        if self.wallpaper_before.is_none() {
+            let shown = self.wallpaper_requested.clone().or_else(|| self.state.wallpapers.get().current);
+            self.wallpaper_before = Some(shown);
+        }
+        let target = wallpaper.or_else(|| self.wallpaper_before.clone().flatten());
+        if let Some(path) = target {
+            self.show_wallpaper(path);
+        }
     }
 
     /// Show `theme` live under `name` without saving it. The config before
@@ -361,6 +449,9 @@ impl App {
 
     /// Go back to the theme shown before the preview, if one is showing.
     pub(super) fn end_theme_preview(&mut self) {
+        if let Some(Some(before)) = self.wallpaper_before.take() {
+            self.show_wallpaper(before);
+        }
         if let Some(base) = self.theme_preview.take() {
             self.config = base;
             self.control_center.set_config(Arc::clone(&self.config));
@@ -376,6 +467,7 @@ impl App {
         name: String,
         theme: crate::config::ThemeConfig,
         replaces: Option<String>,
+        wallpaper: Option<std::path::PathBuf>,
     ) {
         let base = self.theme_preview.take().unwrap_or_else(|| Arc::clone(&self.config));
         let checked = crate::custom_themes::check_name(&name, &base.themes, &self.custom_themes, replaces.as_deref())
@@ -395,10 +487,15 @@ impl App {
             }
             updated.themes.remove(&old);
             self.custom_themes.remove(&old);
+            self.wallpaper_links.remove(&old);
         }
         updated.themes.insert(name.clone(), theme);
         self.custom_themes.insert(name.clone());
         self.config = Arc::new(updated);
+        // The wallpaper previewed stays: it is the theme's now, or the
+        // edit chose none and it is simply what is shown.
+        self.wallpaper_before = None;
+        self.link_wallpaper(&name, wallpaper);
         if self.switch_theme(&name) {
             self.mark_all_dirty();
         }
@@ -417,6 +514,7 @@ impl App {
             return;
         }
         self.custom_themes.remove(name);
+        self.link_wallpaper(name, None);
         let mut updated = (*self.config).clone();
         updated.themes.remove(name);
         let was_active = updated.theme == name;

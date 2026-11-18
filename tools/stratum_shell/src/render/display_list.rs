@@ -211,6 +211,8 @@ pub struct TextRun {
     pub transform: Transform,
     /// Scissor in effect when the run was pushed, if any.
     pub clip: Option<Rect>,
+    /// The layer it was pushed in ([`DisplayList::push_layer`]).
+    pub layer: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -249,10 +251,37 @@ pub enum DrawCommand {
     Outline { rect: Rect, width: f32 },
     Path(Path),
     Image(Image),
+    /// A picture too large for the atlas, in a quadrilateral.
+    Texture(TexturedQuad),
     /// Restrict everything drawn after this to `rect`.
     PushClip(Rect),
     /// Restore the clip in effect before the matching [`DrawCommand::PushClip`].
     PopClip,
+    /// Start a layer ([`DisplayList::push_layer`]): the text pushed before
+    /// it is drawn here, under everything after it.
+    Layer,
+}
+
+/// A picture too large for the glyph atlas (a wallpaper), drawn in order
+/// with the geometry around it into any quadrilateral. The renderer keeps
+/// it in a texture of its own while frames keep drawing it, and uploads it
+/// again only when `key` changes. Its edges are hard: stroke a path over
+/// them for an antialiased outline.
+#[derive(Clone, Debug)]
+pub struct TexturedQuad {
+    /// Identifies the pixels; a new key means new pixels.
+    pub key: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Premultiplied RGBA8.
+    pub pixels: Arc<[u8]>,
+    /// Corners in logical pixels: top left, top right, bottom right, bottom
+    /// left.
+    pub corners: [Point; 4],
+    /// Each corner's texture coordinate, 0..1.
+    pub uv: [(f32, f32); 4],
+    /// Opacity, 0..1.
+    pub alpha: f32,
 }
 
 /// A large picture drawn beneath everything else (a screenshot's frozen
@@ -279,6 +308,10 @@ pub struct Backdrop {
 /// with the renderer rather than in this data structure. A text run records the
 /// clip in effect when it was pushed, so text obeys the same scissor as the
 /// geometry around it.
+///
+/// Within a layer, text draws over all of the layer's geometry. Something
+/// that must cover text (a dropdown's open list) starts a new layer, which
+/// draws entirely over the layers before it.
 #[derive(Clone, Debug)]
 pub struct DisplayList {
     pub clear: Color,
@@ -286,6 +319,8 @@ pub struct DisplayList {
     pub texts: Vec<TextRun>,
     pub backdrop: Option<Backdrop>,
     clip_stack: Vec<Rect>,
+    /// The layer being pushed into.
+    layer: u32,
 }
 
 impl Default for DisplayList {
@@ -296,6 +331,7 @@ impl Default for DisplayList {
             texts: Vec::new(),
             backdrop: None,
             clip_stack: Vec::new(),
+            layer: 0,
         }
     }
 }
@@ -308,6 +344,7 @@ impl DisplayList {
             texts: Vec::new(),
             backdrop: None,
             clip_stack: Vec::new(),
+            layer: 0,
         }
     }
 
@@ -327,10 +364,22 @@ impl DisplayList {
         self.commands.push(DrawCommand::Image(image));
     }
 
+    pub fn push_texture(&mut self, quad: TexturedQuad) {
+        self.commands.push(DrawCommand::Texture(quad));
+    }
+
     pub fn push_text(&mut self, mut run: TextRun) {
         // Nested clips intersect, so a child can never draw outside its parent.
         run.clip = self.clip();
+        run.layer = self.layer;
         self.texts.push(run);
+    }
+
+    /// Draw everything pushed from here on, text included, over everything
+    /// pushed before, text included.
+    pub fn push_layer(&mut self) {
+        self.layer += 1;
+        self.commands.push(DrawCommand::Layer);
     }
 
     /// Restrict subsequent drawing to `rect` until [`Self::pop_clip`].
@@ -344,9 +393,15 @@ impl DisplayList {
     }
 
     /// End the most recent clip.
+    ///
+    /// Inside another clip, that clip is set again: the renderer keeps one
+    /// scissor, and `PopClip` clears it.
     pub fn pop_clip(&mut self) {
         if self.clip_stack.pop().is_some() {
-            self.commands.push(DrawCommand::PopClip);
+            match self.clip_stack.last() {
+                Some(parent) => self.commands.push(DrawCommand::PushClip(*parent)),
+                None => self.commands.push(DrawCommand::PopClip),
+            }
         }
     }
 
@@ -422,6 +477,40 @@ mod tests {
         assert!(matches!(list.commands[1], DrawCommand::Path(_)));
         list.push_outline(Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0, radius: 5.0, color: Color::WHITE }, 1.5);
         assert!(matches!(list.commands.last(), Some(DrawCommand::Outline { width, .. }) if *width == 1.5));
+    }
+
+    #[test]
+    fn text_belongs_to_the_layer_it_was_pushed_in() {
+        let run = || TextRun {
+            x: 0.0,
+            y: 0.0,
+            size: 1.0,
+            color: Color::WHITE,
+            weight: 400,
+            glyphs: Vec::new(),
+            transform: Transform::IDENTITY,
+            clip: None,
+            layer: 7,
+        };
+        let mut list = DisplayList::new(Color::TRANSPARENT);
+        list.push_text(run());
+        list.push_layer();
+        list.push_text(run());
+        assert_eq!(list.texts.iter().map(|t| t.layer).collect::<Vec<_>>(), [0, 1]);
+        assert!(matches!(list.commands.last(), Some(DrawCommand::Layer)));
+    }
+
+    #[test]
+    fn ending_a_nested_clip_restores_its_parent() {
+        let rect = |w: f32| Rect { x: 0.0, y: 0.0, width: w, height: w, radius: 0.0, color: Color::WHITE };
+        let mut list = DisplayList::new(Color::TRANSPARENT);
+        list.push_clip(rect(100.0));
+        list.push_clip(rect(10.0));
+        list.pop_clip();
+        assert!(matches!(list.commands.last(), Some(DrawCommand::PushClip(r)) if r.width == 100.0));
+        list.pop_clip();
+        assert!(matches!(list.commands.last(), Some(DrawCommand::PopClip)));
+        assert_eq!(list.clip(), None);
     }
 }
 

@@ -47,6 +47,8 @@ impl App {
 
         self.update_osd_and_toasts(state_changed, dt);
         self.render_settings_window(dt);
+        // Before the theme is resolved: the switcher's tick may preview one.
+        self.tick_theme_switcher(dt);
 
         let theme = self.config.active_theme();
         self.render_osd(&theme, dt)?;
@@ -57,7 +59,7 @@ impl App {
         self.render_dashboard(&theme, dt, state_changed)?;
         self.render_screenshot(&theme, dt)?;
         self.render_viewer(&theme, dt);
-        self.render_theme_switcher(&theme, dt)?;
+        self.render_theme_switcher(&theme, dt, state_changed)?;
         self.render_tray_menu(&theme, dt)?;
         self.render_bars(&theme, dt)
     }
@@ -201,11 +203,25 @@ impl App {
                         let (name, theme) = *preview;
                         self.preview_theme(name, theme);
                     }
-                    crate::actions::SystemAction::SaveTheme { name, theme, replaces } => {
-                        self.save_custom_theme(name, *theme, replaces);
+                    crate::actions::SystemAction::SaveTheme { name, theme, replaces, wallpaper } => {
+                        self.save_custom_theme(name, *theme, replaces, wallpaper);
+                    }
+                    crate::actions::SystemAction::LinkWallpaper { theme, wallpaper } => {
+                        self.link_wallpaper(&theme, wallpaper);
+                    }
+                    crate::actions::SystemAction::PreviewWallpaper(wallpaper) => self.preview_wallpaper(wallpaper),
+                    crate::actions::SystemAction::Wallpapers(command) => {
+                        if let Some(tx) = &self.wallpaper_tx {
+                            let _ = tx.send(command);
+                        }
                     }
                     crate::actions::SystemAction::EndThemePreview => self.end_theme_preview(),
                     crate::actions::SystemAction::DeleteTheme(name) => self.delete_custom_theme(&name),
+                    crate::actions::SystemAction::Display(command) => {
+                        if let Some(tx) = &self.display_tx {
+                            let _ = tx.send(command);
+                        }
+                    }
                     other => self.actions.push(other),
                 }
             }
@@ -215,7 +231,8 @@ impl App {
         // discard was dispatched.
         let editor_shown =
             self.control_center.open && self.control_center.page == crate::ui::pages::Page::Theme;
-        if self.theme_preview.is_some() && !editor_shown {
+        let previewer = editor_shown || self.theme_switcher.is_open();
+        if (self.theme_preview.is_some() || self.wallpaper_before.is_some()) && !previewer {
             self.end_theme_preview();
         }
     }
@@ -562,11 +579,30 @@ impl App {
     }
 
     /// The theme switcher, on the output it opened on.
-    fn render_theme_switcher(&mut self, theme: &Theme, dt: f32) -> Result<(), String> {
-        self.theme_switcher.set_metrics(&self.config.metrics.theme_switcher);
+    /// Advance the theme switcher, carrying out what its timers ask for, and
+    /// keep its surface painting while it moves.
+    fn tick_theme_switcher(&mut self, dt: f32) {
+        self.theme_switcher
+            .set_config(&self.config.metrics.theme_switcher, self.config.theme_switcher.wallpaper_delay_ms);
+        if self.theme_switcher.target().is_none() {
+            return;
+        }
+        let animating = self.theme_switcher.animating();
+        let action = self.theme_switcher.tick(dt);
+        self.apply_switcher_action(action);
+        if animating {
+            self.mark_themes_dirty();
+        }
+    }
+
+    fn render_theme_switcher(&mut self, theme: &Theme, dt: f32, state_changed: bool) -> Result<(), String> {
+        // Its slices show wallpapers the worker decodes after it opens.
+        if state_changed && self.theme_switcher.target().is_some() {
+            self.mark_themes_dirty();
+        }
         let theme_target = self.theme_switcher.target().map(str::to_string);
         let theme_names = self.theme_names();
-        let current_theme = self.config.theme.clone();
+        let open = self.theme_switcher.is_open();
         for entry in &mut self.theme_surfaces {
             if theme_target.as_deref() != Some(entry.output_name.as_str()) {
                 entry.unmap();
@@ -580,13 +616,12 @@ impl App {
                 let mut ctx = paint_ctx!(self, theme, &output_name, dt);
                 let rect = entry.logical_rect();
                 let mut list = crate::render::display_list::DisplayList::new(Color::TRANSPARENT);
-                self.theme_switcher
-                    .paint(&mut ctx, &mut list, rect, &theme_names, &current_theme);
+                self.theme_switcher.paint(&mut ctx, &mut list, rect, &theme_names);
                 entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
                 entry.dirty = false;
             }
             if entry.mapped {
-                entry.set_keyboard_exclusive(true);
+                entry.set_keyboard_exclusive(open);
             }
         }
         Ok(())

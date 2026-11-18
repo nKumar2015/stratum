@@ -74,61 +74,7 @@ fn role(theme: &ThemeConfig, index: usize) -> &str {
     }
 }
 
-/// A colour as hue (degrees), saturation and lightness (0..=1).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Hsl {
-    pub h: f32,
-    pub s: f32,
-    pub l: f32,
-}
-
-pub fn rgb_to_hsl(c: Color) -> Hsl {
-    let max = c.r.max(c.g).max(c.b);
-    let min = c.r.min(c.g).min(c.b);
-    let l = (max + min) * 0.5;
-    let d = max - min;
-    if d <= f32::EPSILON {
-        return Hsl { h: 0.0, s: 0.0, l };
-    }
-    let s = d / (1.0 - (2.0 * l - 1.0).abs()).max(f32::EPSILON);
-    let h = if max == c.r {
-        60.0 * ((c.g - c.b) / d).rem_euclid(6.0)
-    } else if max == c.g {
-        60.0 * ((c.b - c.r) / d + 2.0)
-    } else {
-        60.0 * ((c.r - c.g) / d + 4.0)
-    };
-    Hsl { h, s: s.clamp(0.0, 1.0), l }
-}
-
-pub fn hsl_to_rgb(hsl: Hsl, alpha: f32) -> Color {
-    let s = hsl.s.clamp(0.0, 1.0);
-    let l = hsl.l.clamp(0.0, 1.0);
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let hp = hsl.h.rem_euclid(360.0) / 60.0;
-    let x = c * (1.0 - (hp.rem_euclid(2.0) - 1.0).abs());
-    let (r, g, b) = match hp as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = l - c * 0.5;
-    Color::rgba(r + m, g + m, b + m, alpha)
-}
-
-/// `#rrggbb`, or `#rrggbbaa` when the colour is not opaque.
-pub fn to_hex(c: Color) -> String {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let (r, g, b, a) = (byte(c.r), byte(c.g), byte(c.b), byte(c.a));
-    if a == 255 {
-        format!("#{r:02x}{g:02x}{b:02x}")
-    } else {
-        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
-    }
-}
+pub use crate::ui::color::{hsl_to_rgb, rgb_to_hsl, to_hex, Hsl};
 
 /// A typed colour, with or without its `#`.
 fn parse_typed(text: &str) -> Option<Color> {
@@ -260,12 +206,16 @@ pub struct Editor {
     preview_name: String,
     /// What the last preview sent, so an unchanged draft is not resent.
     last_sent: Option<(String, ThemeConfig)>,
+    /// The wallpaper the theme is linked to when saved; none by default.
+    wallpaper: Option<std::path::PathBuf>,
+    /// Which scheme Generate makes.
+    pub scheme: crate::palette::Scheme,
 }
 
 impl Editor {
     /// Edit `theme` under `name`. `original` is set when it is a saved
     /// custom theme, which may keep its name.
-    pub fn new(name: &str, theme: ThemeConfig, original: Option<String>) -> Self {
+    pub fn new(name: &str, theme: ThemeConfig, original: Option<String>, wallpaper: Option<std::path::PathBuf>) -> Self {
         Self {
             name: TextField::with_text(name),
             original,
@@ -278,6 +228,30 @@ impl Editor {
             drag_hsl: None,
             preview_name: name.to_string(),
             last_sent: None,
+            wallpaper,
+            scheme: crate::palette::Scheme::Dark,
+        }
+    }
+
+    pub fn wallpaper(&self) -> Option<&std::path::Path> {
+        self.wallpaper.as_deref()
+    }
+
+    /// Choose the wallpaper to link (and show it, through the shell).
+    pub fn set_wallpaper(&mut self, wallpaper: Option<std::path::PathBuf>, pending: &mut Vec<SystemAction>) {
+        pending.push(SystemAction::PreviewWallpaper(wallpaper.clone()));
+        self.wallpaper = wallpaper;
+    }
+
+    /// Replace the colours with ones generated from `sample`, keeping the
+    /// name and font. The next paint previews them.
+    pub fn generate(&mut self, sample: &[[u8; 3]]) {
+        let generated = crate::palette::generate(sample, self.scheme, &self.theme.font);
+        self.theme = ThemeConfig { font: self.theme.font.clone(), ..generated };
+        self.expanded = None;
+        self.drag_hsl = None;
+        if self.focus == Focus::Hex {
+            self.focus = Focus::None;
         }
     }
 
@@ -482,6 +456,7 @@ impl Editor {
                 name: self.name.text().to_string(),
                 theme: Box::new(self.theme.clone()),
                 replaces: self.original.clone(),
+                wallpaper: self.wallpaper.clone(),
             });
             event = EditorEvent::Saved;
         } else if !can_save {
@@ -720,7 +695,7 @@ mod tests {
     #[test]
     fn a_new_editor_previews_once_until_it_changes() {
         let theme = crate::config::Config::test_defaults().themes["carbon"].clone();
-        let mut editor = Editor::new("carbon-custom", theme, None);
+        let mut editor = Editor::new("carbon-custom", theme, None, None);
         let mut pending = Vec::new();
         editor.send_preview(true, &mut pending);
         editor.send_preview(true, &mut pending);
@@ -733,7 +708,7 @@ mod tests {
     #[test]
     fn an_invalid_name_keeps_the_last_preview_name() {
         let theme = crate::config::Config::test_defaults().themes["carbon"].clone();
-        let mut editor = Editor::new("mine", theme, None);
+        let mut editor = Editor::new("mine", theme, None, None);
         editor.name = TextField::with_text("Bad Name");
         let mut pending = Vec::new();
         editor.send_preview(false, &mut pending);

@@ -114,6 +114,33 @@ fn query(command: &str) -> Option<String> {
     Some(out)
 }
 
+/// Whether a Hyprland instance is reachable.
+pub fn available() -> bool {
+    instance_dir().is_some()
+}
+
+/// Every monitor, disabled ones included, as `hyprctl -j monitors all`.
+pub fn monitors_json() -> Option<String> {
+    query("j/monitors all")
+}
+
+/// Run Lua in the compositor (`hyprctl eval`). Hyprland answers `ok`, or
+/// the error.
+pub fn eval(code: &str) -> Result<(), String> {
+    let reply = query(&format!("eval {code}")).ok_or("Hyprland is not reachable")?;
+    let reply = reply.trim();
+    if reply == "ok" {
+        Ok(())
+    } else {
+        Err(reply.to_string())
+    }
+}
+
+/// Reload Hyprland's config, which also drops every rule sent with `eval`.
+pub fn reload() -> bool {
+    query("reload").is_some_and(|reply| reply.trim() == "ok")
+}
+
 /// Send a dispatch command to the compositor.
 pub fn dispatch(command: &str) -> bool {
     query(&format!("dispatch {}", command)).is_some()
@@ -219,64 +246,75 @@ impl HyprState {
     where
         F: Fn() + Send + 'static,
     {
-        /// Minimum spacing between state reads.
-        const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
-
-        let Some(dir) = instance_dir() else {
-            tracing::warn!("Hyprland instance directory not found; workspace state will be static");
-            return;
-        };
-        let socket = dir.join(".socket2.sock");
-
-        std::thread::Builder::new()
-            .name("hyprland-events".into())
-            .spawn(move || {
-                // Reconnect if the compositor restarts.
-                loop {
-                    match UnixStream::connect(&socket) {
-                        Ok(stream) => {
-                            let reader = BufReader::new(stream);
-                            let mut last = std::time::Instant::now()
-                                - MIN_INTERVAL;
-                            for line in reader.lines() {
-                                let Ok(line) = line else { break };
-                                let event = line.split(">>").next().unwrap_or_default();
-                                // Only these affect what the bar shows.
-                                if !matches!(
-                                    event,
-                                    "workspace"
-                                        | "workspacev2"
-                                        | "focusedmon"
-                                        | "focusedmonv2"
-                                        | "activewindow"
-                                        | "activewindowv2"
-                                        | "openwindow"
-                                        | "closewindow"
-                                        | "movewindow"
-                                ) {
-                                    continue;
-                                }
-                                // Coalesce bursts: wait out the remainder of the
-                                // cooldown instead of dropping the event, so a
-                                // rapid workspace switch still updates. Events
-                                // that arrive meanwhile stay buffered in the
-                                // socket and are read after the wait.
-                                if let Some(remaining) = MIN_INTERVAL.checked_sub(last.elapsed()) {
-                                    std::thread::sleep(remaining);
-                                }
-                                last = std::time::Instant::now();
-                                on_change();
-                            }
-                        }
-                        Err(err) => {
-                            tracing::debug!("Hyprland event socket unavailable: {err}");
-                        }
-                    }
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                }
-            })
-            .ok();
+        // Only these affect what the bar shows.
+        const EVENTS: &[&str] = &[
+            "workspace",
+            "workspacev2",
+            "focusedmon",
+            "focusedmonv2",
+            "activewindow",
+            "activewindowv2",
+            "openwindow",
+            "closewindow",
+            "movewindow",
+        ];
+        watch("hyprland-events", EVENTS, std::time::Duration::from_millis(150), on_change);
     }
+}
+
+/// Watch for monitors coming and going and for config reloads, which drop
+/// the rules the shell applied. A hotplug arrives as a burst, so events are
+/// spaced out as for the bar's.
+pub fn spawn_monitor_watcher<F>(on_event: F)
+where
+    F: Fn() + Send + 'static,
+{
+    const EVENTS: &[&str] = &["monitoradded", "monitorremoved", "configreloaded"];
+    watch("hyprland-monitors", EVENTS, std::time::Duration::from_millis(300), on_event);
+}
+
+/// Spawn a thread that reads the event socket and calls `on_event` for each
+/// of `events`, at most once per `min_interval`. Bursts are not dropped:
+/// the thread waits out the remainder of the interval, and events that
+/// arrive meanwhile stay buffered in the socket. Reconnects if the
+/// compositor restarts.
+fn watch<F>(name: &str, events: &'static [&'static str], min_interval: std::time::Duration, on_event: F)
+where
+    F: Fn() + Send + 'static,
+{
+    let Some(dir) = instance_dir() else {
+        tracing::warn!("Hyprland instance directory not found; {name} will not be watched");
+        return;
+    };
+    let socket = dir.join(".socket2.sock");
+
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || loop {
+            match UnixStream::connect(&socket) {
+                Ok(stream) => {
+                    let reader = BufReader::new(stream);
+                    let mut last = std::time::Instant::now() - min_interval;
+                    for line in reader.lines() {
+                        let Ok(line) = line else { break };
+                        let event = line.split(">>").next().unwrap_or_default();
+                        if !events.contains(&event) {
+                            continue;
+                        }
+                        if let Some(remaining) = min_interval.checked_sub(last.elapsed()) {
+                            std::thread::sleep(remaining);
+                        }
+                        last = std::time::Instant::now();
+                        on_event();
+                    }
+                }
+                Err(err) => {
+                    tracing::debug!("Hyprland event socket unavailable: {err}");
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        })
+        .ok();
 }
 
 #[cfg(test)]

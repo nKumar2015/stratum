@@ -106,11 +106,27 @@ pub enum SystemAction {
     PreviewTheme(Box<(String, crate::config::ThemeConfig)>),
     /// Save a custom theme to its file and switch to it. `replaces` is the
     /// name it was saved under before, when it was renamed.
-    SaveTheme { name: String, theme: Box<crate::config::ThemeConfig>, replaces: Option<String> },
+    SaveTheme {
+        name: String,
+        theme: Box<crate::config::ThemeConfig>,
+        replaces: Option<String>,
+        /// The wallpaper to link it to; `None` links none.
+        wallpaper: Option<std::path::PathBuf>,
+    },
+    /// Link a theme to a wallpaper, or unlink it with `None`. Linking the
+    /// theme shown also shows the wallpaper.
+    LinkWallpaper { theme: String, wallpaper: Option<std::path::PathBuf> },
+    /// Show a wallpaper while a theme is edited, or go back to the one from
+    /// before with `None`. Ends with the edit.
+    PreviewWallpaper(Option<std::path::PathBuf>),
+    /// A request for the wallpaper worker (`wallpapers.rs`).
+    Wallpapers(crate::wallpapers::Command),
     /// Drop the live preview and go back to the theme before it.
     EndThemePreview,
     /// Delete a custom theme and its file.
     DeleteTheme(String),
+    /// A request for the display manager (`display_manager.rs`).
+    Display(crate::display_manager::Command),
     /// Left-click a tray item.
     TrayActivate { service: String, path: String },
     /// Middle-click a tray item.
@@ -422,7 +438,11 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         | SystemAction::PreviewTheme(_)
         | SystemAction::SaveTheme { .. }
         | SystemAction::EndThemePreview
-        | SystemAction::DeleteTheme(_) => {
+        | SystemAction::DeleteTheme(_)
+        | SystemAction::Display(_)
+        | SystemAction::LinkWallpaper { .. }
+        | SystemAction::PreviewWallpaper(_)
+        | SystemAction::Wallpapers(_) => {
             // Handled by the shell, which owns the notification server and
             // the theme; the worker has nothing to do.
             return Ok(());

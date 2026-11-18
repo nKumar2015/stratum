@@ -13,7 +13,8 @@ replaced pulled in a closure of about 1.1 GiB.
   Wi-Fi), battery and clock. Resting on a status icon opens a small menu.
 - **Control centre** — a settings window with pages for an overview, audio
   (devices, volumes, now playing, a parametric equalizer), Bluetooth, Wi-Fi,
-  battery and power profile, notifications, display, themes (with custom
+  battery and power profile, notifications, display (arrange monitors and set
+  their modes, applied to Hyprland with a confirm-or-revert countdown), themes (with custom
   themes made and edited live in the window), and power.
 - **Notifications** — the session's notification server: toasts with actions
   and inline replies, do-not-disturb, and a history that survives restarts.

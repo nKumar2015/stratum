@@ -26,6 +26,9 @@ pub struct ControlCenter {
     /// height its last paint overflowed the window by.
     scroll: f32,
     max_scroll: f32,
+    /// A modal covers the window (a display layout waiting to be kept):
+    /// nothing under it takes the pointer or the wheel.
+    modal: bool,
 }
 
 impl ControlCenter {
@@ -36,6 +39,7 @@ impl ControlCenter {
             config,
             progress: 0.0,
             pages: Pages::new(),
+            modal: false,
             scroll: 0.0,
             max_scroll: 0.0,
         }
@@ -120,7 +124,8 @@ impl ControlCenter {
     /// True while the open/close animation is still running.
     pub fn animating(&self) -> bool {
         let target = if self.open { 1.0 } else { 0.0 };
-        (self.progress - target).abs() > 0.001 || (self.open && self.pages.animating(self.page))
+        // A modal's countdown needs a frame each second, on any page.
+        (self.progress - target).abs() > 0.001 || (self.open && (self.modal || self.pages.animating(self.page)))
     }
 
     /// Whether the visible page has a text field that wants the keyboard.
@@ -142,10 +147,18 @@ impl ControlCenter {
     /// Wheel scrolling, which moves the whole page. A positive delta is the
     /// wheel turned toward the user, which moves the page down unless
     /// `control_center.invert_scroll` is set.
-    pub fn on_scroll(&mut self, _point: crate::render::display_list::Point, delta: f32) {
+    /// The page gets it first, for something that scrolls inside it.
+    pub fn on_scroll(&mut self, point: crate::render::display_list::Point, delta: f32) {
         let step = self.config.metrics.window.scroll_step;
         let direction = if self.config.control_center.invert_scroll { -1.0 } else { 1.0 };
-        self.scroll = scroll_by(self.scroll, direction * delta.signum() * step, self.max_scroll);
+        let delta = direction * delta.signum() * step;
+        if self.modal {
+            return;
+        }
+        if self.open && self.pages.scroll(self.page, (point.x, point.y), delta) {
+            return;
+        }
+        self.scroll = scroll_by(self.scroll, delta, self.max_scroll);
     }
 
     /// Paint into a normal window: no scrim and no slide, just the panel
@@ -158,6 +171,16 @@ impl ControlCenter {
         input: &InputState,
     ) -> Rect {
         self.pages.begin_frame(input, ctx.dt);
+        // A layout on trial asks to be kept over whatever page is shown, so
+        // the question is never missed; under it, nothing takes the pointer.
+        let trial = ctx.state.displays.get().trial_until;
+        self.modal = trial.is_some();
+        let clicked = self.pages.clicked;
+        let covered = InputState { pointer: None, pressed: input.pressed };
+        if self.modal {
+            self.pages.clicked = false;
+        }
+        let page_input = if self.modal { &covered } else { input };
 
         // Fill the whole window: `surface` may carry a transparent colour, so
         // paint an explicit background.
@@ -183,7 +206,11 @@ impl ControlCenter {
             radius: 0.0,
             color: Color::TRANSPARENT,
         };
-        self.paint_content(ctx, list, content, input);
+        self.paint_content(ctx, list, content, page_input);
+        if let Some(until) = trial {
+            list.push_layer();
+            crate::ui::pages::display::paint_trial_modal(ctx, list, panel, until, input, clicked, &mut self.pages.pending);
+        }
         panel
     }
 
@@ -326,7 +353,8 @@ impl ControlCenter {
         surface: Rect,
         _input: &InputState,
     ) -> Option<crate::ui::Action> {
-        if !self.open {
+        // The nav rail is under a modal too.
+        if !self.open || self.modal {
             return None;
         }
 

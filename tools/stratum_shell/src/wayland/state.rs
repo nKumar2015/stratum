@@ -62,6 +62,7 @@ macro_rules! paint_ctx {
             state: &$app.state,
             themes: &$app.config.themes,
             custom_themes: &$app.custom_themes,
+            displays: &$app.config.displays,
             output_name: $output,
             axis: $app.config.sidebar.axis(),
             dt: $dt,
@@ -230,6 +231,18 @@ pub struct App {
     theme_choice: Option<crate::theme_choice::Saved>,
     /// The themes in `config.themes` that came from the custom theme files.
     custom_themes: std::collections::BTreeSet<String>,
+    /// The wallpaper worker's commands; `None` until it starts.
+    wallpaper_tx: Option<std::sync::mpsc::Sender<crate::wallpapers::Command>>,
+    /// Which wallpaper each theme is linked to.
+    wallpaper_links: crate::wallpapers::Links,
+    /// The wallpaper last sent to the worker: what will be shown once it
+    /// catches up, which the published `current` may not be yet.
+    wallpaper_requested: Option<std::path::PathBuf>,
+    /// The wallpaper shown before a theme edit previewed another: put back
+    /// when the edit ends unsaved. `Some(None)` when there was none.
+    wallpaper_before: Option<Option<std::path::PathBuf>>,
+    /// The display manager's commands; `None` until it starts.
+    display_tx: Option<std::sync::mpsc::Sender<crate::display_manager::Command>>,
     /// The configuration before a theme being edited was shown live, to go
     /// back to when the edit ends unsaved.
     theme_preview: Option<Arc<crate::config::Config>>,
@@ -351,7 +364,10 @@ impl App {
             polkit_agent: None,
             polkit_runtime: None,
             polkit_events: None,
-            theme_switcher: crate::theme_switcher::ThemeSwitcher::new(&config_for_cc.metrics.theme_switcher),
+            theme_switcher: crate::theme_switcher::ThemeSwitcher::new(
+                &config_for_cc.metrics.theme_switcher,
+                config_for_cc.theme_switcher.wallpaper_delay_ms,
+            ),
             theme_surfaces: Vec::new(),
             dashboard: crate::dashboard::Dashboard::new(&config_for_cc.metrics.dashboard, &config_for_cc.dashboard),
             dashboard_surfaces: Vec::new(),
@@ -386,6 +402,11 @@ impl App {
             theme_choice,
             custom_themes,
             theme_preview: None,
+            display_tx: None,
+            wallpaper_tx: None,
+            wallpaper_links: crate::wallpapers::load_links(),
+            wallpaper_before: None,
+            wallpaper_requested: None,
             _wake: None,
             _ipc: None,
         };
@@ -450,6 +471,7 @@ impl App {
             || self.toasts.animating()
             || self.control_center.animating()
             || self.dashboard.animating()
+            || self.theme_switcher.animating()
         {
             return std::time::Duration::from_millis(16);
         }

@@ -117,6 +117,14 @@ impl PointerHandler for App {
                     smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape::Default,
                 );
             }
+            // The settings window is immediate-mode: hover highlights and a
+            // drag (a slider, a monitor on the Display page's map) are only
+            // seen by a paint, so every move over it needs one.
+            if let Some(settings) = self.settings.as_mut().filter(|w| w.window.wl_surface() == &event.surface) {
+                if !matches!(event.kind, PointerEventKind::Axis { .. }) {
+                    settings.dirty = true;
+                }
+            }
             match event.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     self.pointer = Some((event.surface.clone(), x, y));
@@ -319,6 +327,13 @@ impl PointerHandler for App {
         }
 
         if let Some((surface, x, y, delta)) = scroll_at {
+            // Over the theme switcher, a notch (120) moves it a theme.
+            if self.theme_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                let themes = self.theme_names();
+                let action = self.theme_switcher.on_wheel(delta / 120.0, &themes);
+                self.apply_switcher_action(action);
+                return;
+            }
             let in_settings = self
                 .settings
                 .as_ref()
@@ -377,15 +392,16 @@ impl PointerHandler for App {
             self.mark_hover_dirty();
         }
 
-        // Hovering a theme row selects it, as in the QML switcher.
+        // Hovering a slice highlights it.
         let over_themes = self.pointer.as_ref().and_then(|(surface, x, y)| {
             self.theme_surfaces
                 .iter()
                 .any(|t| t.layer.wl_surface() == surface)
                 .then(|| crate::render::display_list::Point::new(*x, *y))
         });
-        if over_themes.is_some_and(|p| self.theme_switcher.on_hover(p)) {
-            self.mark_themes_dirty();
+        if let Some(point) = over_themes {
+            let action = self.theme_switcher.on_hover(point);
+            self.apply_switcher_action(action);
         }
 
         if changed {

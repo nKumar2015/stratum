@@ -236,6 +236,7 @@ impl Pages {
         match page {
             Page::Power => self.power.disarm(),
             Page::Theme => self.theme.on_hidden(),
+            Page::Display => self.display.on_hidden(),
             _ => {}
         }
     }
@@ -280,6 +281,16 @@ impl Pages {
         }
     }
 
+    /// The wheel over `page`, before it scrolls the page: returns whether
+    /// the page took it (an open dropdown scrolls itself). `delta` is in
+    /// pixels, positive moving the content up.
+    pub fn scroll(&mut self, page: Page, point: (f32, f32), delta: f32) -> bool {
+        match page {
+            Page::Display => self.display.on_scroll(point, delta),
+            _ => false,
+        }
+    }
+
     /// Whether the visible page needs continuous frames (a scan spinner, say).
     pub fn animating(&self, page: Page) -> bool {
         match page {
@@ -288,6 +299,7 @@ impl Pages {
             Page::Audio => self.audio.animating(),
             Page::Power => self.power.animating(),
             Page::Theme => self.theme.animating(),
+            Page::Display => self.display.animating(),
             _ => false,
         }
     }

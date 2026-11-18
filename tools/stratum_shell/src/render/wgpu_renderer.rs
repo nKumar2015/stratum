@@ -44,6 +44,8 @@ struct Batch {
     vertices: Vec<Vertex>,
     segments: Vec<Segment>,
     clip: Option<Rect>,
+    /// The texture sampled instead of the atlas: a `TexturedQuad`'s key.
+    texture: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -51,6 +53,7 @@ struct Segment {
     start: u32,
     end: u32,
     clip: Option<Rect>,
+    texture: Option<u64>,
 }
 
 impl Batch {
@@ -59,6 +62,7 @@ impl Batch {
             vertices: Vec::new(),
             segments: Vec::new(),
             clip: None,
+            texture: None,
         }
     }
 
@@ -66,16 +70,21 @@ impl Batch {
         self.clip = clip;
     }
 
+    fn set_texture(&mut self, texture: Option<u64>) {
+        self.texture = texture;
+    }
+
     fn push(&mut self, vertex: Vertex) {
         let index = self.vertices.len() as u32;
         match self.segments.last_mut() {
-            Some(last) if last.end == index && same_clip(last.clip, self.clip) => {
+            Some(last) if last.end == index && same_clip(last.clip, self.clip) && last.texture == self.texture => {
                 last.end = index + 1;
             }
             _ => self.segments.push(Segment {
                 start: index,
                 end: index + 1,
                 clip: self.clip,
+                texture: self.texture,
             }),
         }
         self.vertices.push(vertex);
@@ -201,13 +210,16 @@ pub struct SurfaceRenderer {
     /// The layout the atlas binds with, reused for the backdrop texture.
     texture_layout: wgpu::BindGroupLayout,
     backdrop: Option<BackdropTexture>,
+    /// `TexturedQuad`s on the GPU, by key; dropped once a frame no longer
+    /// draws them.
+    textures: HashMap<u64, wgpu::BindGroup>,
 }
 
 /// A `Backdrop` uploaded to the GPU: its own texture (it is far larger than
 /// the atlas) and the full-surface quad that draws it.
 struct BackdropTexture {
     key: u64,
-    _texture: wgpu::Texture,
+    /// Keeps its texture alive.
     bind_group: wgpu::BindGroup,
     quad: wgpu::Buffer,
 }
@@ -434,6 +446,7 @@ impl SurfaceRenderer {
             path_cache: HashMap::new(),
             texture_layout: atlas_layout,
             backdrop: None,
+            textures: HashMap::new(),
         })
     }
 
@@ -441,21 +454,15 @@ impl SurfaceRenderer {
     /// so waiting for a list without one would keep it alive indefinitely.
     pub fn release_backdrop(&mut self) {
         self.backdrop = None;
+        self.textures.clear();
     }
 
-    /// Upload `backdrop` unless it is the one already on the GPU.
-    fn ensure_backdrop(&mut self, gpu: &Gpu, backdrop: &crate::render::display_list::Backdrop) {
-        if self.backdrop.as_ref().is_some_and(|b| b.key == backdrop.key) {
-            return;
-        }
-        let (width, height) = (backdrop.width.max(1), backdrop.height.max(1));
-        if backdrop.pixels.len() < (width * height * 4) as usize {
-            self.backdrop = None;
-            return;
-        }
+    /// A texture holding `pixels` (premultiplied RGBA8, `width` × `height`),
+    /// bound on the atlas layout. The bind group keeps the texture alive.
+    fn upload_texture(&self, gpu: &Gpu, width: u32, height: u32, pixels: &[u8], label: &str) -> wgpu::BindGroup {
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("stratum backdrop"),
+            label: Some(label),
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -471,7 +478,7 @@ impl SurfaceRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &backdrop.pixels,
+            pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
@@ -481,26 +488,39 @@ impl SurfaceRenderer {
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("stratum backdrop sampler"),
+            label: Some(label),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("stratum backdrop bind group"),
+        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
             layout: &self.texture_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
             ],
-        });
+        })
+    }
+
+    /// Upload `backdrop` unless it is the one already on the GPU.
+    fn ensure_backdrop(&mut self, gpu: &Gpu, backdrop: &crate::render::display_list::Backdrop) {
+        if self.backdrop.as_ref().is_some_and(|b| b.key == backdrop.key) {
+            return;
+        }
+        let (width, height) = (backdrop.width.max(1), backdrop.height.max(1));
+        if backdrop.pixels.len() < (width * height * 4) as usize {
+            self.backdrop = None;
+            return;
+        }
+        let bind_group = self.upload_texture(gpu, width, height, &backdrop.pixels, "stratum backdrop");
         let quad = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("stratum backdrop quad"),
             size: (std::mem::size_of::<Vertex>() * 6) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        self.backdrop = Some(BackdropTexture { key: backdrop.key, _texture: texture, bind_group, quad });
+        self.backdrop = Some(BackdropTexture { key: backdrop.key, bind_group, quad });
     }
 
     pub fn resize(&mut self, gpu: &Gpu, size: (u32, u32), scale: f32) {
@@ -520,6 +540,7 @@ impl SurfaceRenderer {
         let mut batch = Batch::new();
         self.atlas.begin_frame();
         let mut used_paths = std::collections::HashSet::new();
+        let mut used_textures = std::collections::HashSet::new();
         match &list.backdrop {
             Some(backdrop) => self.ensure_backdrop(gpu, backdrop),
             None => self.backdrop = None,
@@ -548,8 +569,18 @@ impl SurfaceRenderer {
             }
         }
 
+        // Each layer's geometry, then its text; a later layer draws over
+        // both. The geometry's clip is restored after a layer's text, which
+        // sets clips of its own.
+        let mut layer = 0;
+        let mut clip = None;
         for command in &list.commands {
             match command {
+                DrawCommand::Layer => {
+                    self.append_text(gpu, &mut batch, list, layer, text);
+                    batch.set_clip(clip);
+                    layer += 1;
+                }
                 DrawCommand::Rect(rect) => self.append_rect(&mut batch, rect, 0.0),
                 DrawCommand::Outline { rect, width } => self.append_rect(&mut batch, rect, *width),
                 DrawCommand::Path(path) => {
@@ -582,59 +613,49 @@ impl SurfaceRenderer {
                         );
                     }
                 }
-                DrawCommand::PushClip(clip) => batch.set_clip(Some(*clip)),
-                DrawCommand::PopClip => batch.set_clip(None),
+                DrawCommand::Texture(quad) => {
+                    let (w, h) = (quad.width, quad.height);
+                    if w == 0 || h == 0 || quad.pixels.len() < (w * h * 4) as usize {
+                        continue;
+                    }
+                    if !self.textures.contains_key(&quad.key) {
+                        let bind_group = self.upload_texture(gpu, w, h, &quad.pixels, "stratum texture");
+                        self.textures.insert(quad.key, bind_group);
+                    }
+                    used_textures.insert(quad.key);
+                    let s = self.scale;
+                    let a = quad.alpha.clamp(0.0, 1.0);
+                    batch.set_texture(Some(quad.key));
+                    for i in [0, 1, 2, 0, 2, 3] {
+                        let p = quad.corners[i];
+                        let (u, v) = quad.uv[i];
+                        let mut vertex = Vertex::solid([p.x * s, p.y * s], [0.0, 0.0], [0.0, 0.0], RADIUS_PATH, [a; 4]);
+                        vertex.kind = 3.0;
+                        vertex.uv = [u, v, 0.0, 0.0];
+                        batch.push(vertex);
+                    }
+                    batch.set_texture(None);
+                }
+                DrawCommand::PushClip(rect) => {
+                    clip = Some(*rect);
+                    batch.set_clip(clip);
+                }
+                DrawCommand::PopClip => {
+                    clip = None;
+                    batch.set_clip(None);
+                }
             }
         }
+        self.append_text(gpu, &mut batch, list, layer, text);
 
-        // Glyphs last so text sits above geometry in the same draw. Each run
-        // carries the clip that was active when it was pushed.
-        let mut glyph_uploads = Vec::new();
-        for run in &list.texts {
-            // Upright text is placed in surface pixels, so its bitmaps sit on
-            // the pixel grid; a translation is folded into the pen first.
-            // Rotated or scaled text keeps its transform and lands where the
-            // transform takes it.
-            let [a, b, c, d, tx, ty] = run.transform.m;
-            let (origin, transform) = if (a, b, c, d) == (1.0, 0.0, 0.0, 1.0) {
-                ((run.x + tx, run.y + ty), Transform::IDENTITY)
-            } else {
-                ((run.x, run.y), run.transform)
-            };
-            let physical = (origin.0 * self.scale, origin.1 * self.scale);
-            for (_, raster) in text.rasterize_run(run, self.scale, physical) {
-                glyph_uploads.push((run.color, transform, run.clip, raster));
-            }
-        }
         // Paths whose geometry changes every frame (a dragged curve) would
         // otherwise add a cache entry per frame forever. Past a bound, keep
         // only what this frame drew.
         if self.path_cache.len() > PATH_CACHE_LIMIT {
             self.path_cache.retain(|key, _| used_paths.contains(key));
         }
-        for (color, transform, clip, raster) in glyph_uploads {
-            if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
-                // The raster is placed in whole physical pixels from the
-                // origin: `(left, -top)`.
-                let scale = self.scale;
-                let lx = raster.left as f32 / scale;
-                let ly = -raster.top as f32 / scale;
-                let lw = raster.width as f32 / scale;
-                let lh = raster.height as f32 / scale;
-                batch.set_clip(clip);
-                append_quad_transformed(
-                    &mut batch,
-                    transform,
-                    scale,
-                    lx,
-                    ly,
-                    lw,
-                    lh,
-                    uv,
-                    color.with_alpha(1.0).to_array(),
-                );
-            }
-        }
+        // A texture lives only while frames draw it: they are large.
+        self.textures.retain(|key, _| used_textures.contains(key));
 
         gpu.queue.write_buffer(
             &self.globals_buffer,
@@ -727,7 +748,13 @@ impl SurfaceRenderer {
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_bind_group(1, &self.atlas.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                let mut bound = None;
                 for segment in &batch.segments {
+                    if segment.texture != bound {
+                        let group = segment.texture.and_then(|key| self.textures.get(&key));
+                        pass.set_bind_group(1, group.unwrap_or(&self.atlas.bind_group), &[]);
+                        bound = segment.texture;
+                    }
                     match segment.clip {
                         Some(clip) => {
                             let Some(scissor) = scissor_rect(clip, self.scale, self.size) else {
@@ -753,6 +780,51 @@ impl SurfaceRenderer {
     }
 
     /// A rect, filled, or outlined `stroke` logical pixels thick.
+    /// The glyphs of `layer`'s text, over what is already in `batch`. Each
+    /// run carries the clip that was active when it was pushed.
+    fn append_text(&mut self, gpu: &Gpu, batch: &mut Batch, list: &DisplayList, layer: u32, text: &mut TextEngine) {
+        let mut glyph_uploads = Vec::new();
+        for run in list.texts.iter().filter(|run| run.layer == layer) {
+            // Upright text is placed in surface pixels, so its bitmaps sit on
+            // the pixel grid; a translation is folded into the pen first.
+            // Rotated or scaled text keeps its transform and lands where the
+            // transform takes it.
+            let [a, b, c, d, tx, ty] = run.transform.m;
+            let (origin, transform) = if (a, b, c, d) == (1.0, 0.0, 0.0, 1.0) {
+                ((run.x + tx, run.y + ty), Transform::IDENTITY)
+            } else {
+                ((run.x, run.y), run.transform)
+            };
+            let physical = (origin.0 * self.scale, origin.1 * self.scale);
+            for (_, raster) in text.rasterize_run(run, self.scale, physical) {
+                glyph_uploads.push((run.color, transform, run.clip, raster));
+            }
+        }
+        for (color, transform, clip, raster) in glyph_uploads {
+            if let Some(uv) = self.atlas.upload_mask(gpu, &raster) {
+                // The raster is placed in whole physical pixels from the
+                // origin: `(left, -top)`.
+                let scale = self.scale;
+                let lx = raster.left as f32 / scale;
+                let ly = -raster.top as f32 / scale;
+                let lw = raster.width as f32 / scale;
+                let lh = raster.height as f32 / scale;
+                batch.set_clip(clip);
+                append_quad_transformed(
+                    batch,
+                    transform,
+                    scale,
+                    lx,
+                    ly,
+                    lw,
+                    lh,
+                    uv,
+                    color.with_alpha(1.0).to_array(),
+                );
+            }
+        }
+    }
+
     fn append_rect(&self, out: &mut Batch, rect: &Rect, stroke: f32) {
         let scale = self.scale;
         let (x, y) = (rect.x * scale, rect.y * scale);

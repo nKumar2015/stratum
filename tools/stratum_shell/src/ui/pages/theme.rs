@@ -16,6 +16,7 @@ use crate::ui::pages::layout;
 use crate::ui::pages::theme_editor::{suggest_name, Editor, EditorEvent};
 use crate::ui::pages::Optimistic;
 use crate::ui::{self, InputState, PaintCtx};
+use crate::wallpapers::WallpaperState;
 
 /// The custom theme waiting for a second click to be deleted.
 #[derive(Debug, Default)]
@@ -28,11 +29,8 @@ pub struct ThemePage {
     theme: Optimistic<String>,
     editor: Option<Editor>,
     armed: ArmedDelete,
-}
-
-/// The colours a card's strip shows, in order.
-fn swatches(theme: &Theme) -> [Color; 5] {
-    [theme.bg_main, theme.bg_widget, theme.primary, theme.secondary, theme.tertiary]
+    /// Whether this showing of the page has asked for the wallpapers.
+    wallpapers_requested: bool,
 }
 
 impl ThemePage {
@@ -41,6 +39,7 @@ impl ThemePage {
             theme: Optimistic::new(),
             editor: None,
             armed: ArmedDelete::default(),
+            wallpapers_requested: false,
         }
     }
 
@@ -63,6 +62,7 @@ impl ThemePage {
     pub fn on_hidden(&mut self) {
         self.editor = None;
         self.armed.name = None;
+        self.wallpapers_requested = false;
     }
 
     pub fn wants_keys(&self) -> bool {
@@ -89,6 +89,13 @@ impl ThemePage {
         let current = ctx.theme.name.clone();
         let selected_theme = self.theme.view(current.clone());
         let custom_count = ctx.custom_themes.len();
+        let wallpapers = ctx.state.wallpapers.get();
+        let links = ctx.state.theme_wallpapers.get();
+        // Thumbnails are decoded only once the page is looked at.
+        if !self.wallpapers_requested {
+            pending.push(SystemAction::Wallpapers(crate::wallpapers::Command::Load));
+            self.wallpapers_requested = true;
+        }
 
         let area = layout::column(area, m.max_width);
         let summary = match &self.editor {
@@ -124,7 +131,8 @@ impl ThemePage {
             let selected = *name == selected_theme;
             let hot = layout::hovered(input, *cell);
             let custom = ctx.custom_themes.contains(name);
-            paint_theme_card(ctx, list, *cell, name, theme, selected, hot, custom);
+            let linked = links.contains_key(name);
+            paint_theme_card(ctx, list, *cell, name, theme, selected, hot, custom, linked);
             // While editing, applying another theme would end the edit.
             if hot && clicked && !selected && self.editor.is_none() {
                 self.theme.set(name.clone());
@@ -151,6 +159,31 @@ impl ThemePage {
             };
             paint_preview(ctx, list, card, &name, &theme);
             y += card.height;
+        }
+
+        // The wallpaper: the one the selected theme is linked to, or while
+        // editing, the draft's, with generating colours from it.
+        y += m.section_spacing;
+        match &mut self.editor {
+            Some(editor) => {
+                y = layout::section(ctx, list, body, y, "Wallpaper");
+                let (bottom, pick) = paint_wallpapers(ctx, list, body, y, &wallpapers, editor.wallpaper(), input, clicked);
+                if let Some(pick) = pick {
+                    editor.set_wallpaper(pick, pending);
+                }
+                y = bottom + m.label_gap;
+                y = paint_generate(ctx, list, body, y, editor, &wallpapers, input, clicked);
+            }
+            None => {
+                let label = format!("Wallpaper for {selected_theme}");
+                y = layout::section(ctx, list, body, y, &label);
+                let linked = links.get(&selected_theme).map(|p| p.as_path());
+                let (bottom, pick) = paint_wallpapers(ctx, list, body, y, &wallpapers, linked, input, clicked);
+                if let Some(pick) = pick {
+                    pending.push(SystemAction::LinkWallpaper { theme: selected_theme.clone(), wallpaper: pick });
+                }
+                y = bottom;
+            }
         }
 
         if let Some(editor) = &mut self.editor {
@@ -192,11 +225,12 @@ impl ThemePage {
         match labels[hit] {
             "New theme" => {
                 let name = suggest_name(selected, |n| ctx.themes.contains_key(n));
-                self.editor = Some(Editor::new(&name, config, None));
+                self.editor = Some(Editor::new(&name, config, None, None));
                 self.armed.name = None;
             }
             "Edit" => {
-                self.editor = Some(Editor::new(selected, config, Some(selected.to_string())));
+                let wallpaper = ctx.state.theme_wallpapers.get().get(selected).cloned();
+                self.editor = Some(Editor::new(selected, config, Some(selected.to_string()), wallpaper));
                 self.armed.name = None;
             }
             _ if armed => {
@@ -225,6 +259,7 @@ fn paint_theme_card(
     selected: bool,
     hot: bool,
     custom: bool,
+    linked: bool,
 ) {
     let m = ctx.metrics.page.clone();
     let typo = ctx.metrics.typography.clone();
@@ -280,7 +315,7 @@ fn paint_theme_card(
     list.push_rect(Rect { width: track.width * 0.6, color: theme.primary, ..track });
 
     let mut x = cell.x + pad;
-    for color in swatches(theme) {
+    for color in ui::theme_swatches(theme) {
         let swatch = Rect {
             radius: m.swatch * 0.5,
             color,
@@ -290,10 +325,138 @@ fn paint_theme_card(
         ui::paint_frame(list, swatch, ctx.appearance.border_width, theme.border_inactive, color);
         x += m.swatch + m.swatch_gap;
     }
-    if custom {
-        let mark = layout::rect(cell.x + cell.width - pad - typo.caption, swatch_y, typo.caption, m.swatch);
-        ui::paint_icon_centered(ctx, list, "\u{f03eb}", mark, typo.caption, theme.text_muted);
+    // Marks at the right: a pencil for a custom theme, a picture for one
+    // linked to a wallpaper.
+    let mut mark_x = cell.x + cell.width - pad - typo.caption;
+    for (shown, glyph) in [(custom, "\u{f03eb}"), (linked, "\u{f02e9}")] {
+        if shown {
+            let mark = layout::rect(mark_x, swatch_y, typo.caption, m.swatch);
+            ui::paint_icon_centered(ctx, list, glyph, mark, typo.caption, theme.text_muted);
+            mark_x -= typo.caption + m.swatch_gap;
+        }
     }
+}
+
+/// The wallpapers as a grid of thumbnails, after a "None" tile, with
+/// `selected` marked. Returns the bottom and the tile clicked: `Some(None)`
+/// for None.
+#[allow(clippy::too_many_arguments)]
+fn paint_wallpapers(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    body: Rect,
+    y: f32,
+    state: &WallpaperState,
+    selected: Option<&std::path::Path>,
+    input: &InputState,
+    clicked: bool,
+) -> (f32, Option<Option<std::path::PathBuf>>) {
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let theme = ctx.theme.clone();
+    if state.items.is_empty() {
+        let text = if state.loading { "Loading wallpapers\u{2026}" } else { "No wallpapers found" };
+        let line = layout::rect(body.x, y, body.width, m.section_label_height);
+        ui::paint_text_vcentered(ctx, list, text, body.x, line, typo.caption, typo.weight_regular, theme.text_muted);
+        // None is still offered below the note.
+    }
+    let count = state.items.len() + 1;
+    let top = if state.items.is_empty() { y + m.section_label_height + m.label_gap } else { y };
+    let cols = layout::columns(body.width, m.wallpaper_min_width, m.grid_gap, 6);
+    let tile_w = (body.width - m.grid_gap * (cols as f32 - 1.0)) / cols as f32;
+    let thumb_h = tile_w * 10.0 / 16.0;
+    let caption_h = typo.line(typo.caption) + m.label_gap * 0.5;
+    let cells = layout::cells(body.x, top, body.width, count, cols, thumb_h + caption_h, m.grid_gap);
+    let mut pick = None;
+    for (i, cell) in cells.iter().enumerate() {
+        let item = i.checked_sub(1).and_then(|i| state.items.get(i));
+        let thumb = layout::rect(cell.x, cell.y, cell.width, thumb_h);
+        let hot = layout::hovered(input, *cell);
+        let chosen = match item {
+            Some(w) => selected == Some(w.path.as_path()),
+            None => selected.is_none(),
+        };
+        match item {
+            Some(w) => list.push_image(crate::render::display_list::Image {
+                width: w.thumb_size.0,
+                height: w.thumb_size.1,
+                pixels: w.thumb.clone(),
+                x: thumb.x,
+                y: thumb.y,
+                width_logical: thumb.width,
+                height_logical: thumb.height,
+            }),
+            None => {
+                list.push_rect(Rect { color: theme.surface_high, ..thumb });
+                ui::paint_icon_centered(ctx, list, "\u{f05e}", thumb, typo.body, theme.text_muted);
+            }
+        }
+        let (border, width) = if chosen {
+            (theme.primary, m.outline_active * 2.0)
+        } else if hot {
+            (theme.text_muted, m.outline)
+        } else {
+            (theme.outline, m.outline)
+        };
+        ui::stroke_rounded(list, thumb, border, width);
+        if chosen {
+            let size = m.badge * 0.6;
+            let x = thumb.x + thumb.width - size - m.label_gap * 0.5;
+            let check = Rect { radius: size * 0.5, color: theme.primary, ..layout::rect(x, thumb.y + m.label_gap * 0.5, size, size) };
+            list.push_rect(check);
+            ui::paint_icon_centered(ctx, list, "\u{f00c}", check, typo.caption, theme.on_primary);
+        }
+        let name = item.map_or("None", |w| w.name.as_str());
+        let caption = layout::rect(cell.x, thumb.y + thumb_h, cell.width, caption_h);
+        let name = ui::elide(ctx, name, typo.caption, typo.weight_regular, cell.width);
+        let color = if chosen { theme.primary } else { theme.text_muted };
+        ui::paint_text_vcentered(ctx, list, &name, cell.x, caption, typo.caption, typo.weight_regular, color);
+        if hot && clicked && !chosen {
+            pick = Some(item.map(|w| w.path.clone()));
+        }
+    }
+    (top + layout::grid_height(count, cols, thumb_h + caption_h, m.grid_gap), pick)
+}
+
+/// Generating the draft's colours from its wallpaper: the scheme, and the
+/// button, which needs a wallpaper chosen. Returns the bottom.
+#[allow(clippy::too_many_arguments)]
+fn paint_generate(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    body: Rect,
+    y: f32,
+    editor: &mut Editor,
+    state: &WallpaperState,
+    input: &InputState,
+    clicked: bool,
+) -> f32 {
+    use crate::palette::Scheme;
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let gap = m.grid_gap * 0.5;
+    let sample = editor.wallpaper().and_then(|p| state.find(p)).map(|w| w.sample.clone());
+
+    let note = if sample.is_some() { "Colours from this wallpaper" } else { "Pick a wallpaper to generate colours from it" };
+    let note_w = ctx.measure(note, typo.caption);
+    let row = layout::rect(body.x, y, note_w, m.badge);
+    ui::paint_text_vcentered(ctx, list, note, body.x, row, typo.caption, typo.weight_regular, ctx.theme.text_muted);
+
+    let mut x = body.x + note_w + m.grid_gap;
+    for (label, scheme) in [("Dark", Scheme::Dark), ("Light", Scheme::Light)] {
+        if layout::chip(ctx, list, x, y, label, editor.scheme == scheme, input, clicked) {
+            editor.scheme = scheme;
+        }
+        x += layout::text_button_width(ctx, label) + gap;
+    }
+    let generate_w = layout::text_button_width(ctx, "Generate");
+    let generate_x = body.x + body.width - generate_w;
+    if layout::text_button(ctx, list, generate_x, y, "Generate", sample.is_some(), input, clicked) {
+        if let Some(sample) = sample {
+            editor.generate(&sample);
+        }
+    }
+    y + m.badge
 }
 
 /// A miniature panel drawn entirely in `theme`: its background and border, a

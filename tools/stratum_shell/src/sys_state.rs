@@ -99,6 +99,17 @@ pub struct SystemState {
     /// Compositor state (workspaces, active window), refreshed by the event
     /// watcher rather than polled.
     pub hypr: Cell<crate::hyprland::HyprState>,
+    /// The monitors and how the Display page's last change went, published
+    /// by the display manager.
+    pub displays: Cell<crate::display_manager::DisplaysState>,
+    /// The wallpapers, their thumbnails and the one shown, published by
+    /// the wallpaper worker.
+    pub wallpapers: Cell<crate::wallpapers::WallpaperState>,
+    /// Large wallpapers for the theme switcher's slices, only while it is
+    /// open.
+    pub wallpaper_previews: Cell<crate::wallpapers::Previews>,
+    /// Which wallpaper each theme is linked to, published by the shell.
+    pub theme_wallpapers: Cell<crate::wallpapers::Links>,
     /// System tray items, refreshed by the tray watcher.
     pub tray: Cell<Vec<crate::tray::TrayItem>>,
     /// The open tray context menu, if any. The shell fetches it on right-click
@@ -147,6 +158,10 @@ impl SystemState {
             tray_menu: Cell::new(None),
             brightness: Cell::new(None),
             notifications: Cell::new(Vec::new()),
+            displays: Cell::default(),
+            wallpapers: Cell::default(),
+            wallpaper_previews: Cell::default(),
+            theme_wallpapers: Cell::default(),
             dnd: Cell::new(false),
             action_result: Cell::new(ActionResult::default()),
             waker: Mutex::new(None),
@@ -199,6 +214,10 @@ impl SystemState {
             | self.tray.take_dirty()
             | self.tray_menu.take_dirty()
             | self.notifications.take_dirty()
+            | self.displays.take_dirty()
+            | self.wallpapers.take_dirty()
+            | self.wallpaper_previews.take_dirty()
+            | self.theme_wallpapers.take_dirty()
             | self.dnd.take_dirty()
             | self.action_result.take_dirty()
     }

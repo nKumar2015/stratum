@@ -123,6 +123,8 @@ impl TextEngine {
             // Filled in by `DisplayList::push_text`, which knows the active
             // clip. A run used outside a list is never clipped.
             clip: None,
+            // Likewise the layer.
+            layer: 0,
         }
     }
 

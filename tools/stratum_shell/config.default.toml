@@ -59,6 +59,22 @@ gpu = "auto"
 animation_ms = 160      # 0 opens instantly
 invert_scroll = false   # true: turning the wheel down scrolls the page up
 
+[wallpapers]            # linked to themes, and themes generated from them
+dir = "~/Pictures/Wallpapers"
+current = "~/Pictures/Wallpapers/current_wp.png"  # symlink hyprpaper reads;
+                        # applying a wallpaper points it at the image
+thumb_px = 240          # thumbnail width in pixels
+
+[theme_switcher]
+wallpaper_delay_ms = 250  # a theme's wallpaper is previewed once the focus
+                        # has rested on it this long
+preview_px = 1280       # long edge of a slice's wallpaper, in pixels
+
+[displays]              # the Display page's monitor settings
+confirm_s = 15          # an applied layout reverts unless kept within this
+scales = [1.0, 1.25, 1.333333, 1.5, 1.6, 1.666667, 1.75, 2.0, 2.5, 3.0]
+                        # offered where they give a whole logical size
+
 [screenshot]            # the viewer's annotation pen
 # Drawn into the image, so they are fixed colours, not theme colours. The
 # first is selected when the viewer opens.
@@ -403,28 +419,31 @@ reply_text = 12.0
 send_width = 52.0
 caret_width = 1.5
 
-[metrics.theme_switcher]
-width = 360.0
-padding = 16.0
-spacing = 12.0          # gap between the card's rows
-radius = 12.0
-border = 1.0
-title = 20.0
-subtitle = 13.0         # "Current: …"
+[metrics.theme_switcher] # a band of slanted slices, one per theme
+band_height = 0.46      # fraction of the output's height
+slice_width = 64.0      # an unfocused slice
+focus_width = 1.5       # the focused slice, times the band's height
+slice_gap = 10.0
+skew = 0.16             # lean of a slice, as a fraction of the band's height
+outline = 1.0
+outline_focus = 3.0
+footer_height = 8.0     # the palette strip along a slice's bottom
+scrim = 0.35            # dimming over the desktop
+name_text = 30.0
+caption_text = 13.0
+hint_text = 12.0
+label_gap = 14.0
+swatch = 14.0
 search_height = 34.0
-search_radius = 8.0
-search_padding = 10.0
+search_radius = 17.0
+search_padding = 14.0
 search_text = 13.0
 caret_width = 1.5
-row_height = 42.0
-row_gap = 4.0
-row_radius = 8.0
-row_padding = 14.0
-row_text = 14.0
-empty_height = 36.0     # "No matching themes"
-empty_text = 12.0
-max_rows = 8            # rows shown before the list scrolls
-scrim_alpha = 0.56      # dimming behind the card
+open_ms = 320           # each slice rising in
+stagger_ms = 28         # between one slice and the next
+slide_ms = 260          # the band sliding to a new focus
+close_ms = 160
+rise = 40.0             # how far slices rise while opening
 
 [metrics.hover_menu]
 open_ms = 350           # rest on an icon this long to open its menu
@@ -649,6 +668,13 @@ field_height = 32.0     # channel slider's height, and how many steps
 channel_height = 22.0   # its gradient track is drawn in, and that track's
 channel_segments = 36   # thickness
 channel_track = 10.0
+display_map_height = 240.0  # Display page: the monitor map, and how near (in
+display_snap = 14.0     # pixels on the map) a dragged edge snaps
+dropdown_rows = 4       # an open dropdown shows at least this many rows; it
+scroll_thumb = 3.0      # scrolls when longer, with a thumb this wide
+modal_width = 420.0     # a modal over the settings window, and how much it
+modal_scrim = 0.6       # dims what is under it
+wallpaper_min_width = 140.0  # Theme page: narrowest wallpaper thumbnail
 empty_height = 168.0    # the card a page shows when it has nothing to list
 confirm_ms = 4000       # how long a Power tile waits for its second click
 outline = 1.0           # card outline, and a selected card's
@@ -728,6 +754,23 @@ warning = "#e0af68"
 error = "#f7768e"
 border_active = "#7aa2f7"
 border_inactive = "#15161e"
+font = "JetBrainsMono NFM"
+
+[themes.monochrome]      # neutral greys only; status colours keep a faint hue
+bg_main = "#111111"
+bg_widget = "#1c1c1c"
+bg_hover = "#2a2a2a"
+bg_dark = "#0a0a0a"
+text_main = "#ededed"
+text_muted = "#8c8c8c"
+primary = "#e6e6e6"
+secondary = "#b5b5b5"
+tertiary = "#858585"
+success = "#9db89d"
+warning = "#cfc195"
+error = "#d99494"
+border_active = "#e6e6e6"
+border_inactive = "#2a2a2a"
 font = "JetBrainsMono NFM"
 
 # Optional Material-style tokens. Each falls back to an existing colour, so a

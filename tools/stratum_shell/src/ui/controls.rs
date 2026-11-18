@@ -54,6 +54,58 @@ pub fn slider(
     Some(fraction_in(rect, px))
 }
 
+/// A slider that only stops at `count` evenly spaced steps, each marked on
+/// the track. Returns the step nearest the pointer while dragging. With a
+/// single step there is nothing to choose and it never returns one.
+pub fn stepped_slider(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    rect: Rect,
+    index: usize,
+    count: usize,
+    dragging: bool,
+    input: &InputState,
+) -> Option<usize> {
+    let page = &ctx.metrics.page;
+    let track_height = page.slider_track;
+    let knob = page.slider_knob;
+    let last = count.saturating_sub(1).max(1) as f32;
+    let at = |i: usize| rect.x + rect.width * (i as f32 / last).min(1.0);
+    let cy = rect.y + rect.height * 0.5;
+
+    let track = Rect {
+        x: rect.x,
+        y: cy - track_height * 0.5,
+        width: rect.width,
+        height: track_height,
+        radius: track_height * 0.5,
+        color: ctx.theme.surface_highest,
+    };
+    list.push_rect(track);
+    list.push_rect(Rect { width: at(index) - rect.x, color: ctx.theme.primary, ..track });
+    // A mark per step, in the colour that reads on the part of the track
+    // it sits on.
+    let dot = track_height * 0.5;
+    for i in 0..count {
+        let color = if i <= index { ctx.theme.on_primary } else { ctx.theme.text_muted };
+        list.push_rect(Rect { x: at(i) - dot * 0.5, y: cy - dot * 0.5, width: dot, height: dot, radius: dot * 0.5, color });
+    }
+    list.push_rect(Rect {
+        x: at(index) - knob * 0.5,
+        y: cy - knob * 0.5,
+        width: knob,
+        height: knob,
+        radius: knob * 0.5,
+        color: ctx.theme.text_main,
+    });
+
+    if !dragging || count < 2 {
+        return None;
+    }
+    let (px, _) = input.pointer?;
+    Some((fraction_in(rect, px) * last).round() as usize)
+}
+
 /// A switch, its top-left at `(x, y)`. Returns the new state when it is
 /// clicked.
 pub fn switch(

@@ -58,13 +58,27 @@ module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 Implemented and working: sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with ten
 pages (overview, audio, equalizer, bluetooth, wifi, battery, notifications,
-display, theme, power),
+display (monitor layout), theme, power),
 volume/brightness OSD, notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
 the IPC socket, the lock screen, and the polkit dialog (both verified only
 against fixtures in a nested compositor; see below).
 
-The theme switcher overlay is implemented too (`theme_switcher.rs`).
+The **theme switcher** (`theme_switcher/`) is a band of slanted slices,
+one per theme, across the output it opens on, with the desktop visible
+behind. A slice shows the theme's linked wallpaper over columns of its
+palette; the focused one opens wide and the band slides to centre it
+(`layout.rs`, pure and tested). Moving the focus previews the theme on the
+whole shell through `preview_theme`, and its wallpaper (or, for a theme
+without one, the wallpaper from before) once the focus has rested
+`[theme_switcher] wallpaper_delay_ms`. Return keeps it through
+`switch_theme`; Escape after clearing the search, a click outside the band,
+or `theme close|toggle` reverts. Hover only highlights: the band slides
+under the pointer, so a focus that followed it would chase the mouse. Its
+tick runs before the frame resolves its theme, since it may preview one.
+The wallpapers are decoded large (`preview_px`) on their own thread only
+while it is open, published in `SystemState::wallpaper_previews`, and
+dropped when it closes.
 
 Settings pages are built on the scaffold in `ui/pages/layout.rs` (header,
 sections, cards, rows, badges, pills) and scroll as a whole. The Bluetooth
@@ -167,7 +181,60 @@ stay derived. An edit is shown live through `SystemAction::PreviewTheme`:
 applied over that, so Discard, leaving the page or closing the window
 restores it exactly (`render_settings_window` ends any preview that
 outlives the editor). A preview never writes `theme.json`; Save does, via
-`switch_theme`. The Display page now holds only the font and output.
+`switch_theme`.
+
+**Wallpapers** (`wallpapers.rs`) live in `[wallpapers] dir`; the one shown is
+`[wallpapers] current`, a symlink hyprpaper and the lock screen read.
+Applying one repoints that link (never a real file there) and runs
+`hyprctl hyprpaper wallpaper ",<path>"`, on a worker thread that also
+decodes thumbnails and 48² colour samples, only once the Theme page asks.
+Any theme, built-in or custom, may be linked to a wallpaper
+(`$XDG_STATE_HOME/stratum/theme-wallpapers.json`; none by default), which
+`switch_theme` applies, so the page, the switcher and `theme set` all bring
+it along. The editor's wallpaper is previewed live (`PreviewWallpaper`) and
+restored with the theme when the edit ends unsaved; Save links it.
+`App::show_wallpaper` compares with the last wallpaper *requested*
+(`wallpaper_requested`), not the worker's published `current`: a restore
+still queued would otherwise make showing the wallpaper it replaces look
+redundant, and the restore would win.
+`palette.rs` generates a dark or light theme from a sample: hue bins give
+the background tint and three distinct accents, then every colour is moved
+in lightness to WCAG contrast (text 7:1, muted 4.5:1, accents 3:1) on
+`bg_main`. The lock artwork is keyed on the wallpaper's resolved path as well
+as its mtime, since a relinked file may be as old as the last. Live tests use
+a scratch `[wallpapers]` directory and, in the nested Hyprland, their own
+hyprpaper (`XDG_CONFIG_HOME` holding a `hypr/hyprpaper.conf`).
+
+The **Display page** (`ui/pages/display.rs`) configures monitors in Hyprland:
+a map of the enabled monitors at their logical sizes, where a dragged one is
+always put against another's edge and never over it (`displays::place`), and
+the selected monitor's resolution, refresh rate, scale (only those giving a
+whole logical size, from `[displays] scales`), rotation, flip, VRR and on/off.
+`display_manager.rs` owns a thread that applies layouts as `hl.monitor`
+rules sent with `hyprctl eval` over the socket (`hyprland::eval`). Things
+learned against Hyprland 0.57 that the design depends on:
+
+- `eval` answers before the monitors change, and a move raises no event, so
+  `send` waits until `j/monitors all` shows the rules before publishing.
+- A monitor the config places `auto` is moved whenever another moves, so
+  Apply, Revert and re-applying always send a rule for *every* monitor.
+- `hyprctl reload` drops every `eval`'d rule; disabling a monitor reports it
+  removed, enabling it added. Re-applying is therefore idempotent (nothing is
+  sent unless something differs) and skipped while a layout is on trial.
+
+Resolution is a dropdown (`layout::dropdown`/`dropdown_list`: the list is
+painted last in its own layer, ends at the window's bottom and scrolls,
+with the wheel routed to it through `Pages::scroll`); scale is a
+`controls::stepped_slider` over the valid scales. Apply puts a layout on
+trial, shown as a modal over the whole settings window on any page
+(`display::paint_trial_modal`, painted by `ControlCenter::paint_window`,
+which keeps the pointer, the wheel and the nav rail from what is under
+it); unless Keep comes within `[displays] confirm_s` the old one is sent back, by the thread's own timeout, so it
+works with the window closed. Kept layouts are saved per *set* of connected
+monitors (identified by description, so a port change does not matter) in
+`$XDG_STATE_HOME/stratum/displays.json`, and applied at start, after
+`configreloaded`, and on `monitoradded`/`monitorremoved`.
+"Use Hyprland config" forgets the set's layout and reloads.
 
 The **equalizer** is a settings page (`ui/pages/equalizer.rs`). `EqModel` is
 the pure, tested state (QML's editing rules and curve model); the blocking
@@ -179,7 +246,9 @@ audio manager re-applies each output's last preset, which saves it again.
 Settings pages find clicks as a pressed edge between paints, so the window
 latches a press (`settings_press`) until it has painted once with it; a press
 and release arriving together were otherwise never seen. Text fields in a page
-get keys only while the settings window has keyboard focus.
+get keys only while the settings window has keyboard focus. Every pointer
+event over the window marks it dirty: without that, hover and drags were
+only seen when something else repainted.
 
 **Wi-Fi connect** (`stratum_sys::managers::wifi::connect`) uses NetworkManager's
 D-Bus API, never `nmcli … password`: a command line is readable by every local
@@ -282,6 +351,24 @@ password). On a private `dbus-launch` bus, call `BeginAuthentication`
 (`sssa{ss}sa(sa{sv})`) and `CancelAuthentication` with `busctl --address`.
 `STRATUM_POLKIT_SUBJECT_PID` registers with real polkitd for one process only.
 polkit 127's `pkexec` is not setuid; use `pkcheck --process` instead.
+
+**Testing against Hyprland without touching the session.** Never apply
+monitor rules to the user's Hyprland. Use a nested Hyprland (it opens as a
+window in the session; headless sway's xdg-shell is too old to host it) with
+fake outputs (`hyprctl output create headless T1`). **It must be isolated
+from systemd**: on start Hyprland imports its `WAYLAND_DISPLAY`,
+`HYPRLAND_INSTANCE_SIGNATURE`, `PATH` and `XDG_DATA_DIRS` into the user
+manager and starts `hyprland-session.target`, and on exit it stops
+`graphical-session.target` and unsets them. That restarted the installed
+shell inside the nested window, then stopped it; the `HYPRLAND_NO_SD_*`
+variables did not prevent the import. What works: give it its own
+`XDG_RUNTIME_DIR` (`/run/user/$UID/<short>`) with `WAYLAND_DISPLAY` as the
+absolute path of the session's socket, `DBUS_SESSION_BUS_ADDRESS` pointing
+nowhere, and stub `systemctl` and `dbus-update-activation-environment` first
+in `PATH`; diff `systemctl --user show-environment` before and after, and
+end it with `SIGKILL`. Run the dev shell with the same runtime dir and
+signature. A virtual pointer's absolute coordinates span the current layout's
+bounds, which change as monitors move.
 
 **Overlays on wlroots (sway).** Hyprland is lenient where wlroots is not; two
 rules found in sway, both handled by `SurfaceEntry`:
@@ -489,6 +576,16 @@ format, one draw call split into scissored segments. Notable invariants:
   `local.x` (`radius` = `RADIUS_STROKE`). Fills and round-capped strokes are
   still hard-edged: lyon puts same-side vertices next to each other in round
   caps, which that distance cannot describe.
+- Within a layer, all text draws after all geometry. Something that must
+  cover text (a dropdown's open list, a modal) calls
+  `DisplayList::push_layer` first: a later layer draws entirely over the
+  earlier ones. `pop_clip` inside another clip re-sets the parent, since
+  the renderer's `PopClip` clears the scissor.
+- Pictures too large for the 1024² atlas (the switcher's wallpapers) are
+  `DisplayList::push_texture`: a texture of their own per key, drawn in
+  order into any quadrilateral, freed once a frame no longer draws them
+  and on `release_backdrop`. Batch segments carry the texture they bind.
+  Their edges are hard; stroke a path over them.
 - Clear to `Color::TRANSPARENT`, never a theme colour with zero alpha. The
   swapchain is premultiplied, so colour under zero alpha is *added* to what is
   below: the strip beside the rail that holds the inverted corners came out

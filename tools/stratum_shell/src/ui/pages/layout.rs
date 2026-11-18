@@ -342,6 +342,183 @@ pub fn text_buttons(
     (x + gap, hit)
 }
 
+/// Chips from `(x, y)`, left to right, wrapping within `width`; the one
+/// at `selected` is filled. Returns the bottom of the last row and the
+/// index clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn chip_flow(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    x: f32,
+    y: f32,
+    width: f32,
+    labels: &[String],
+    selected: Option<usize>,
+    input: &InputState,
+    clicked: bool,
+) -> (f32, Option<usize>) {
+    let gap = ctx.metrics.page.grid_gap * 0.5;
+    let height = ctx.metrics.page.badge;
+    let (mut cx, mut cy) = (x, y);
+    let mut hit = None;
+    for (i, label) in labels.iter().enumerate() {
+        let w = text_button_width(ctx, label);
+        if cx > x && cx + w > x + width {
+            cx = x;
+            cy += height + gap;
+        }
+        if chip(ctx, list, cx, cy, label, selected == Some(i), input, clicked) {
+            hit = Some(i);
+        }
+        cx += w + gap;
+    }
+    (cy + height, hit)
+}
+
+/// A dropdown's closed face in `rect`: the chosen option and a chevron in a
+/// framed box. Returns whether it was clicked; the owner keeps whether it is
+/// open and paints [`dropdown_list`] last, so the list lies over the page.
+pub fn dropdown(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    rect: Rect,
+    label: &str,
+    open: bool,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let theme = ctx.theme.clone();
+    let hot = hovered(input, rect);
+    let face = Rect { radius: m.button_radius, ..rect };
+    let fill = if hot { mix(theme.surface_highest, theme.text_main, 0.06) } else { theme.surface_highest };
+    let (border, width) = if open { (theme.primary, m.outline_active) } else { (theme.outline, m.outline) };
+    ui::paint_frame(list, face, width, border, fill);
+    let pad = m.card_padding * 0.75;
+    let chevron = rect.height;
+    let text_w = (rect.width - pad - chevron).max(0.0);
+    let text = ui::elide(ctx, label, typo.body, typo.weight_regular, text_w);
+    ui::paint_text_vcentered(ctx, list, &text, rect.x + pad, rect, typo.body, typo.weight_regular, theme.text_main);
+    let glyph = if open { "\u{f0143}" } else { "\u{f0140}" };
+    let glyph_rect = self::rect(rect.x + rect.width - chevron, rect.y, chevron, rect.height);
+    ui::paint_icon_centered(ctx, list, glyph, glyph_rect, typo.body, theme.text_muted);
+    hot && clicked
+}
+
+/// How wide a [`dropdown`] must be to show the longest of `options`.
+pub fn dropdown_width(ctx: &mut PaintCtx<'_>, options: &[String], height: f32) -> f32 {
+    let size = ctx.metrics.typography.body;
+    let widest = options.iter().map(|o| ctx.measure(o, size)).fold(0.0, f32::max);
+    widest + ctx.metrics.page.card_padding * 0.75 + height
+}
+
+/// An open dropdown's options, in a card below `anchor`. Paint it after
+/// everything it may cover (in a layer of its own, to cover text too).
+///
+/// The card stops at the bottom of the visible area (the clip in effect),
+/// leaving `keep_rows` rows at least, and scrolls within itself: `scroll` is
+/// the owner's offset, set to show the chosen option when `None` and kept
+/// in range here; [`scroll_list`] moves it with the wheel. Returns the card,
+/// so the owner can keep clicks, hover and the wheel from reaching what is
+/// under it next frame, and the option clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn dropdown_list(
+    ctx: &mut PaintCtx<'_>,
+    list: &mut DisplayList,
+    anchor: Rect,
+    options: &[String],
+    selected: Option<usize>,
+    scroll: &mut Option<f32>,
+    input: &InputState,
+    clicked: bool,
+) -> (Rect, Option<usize>) {
+    let m = ctx.metrics.page.clone();
+    let typo = ctx.metrics.typography.clone();
+    let theme = ctx.theme.clone();
+    let inset = m.label_gap * 0.5;
+    let row_h = m.editor_row_height;
+    let pad = m.card_padding * 0.75;
+    // At least as wide as its face, and wide enough for every option and
+    // the check beside the chosen one.
+    let widest = options.iter().map(|o| ctx.measure(o, typo.body)).fold(0.0, f32::max);
+    let width = anchor.width.max(widest + pad + row_h + inset * 2.0);
+    let top = anchor.y + anchor.height + inset;
+    let content = row_h * options.len() as f32;
+    let room = list.clip().map_or(f32::INFINITY, |c| c.y + c.height - inset - top - inset * 2.0);
+    let (shown, max_scroll, offset) = list_window(options.len(), row_h, room, m.dropdown_rows, selected, *scroll);
+    *scroll = Some(offset);
+    let card = Rect { radius: m.button_radius, ..rect(anchor.x, top, width, shown + inset * 2.0) };
+    ui::paint_frame(list, card, m.outline, theme.outline, theme.surface_high);
+
+    let viewport = rect(card.x, card.y + inset, card.width, shown);
+    list.push_clip(viewport);
+    let mut hit = None;
+    let first = (offset / row_h).floor() as usize;
+    let last = (((offset + shown) / row_h).ceil() as usize).min(options.len());
+    for (i, option) in options.iter().enumerate().take(last).skip(first) {
+        let row = rect(card.x + inset, viewport.y + row_h * i as f32 - offset, card.width - inset * 2.0, row_h);
+        let hot = hovered(input, row) && hovered(input, viewport);
+        let chosen = selected == Some(i);
+        if hot || chosen {
+            let tint = if chosen { mix(theme.surface_high, theme.primary, 0.18) } else { theme.surface_highest };
+            list.push_rect(Rect { radius: m.button_radius * 0.75, color: tint, ..row });
+        }
+        let check = row.height;
+        let text = ui::elide(ctx, option, typo.body, typo.weight_regular, (row.width - pad - check).max(0.0));
+        let color = if chosen { theme.primary } else { theme.text_main };
+        ui::paint_text_vcentered(ctx, list, &text, row.x + pad - inset, row, typo.body, typo.weight_regular, color);
+        if chosen {
+            let mark = rect(row.x + row.width - check, row.y, check, row.height);
+            ui::paint_icon_centered(ctx, list, "\u{f00c}", mark, typo.caption, theme.primary);
+        }
+        if hot && clicked {
+            hit = Some(i);
+        }
+    }
+    list.pop_clip();
+
+    // A thumb along the right edge says there is more.
+    if max_scroll > 0.0 {
+        let track = rect(card.x + card.width - inset * 0.5 - m.scroll_thumb, viewport.y, m.scroll_thumb, shown);
+        let thumb_h = (shown * shown / content).max(m.scroll_thumb * 4.0).min(shown);
+        let thumb_y = track.y + (shown - thumb_h) * (offset / max_scroll);
+        list.push_rect(Rect {
+            radius: m.scroll_thumb * 0.5,
+            color: theme.outline,
+            ..rect(track.x, thumb_y, track.width, thumb_h)
+        });
+    }
+    (card, hit)
+}
+
+/// How much of a list of `rows` rows to show in `room` (never fewer than
+/// `min_rows` rows, if it has them), how far it can scroll, and where it is
+/// scrolled: `scroll`, kept in range, or at first the chosen row, centred.
+fn list_window(
+    rows: usize,
+    row_h: f32,
+    room: f32,
+    min_rows: u32,
+    selected: Option<usize>,
+    scroll: Option<f32>,
+) -> (f32, f32, f32) {
+    let content = row_h * rows as f32;
+    let floor = row_h * min_rows.min(rows as u32) as f32;
+    let shown = content.min(room.max(floor));
+    let max_scroll = (content - shown).max(0.0);
+    let offset = scroll
+        .unwrap_or_else(|| selected.map_or(0.0, |i| row_h * i as f32 - (shown - row_h) * 0.5))
+        .clamp(0.0, max_scroll);
+    (shown, max_scroll, offset)
+}
+
+/// Move a [`dropdown_list`]'s `scroll` by `delta` pixels; the next paint
+/// keeps it in range.
+pub fn scroll_list(scroll: &mut Option<f32>, delta: f32) {
+    *scroll = Some((scroll.unwrap_or(0.0) + delta).max(0.0));
+}
+
 /// A full-width list row: a badge, a title over a caption, and an optional
 /// glyph at the right (a check, a chevron). `active` tints it. Returns
 /// whether the pointer is over it.
@@ -537,6 +714,25 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_list_fits_its_room_and_scrolls() {
+        // 13 rows of 10 in room for 5: shows 5, scrolls the other 8.
+        let (shown, max, offset) = list_window(13, 10.0, 50.0, 4, None, None);
+        assert_eq!((shown, max, offset), (50.0, 80.0, 0.0));
+        // The chosen row starts centred, within range.
+        assert_eq!(list_window(13, 10.0, 50.0, 4, Some(6), None).2, 40.0);
+        assert_eq!(list_window(13, 10.0, 50.0, 4, Some(12), None).2, 80.0);
+        // A scroll is kept in range.
+        assert_eq!(list_window(13, 10.0, 50.0, 4, None, Some(500.0)).2, 80.0);
+    }
+
+    #[test]
+    fn a_list_shows_its_minimum_rows_however_little_room_there_is() {
+        assert_eq!(list_window(13, 10.0, 5.0, 4, None, None).0, 40.0);
+        // And a short list takes only its own height.
+        assert_eq!(list_window(2, 10.0, 500.0, 4, None, None), (20.0, 0.0, 0.0));
+    }
 
     #[test]
     fn column_is_centred_once_capped() {

@@ -336,36 +336,51 @@ pub struct NotificationCardMetrics {
     pub caret_width: f32,
 }
 
-/// The theme switcher overlay. Defaults follow `modules/ThemeSwitcher.qml`.
+/// The theme switcher: a band of slanted slices, one per theme, across the
+/// output it opens on.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeSwitcherMetrics {
-    pub width: f32,
-    pub padding: f32,
-    /// Gap between the card's rows.
-    pub spacing: f32,
-    pub radius: f32,
-    pub border: f32,
-    pub title: f32,
-    /// "Current: …".
-    pub subtitle: f32,
+    /// Height of the band, as a fraction of the output's height.
+    pub band_height: f32,
+    /// Width of an unfocused slice.
+    pub slice_width: f32,
+    /// Width of the focused slice, as a multiple of the band's height.
+    pub focus_width: f32,
+    pub slice_gap: f32,
+    /// How far a slice's top leans right of its bottom, as a fraction of
+    /// the band's height.
+    pub skew: f32,
+    pub outline: f32,
+    pub outline_focus: f32,
+    /// The palette strip along a slice's bottom edge.
+    pub footer_height: f32,
+    /// Dimming over the desktop, 0..1 of `bg_dark`.
+    pub scrim: f32,
+    /// The focused theme's name, under the band.
+    pub name_text: f32,
+    /// Its wallpaper line, and the "current" mark.
+    pub caption_text: f32,
+    /// The key hints at the bottom.
+    pub hint_text: f32,
+    /// Gap between the band and the label, and between the label's lines.
+    pub label_gap: f32,
+    pub swatch: f32,
     pub search_height: f32,
     pub search_radius: f32,
     pub search_padding: f32,
     pub search_text: f32,
     pub caret_width: f32,
-    pub row_height: f32,
-    pub row_gap: f32,
-    pub row_radius: f32,
-    pub row_padding: f32,
-    pub row_text: f32,
-    /// The "No matching themes" box.
-    pub empty_height: f32,
-    pub empty_text: f32,
-    /// Rows shown before the list scrolls.
-    pub max_rows: usize,
-    /// Dimming behind the card (QML `#90000000`).
-    pub scrim_alpha: f32,
+    /// Opening: how long each slice takes to rise in, and the delay
+    /// between one slice and the next.
+    pub open_ms: u32,
+    pub stagger_ms: u32,
+    /// How long the band takes to slide to a new focus.
+    pub slide_ms: u32,
+    /// How long it takes to fade out.
+    pub close_ms: u32,
+    /// How far slices rise while opening.
+    pub rise: f32,
 }
 
 /// The dashboard overlay.
@@ -899,6 +914,21 @@ pub struct PageMetrics {
     pub channel_height: f32,
     pub channel_segments: u32,
     pub channel_track: f32,
+    /// Display page: the monitor map's height, and how near (in pixels on
+    /// the map) a dragged monitor's edge snaps to another's.
+    pub display_map_height: f32,
+    pub display_snap: f32,
+    /// A dropdown's open list: the fewest rows it shows however little room
+    /// is left below it, and its scroll thumb's width.
+    pub dropdown_rows: u32,
+    pub scroll_thumb: f32,
+    /// A modal over the settings window (keeping a display layout): its
+    /// card's width, and how much it dims the window.
+    pub modal_width: f32,
+    pub modal_scrim: f32,
+    /// Theme page: the narrowest a wallpaper thumbnail may be before the
+    /// grid drops a column.
+    pub wallpaper_min_width: f32,
     /// The card a page shows when it has nothing to list.
     pub empty_height: f32,
     /// How long an action tile waits for its confirming second click.

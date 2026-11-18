@@ -407,6 +407,9 @@ pub struct Artwork {
     pub avatar: Option<Image>,
 }
 
+/// A file as resolved through any symlink, and when it was modified.
+pub type FileStamp = Option<(PathBuf, std::time::SystemTime)>;
+
 /// Where the artwork comes from and how it is prepared.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArtworkSpec {
@@ -416,8 +419,10 @@ pub struct ArtworkSpec {
     pub blur: f32,
     /// Avatar edge in pixels: its logical size times the largest output scale.
     pub avatar_px: u32,
-    /// Modification times, so a changed wallpaper is decoded again.
-    pub stamps: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
+    /// What each file resolves to and when it was modified, so a changed
+    /// wallpaper is decoded again: the wallpaper is usually a symlink that
+    /// a theme switch points elsewhere, maybe at a file of the same age.
+    pub stamps: (FileStamp, FileStamp),
 }
 
 impl ArtworkSpec {
@@ -429,9 +434,9 @@ impl ArtworkSpec {
         let wallpaper = expand_home(&config.wallpaper);
         let avatar = expand_home(&config.avatar);
         let stamp = |path: &Option<PathBuf>| {
-            path.as_ref()
-                .and_then(|p| std::fs::metadata(p).ok())
-                .and_then(|m| m.modified().ok())
+            let target = std::fs::canonicalize(path.as_ref()?).ok()?;
+            let modified = std::fs::metadata(&target).ok()?.modified().ok()?;
+            Some((target, modified))
         };
         let stamps = (stamp(&wallpaper), stamp(&avatar));
         Self {

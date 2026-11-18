@@ -182,6 +182,16 @@ impl App {
         });
         // Seed once so the first frame is correct.
         self.state.hypr.set(crate::hyprland::HyprState::read());
+
+        // Monitor layouts: applies the saved one now, and again after every
+        // config reload and hotplug.
+        let confirm = std::time::Duration::from_secs(self.config.displays.confirm_s.into());
+        self.display_tx = Some(crate::display_manager::start(Arc::clone(&self.state), confirm));
+
+        // Wallpapers: thumbnails for the Theme page, and applying them.
+        let places = crate::wallpapers::Places::new(&self.config.wallpapers, self.config.theme_switcher.preview_px);
+        self.wallpaper_tx = Some(crate::wallpapers::start(Arc::clone(&self.state), places));
+        self.state.theme_wallpapers.set(self.wallpaper_links.clone());
     }
 
     /// Reload the configuration when the file changed on disk.

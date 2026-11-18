@@ -81,17 +81,15 @@ impl App {
             ("theme", function @ ("open" | "close" | "toggle")) => {
                 // Opens where the user is looking, like the other overlays.
                 let output = self.focused_output();
-                let themes = self.theme_names();
-                let current = self.config.theme.clone();
+                let open = self.theme_switcher.is_open();
                 match function {
-                    "open" if !self.theme_switcher.is_open() => {
-                        self.theme_switcher.open_on(&output, &themes, &current)
+                    "open" | "toggle" if !open => self.open_theme_switcher(&output),
+                    "close" | "toggle" => {
+                        let action = self.theme_switcher.cancel();
+                        self.apply_switcher_action(action);
                     }
-                    "close" => self.theme_switcher.close(),
-                    "toggle" => self.theme_switcher.toggle(&output, &themes, &current),
                     _ => {}
                 }
-                self.mark_themes_dirty();
             }
             ("dashboard", function @ ("open" | "close" | "toggle")) => {
                 // The parser allows one argument; only the config knows the

@@ -39,6 +39,9 @@ pub struct Config {
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
     pub screenshot: ScreenshotConfig,
+    pub displays: DisplaysConfig,
+    pub wallpapers: WallpapersConfig,
+    pub theme_switcher: ThemeSwitcherConfig,
     pub dashboard: DashboardConfig,
     pub render: RenderConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
@@ -83,6 +86,21 @@ impl Config {
         }
         for (name, theme) in &self.themes {
             theme.to_theme().map_err(|err| format!("themes.{name}: {err}"))?;
+        }
+        if self.theme_switcher.wallpaper_delay_ms > 5000 {
+            return Err("theme_switcher.wallpaper_delay_ms must be at most 5000".into());
+        }
+        if !(256..=4096).contains(&self.theme_switcher.preview_px) {
+            return Err("theme_switcher.preview_px must be 256-4096".into());
+        }
+        if !(16..=1024).contains(&self.wallpapers.thumb_px) {
+            return Err("wallpapers.thumb_px must be 16-1024".into());
+        }
+        if !(5..=600).contains(&self.displays.confirm_s) {
+            return Err("displays.confirm_s must be 5-600".into());
+        }
+        if self.displays.scales.is_empty() || self.displays.scales.iter().any(|s| !(*s >= 0.25 && *s <= 8.0)) {
+            return Err("displays.scales must list scales from 0.25 to 8".into());
         }
         if self.screenshot.pen_colors.is_empty() {
             return Err("screenshot.pen_colors is empty".into());
@@ -481,6 +499,43 @@ pub struct BehaviorConfig {
     pub polkit: bool,
 }
 
+/// The theme switcher's behaviour; its sizes are `[metrics.theme_switcher]`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeSwitcherConfig {
+    /// A theme's wallpaper is previewed once the focus has rested on it
+    /// this long, so browsing quickly does not make hyprpaper load every
+    /// image passed.
+    pub wallpaper_delay_ms: u32,
+    /// The long edge of a slice's wallpaper, in pixels.
+    pub preview_px: u32,
+}
+
+/// Wallpapers, for linking them to themes and generating themes from them.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WallpapersConfig {
+    /// Where the wallpapers are. `~/` is expanded.
+    pub dir: String,
+    /// The symlink to the wallpaper shown, which hyprpaper and the lock
+    /// screen read; applying a wallpaper points it there. A real file here
+    /// is left alone.
+    pub current: String,
+    /// Width of a thumbnail in pixels.
+    pub thumb_px: u32,
+}
+
+/// The Display page's monitor settings.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisplaysConfig {
+    /// Seconds an applied layout waits to be kept before it is put back.
+    pub confirm_s: u32,
+    /// The scales offered; each monitor shows those that give its mode a
+    /// whole number of logical pixels.
+    pub scales: Vec<f32>,
+}
+
 /// The screenshot viewer's annotation pen.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -792,6 +847,22 @@ mod tests {
 
     fn with_user(user: &str) -> Result<Config, ConfigError> {
         Config::from_layers(&[(Path::new("defaults"), DEFAULTS), (Path::new("user"), user)])
+    }
+
+    #[test]
+    fn the_monochrome_theme_ships_and_reads_well() {
+        use crate::ui::color::contrast;
+        let config = Config::test_defaults();
+        let theme = config.themes["monochrome"].to_theme().unwrap();
+        assert!(contrast(theme.text_main, theme.bg_main) >= 7.0);
+        assert!(contrast(theme.text_muted, theme.bg_main) >= 4.5);
+        for accent in [theme.primary, theme.secondary, theme.tertiary, theme.success, theme.warning, theme.error] {
+            assert!(contrast(accent, theme.bg_main) >= 3.0);
+        }
+        // Monochrome: the backgrounds, text and accents have no hue.
+        for c in [theme.bg_main, theme.bg_widget, theme.bg_hover, theme.bg_dark, theme.text_main, theme.primary, theme.tertiary] {
+            assert!((c.r - c.g).abs() < 1e-6 && (c.g - c.b).abs() < 1e-6);
+        }
     }
 
     #[test]
