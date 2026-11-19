@@ -158,6 +158,15 @@ impl App {
                     _ => self.close_launcher(),
                 }
             }
+            ("clipboard", "clear") => {
+                let store = self.clipboard_store().ok_or_else(|| IpcError::Failed("the clipboard history is off".into()))?;
+                store
+                    .lock()
+                    .map_err(|_| IpcError::Failed("the clipboard history is unavailable".into()))?
+                    .clear()
+                    .map_err(|err| IpcError::Failed(format!("could not clear the clipboard history: {err}")))?;
+                info!("clipboard history cleared");
+            }
             ("idle", function) => {
                 let inhibited = match function {
                     "inhibit" => true,

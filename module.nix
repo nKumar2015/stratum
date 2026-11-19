@@ -66,7 +66,6 @@ in {
       # Programs the shell runs.
       ++ (with pkgs; [
         brightnessctl # brightness, and the OSD's fallback reading
-        cliphist # the clipboard history the launcher shows (`wl-paste --watch cliphist store` records it)
         curl # the dashboard's weather and calendar sync
         grim # screenshots
         networkmanager # nmcli
@@ -75,7 +74,7 @@ in {
         playerctl # media controls
         upower # battery details
         util-linux # setsid, which the launcher starts apps with
-        wl-clipboard # copying screenshots
+        wl-clipboard # copying screenshots, and restoring clipboard history entries
         xdg-utils # xdg-open, for links in calendar events
       ]);
 

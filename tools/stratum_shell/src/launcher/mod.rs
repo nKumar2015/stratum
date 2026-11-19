@@ -1,6 +1,6 @@
 //! The launcher: a search box over applications, open windows, shell
 //! commands and a calculator (`stratum-cli launcher toggle`), and in modes
-//! of its own over emoji and the clipboard history
+//! of its own over emoji and the shell's clipboard history
 //! (`stratum-cli launcher toggle emoji|clipboard`).
 //!
 //! It holds nothing while closed: the desktop entries, windows and results
@@ -29,7 +29,7 @@ pub enum Mode {
     #[default]
     All,
     Emoji,
-    /// cliphist's history.
+    /// The shell's clipboard history.
     Clipboard,
 }
 
@@ -47,7 +47,7 @@ impl Mode {
     }
 }
 
-/// The clipboard history, which loads off the event loop.
+/// The clipboard history, or why there is none.
 #[derive(Debug, Default)]
 enum Clips {
     #[default]
@@ -103,11 +103,10 @@ pub enum LauncherAction {
     Copy(String),
     FocusWindow(String),
     Ipc(IpcCall),
-    /// Put clipboard history entry `id` back on the clipboard.
-    RestoreClip(String),
-    /// Remove this `cliphist list` line from the history. The launcher
-    /// stays open.
-    DeleteClip(String),
+    /// Put a clipboard history entry back on the clipboard.
+    RestoreClip(clipboard::Clip),
+    /// Remove a clipboard history entry, by id. The launcher stays open.
+    DeleteClip(u64),
 }
 
 #[derive(Default)]
@@ -120,8 +119,8 @@ pub struct Launcher {
     clips: Clips,
     /// Image entries' thumbnails by id (`None` while decoding or when it
     /// failed), and the ids a paint found missing.
-    thumbs: HashMap<String, Option<crate::icons::IconImage>>,
-    thumb_requests: Vec<String>,
+    thumbs: HashMap<u64, Option<crate::icons::IconImage>>,
+    thumb_requests: Vec<(u64, std::path::PathBuf)>,
     /// The colour emoji font (`[launcher] emoji_font`).
     emoji_font: Option<std::sync::Arc<str>>,
     field: TextField,
@@ -154,8 +153,8 @@ impl Launcher {
     }
 
     /// Open on `output` in `mode`. All searches the apps it reads and the
-    /// given windows and commands; the clipboard history arrives later
-    /// through [`Launcher::set_clips`].
+    /// given windows and commands; the clipboard history is given through
+    /// [`Launcher::set_clips`].
     pub fn open_on(&mut self, output: &str, mode: Mode, windows: Vec<Window>, commands: Vec<Command>) {
         *self = Self::default();
         self.mode = mode;
@@ -180,7 +179,8 @@ impl Launcher {
         self.emoji_font = Some(std::sync::Arc::from(family));
     }
 
-    /// The clipboard history, listed off the event loop.
+    /// The clipboard history, or why there is none. Given again when a
+    /// copy is made while the list is open, so the query stays.
     pub fn set_clips(&mut self, clips: Result<Vec<clipboard::Clip>, String>) {
         if self.is_open() && self.mode == Mode::Clipboard {
             self.clips = clips.map_or_else(Clips::Failed, Clips::Ready);
@@ -189,7 +189,7 @@ impl Launcher {
     }
 
     /// A decoded thumbnail for an image entry.
-    pub fn set_thumb(&mut self, id: String, image: Option<crate::icons::IconImage>) {
+    pub fn set_thumb(&mut self, id: u64, image: Option<crate::icons::IconImage>) {
         if self.is_open() {
             self.thumbs.insert(id, image);
         }
@@ -197,7 +197,7 @@ impl Launcher {
 
     /// Image entries the last paint showed without a thumbnail, each asked
     /// for once.
-    pub fn take_thumb_requests(&mut self) -> Vec<String> {
+    pub fn take_thumb_requests(&mut self) -> Vec<(u64, std::path::PathBuf)> {
         std::mem::take(&mut self.thumb_requests)
     }
 
@@ -242,7 +242,7 @@ impl Launcher {
                         .iter()
                         .enumerate()
                         .filter(|(_, c)| lower.is_empty() || c.preview.to_lowercase().contains(&lower))
-                        // Newest first, as cliphist lists them.
+                        // Newest first, as the store keeps them.
                         .map(|(i, _)| Item { kind: Kind::Clip(i), score: -(i as f32) })
                         .collect()
                 }
@@ -383,7 +383,7 @@ impl Launcher {
         let selected = self.selected;
         self.refilter();
         self.select(selected, rows);
-        LauncherAction::DeleteClip(clip.line)
+        LauncherAction::DeleteClip(clip.id)
     }
 
     /// Act on result `index`, closing the launcher.
@@ -403,7 +403,7 @@ impl Launcher {
             Kind::Calc(value) => LauncherAction::Copy(value.clone()),
             Kind::Emoji(i) => LauncherAction::Copy(self.emoji[*i].glyph.to_string()),
             Kind::Clip(i) => match &self.clips {
-                Clips::Ready(clips) => LauncherAction::RestoreClip(clips[*i].id.clone()),
+                Clips::Ready(clips) => LauncherAction::RestoreClip(clips[*i].clone()),
                 _ => LauncherAction::None,
             },
         };
@@ -467,9 +467,9 @@ impl Launcher {
                 };
                 let clip = &clips[*i];
                 match &clip.image {
-                    Some(image) => ("Image".to_string(), format!("{} · {}×{}", image.format, image.width, image.height)),
-                    // One line: cliphist keeps a preview's newlines.
-                    None => (clip.preview.split_whitespace().collect::<Vec<_>>().join(" "), String::new()),
+                    Some(clipboard::ImageInfo { format, size: Some((w, h)) }) => ("Image".to_string(), format!("{format} · {w}×{h}")),
+                    Some(image) => ("Image".to_string(), image.format.clone()),
+                    None => (clip.preview.clone(), String::new()),
                 }
             }
         }
@@ -590,12 +590,12 @@ impl Launcher {
             }
             Kind::Clip(i) => match &self.clips {
                 Clips::Ready(clips) if clips[*i].image.is_some() => {
-                    let id = &clips[*i].id;
-                    match self.thumbs.get(id) {
+                    let clip = &clips[*i];
+                    match self.thumbs.get(&clip.id) {
                         Some(image) => image.clone(),
                         None => {
-                            self.thumbs.insert(id.clone(), None);
-                            self.thumb_requests.push(id.clone());
+                            self.thumbs.insert(clip.id, None);
+                            self.thumb_requests.push((clip.id, clip.path.clone()));
                             None
                         }
                     }
@@ -650,6 +650,25 @@ mod tests {
             icon: None,
             argv: vec![name.to_lowercase()],
             terminal: false,
+        }
+    }
+
+    fn clip(id: u64, text: &str) -> clipboard::Clip {
+        clipboard::Clip {
+            id,
+            mime: crate::clipboard::TEXT.into(),
+            preview: text.into(),
+            image: None,
+            path: format!("/clips/{id}").into(),
+        }
+    }
+
+    fn image_clip(id: u64) -> clipboard::Clip {
+        clipboard::Clip {
+            image: Some(clipboard::ImageInfo { format: "png".into(), size: Some((10, 10)) }),
+            mime: "image/png".into(),
+            preview: String::new(),
+            ..clip(id, "")
         }
     }
 
@@ -749,16 +768,16 @@ mod tests {
         let mut l = Launcher::default();
         l.open_on("OUT", Mode::Clipboard, Vec::new(), Vec::new());
         assert!(l.results.is_empty(), "nothing until the history arrives");
-        l.set_clips(Ok(clipboard::parse_list("3\tssh key fingerprint\n2\t[[ binary data 9 KiB png 10x10 ]]\n1\tnix build\n")));
+        l.set_clips(Ok(vec![clip(3, "ssh key fingerprint"), image_clip(2), clip(1, "nix build")]));
         assert_eq!(l.results.len(), 3);
         assert!(matches!(l.results[0].kind, Kind::Clip(0)), "newest first");
         type_text(&mut l, "NIX");
         assert_eq!(l.results.len(), 1);
-        assert_eq!(l.key(Keysym::Delete, None, false, 8), LauncherAction::DeleteClip("1\tnix build".into()));
+        assert_eq!(l.key(Keysym::Delete, None, false, 8), LauncherAction::DeleteClip(1));
         assert!(l.is_open() && l.results.is_empty(), "deleting keeps the launcher open");
         l.key(Keysym::Escape, None, false, 8);
         assert_eq!(l.results.len(), 2);
-        assert_eq!(l.key(Keysym::Return, None, false, 8), LauncherAction::RestoreClip("3".into()));
+        assert_eq!(l.key(Keysym::Return, None, false, 8), LauncherAction::RestoreClip(clip(3, "ssh key fingerprint")));
     }
 
     #[test]
@@ -766,7 +785,7 @@ mod tests {
         let mut l = Launcher::default();
         l.open_on("OUT", Mode::Emoji, Vec::new(), Vec::new());
         let before = l.results.len();
-        l.set_clips(Ok(clipboard::parse_list("1\tx\n")));
+        l.set_clips(Ok(vec![clip(1, "x")]));
         assert_eq!(l.results.len(), before);
     }
 

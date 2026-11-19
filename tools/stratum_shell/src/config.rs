@@ -40,6 +40,7 @@ pub struct Config {
     pub lock: LockConfig,
     pub idle: IdleConfig,
     pub launcher: LauncherConfig,
+    pub clipboard: ClipboardConfig,
     pub screenshot: ScreenshotConfig,
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
@@ -103,6 +104,12 @@ impl Config {
         }
         if self.displays.scales.is_empty() || self.displays.scales.iter().any(|s| !(*s >= 0.25 && *s <= 8.0)) {
             return Err("displays.scales must list scales from 0.25 to 8".into());
+        }
+        if !(1..=10_000).contains(&self.clipboard.max_entries) {
+            return Err("clipboard.max_entries must be 1-10000".into());
+        }
+        if !(1..=1024).contains(&self.clipboard.max_entry_mb) {
+            return Err("clipboard.max_entry_mb must be 1-1024".into());
         }
         if !(1..=20).contains(&self.launcher.rows) {
             return Err("launcher.rows must be 1-20".into());
@@ -812,6 +819,19 @@ pub struct LauncherConfig {
     /// in a systemd scope of its own, detached, so restarting the shell
     /// (whose unit's processes systemd stops together) leaves it running.
     pub launch_prefix: Vec<String>,
+}
+
+/// The clipboard history the shell keeps (`crate::clipboard`).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClipboardConfig {
+    /// Watch the clipboard and keep its history. Read at start. A second
+    /// shell beside the installed one turns it off, or both would record.
+    pub enabled: bool,
+    /// Entries kept; the oldest go first.
+    pub max_entries: usize,
+    /// A copy larger than this is not recorded.
+    pub max_entry_mb: usize,
 }
 
 /// A resolved, ready-to-draw palette.

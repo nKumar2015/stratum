@@ -235,9 +235,13 @@ impl App {
                     || config.sidebar.inverted_corners != self.config.sidebar.inverted_corners
                     || config.metrics.bar.corner_size != self.config.metrics.bar.corner_size;
                 let idle_changed = config.idle != self.config.idle;
+                let clipboard_changed = config.clipboard.max_entries != self.config.clipboard.max_entries;
                 self.config = Arc::new(config);
                 if idle_changed {
                     self.arm_idle();
+                }
+                if clipboard_changed {
+                    self.clipboard_reconfigured();
                 }
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
                 // An open settings window would otherwise keep the old

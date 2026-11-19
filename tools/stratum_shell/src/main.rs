@@ -5,6 +5,7 @@
 //! managers (`stratum_sys`) directly.
 
 mod actions;
+mod clipboard;
 mod config;
 mod custom_themes;
 mod dashboard;

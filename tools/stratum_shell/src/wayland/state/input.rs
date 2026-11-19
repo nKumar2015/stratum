@@ -9,10 +9,12 @@ impl SeatHandler for App {
     }
 
     fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {
-        // Idle notifications need a seat; one may arrive after the start.
+        // Idle notifications and the clipboard watch need a seat; one may
+        // arrive after the start.
         if self.idle_notifications.is_empty() {
             self.arm_idle();
         }
+        self.watch_clipboard_seat();
     }
 
     fn new_capability(

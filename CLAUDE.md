@@ -187,15 +187,22 @@ coverage, so each visible emoji is rasterised in colour by
 `TextEngine::rasterize_color` and drawn as an image, in `[launcher]
 emoji_font` asked for by name: under the theme's font, a monochrome font
 shaped the common ones first. Only the rows on screen keep their images.
-The **clipboard** mode is a viewer over cliphist, which the module
-installs; the session's `wl-paste --watch cliphist store` keeps the history
-(before the module shipped cliphist, that command failed on every copy and
-no history existed). `cliphist list` and image thumbnails (`cliphist
-decode`) run on threads and arrive as `LauncherEvent`s; Return restores an
-entry with `cliphist decode | wl-copy`, and Delete removes it with
-`cliphist delete`, values passed as `$1`, never interpolated into the
-script. Live tests use a scratch `XDG_CACHE_HOME`, where cliphist keeps its
-database. Closing trims the heap (`memory::release_freed`); the first emoji
+The **clipboard** mode shows the shell's own history (`clipboard/`,
+`wayland/state/clipboard.rs`). The shell watches the selection through
+`ext-data-control-v1`; for each copy `clipboard::choose` picks a type (an
+image over text; a copy offering `x-kde-passwordManagerHint` is never
+kept), the owner writes it into a pipe, and one reader thread records the
+copies in order, giving up after 5 s without data or past `[clipboard]
+max_entry_mb`. `clipboard::store` keeps one file per entry, named by id,
+and an index newest first in `$XDG_STATE_HOME/stratum/clipboard/`
+(directory 0700, files 0600); a repeated copy moves up rather than being
+stored twice. Only the index is in memory. Return restores an entry with
+`wl-copy --type <mime> < <file>`, which the watcher then sees as a new copy
+and moves to the top; Delete removes one; `stratum-cli clipboard clear`
+forgets them all. Files are named by id, so thumbnails guess the format
+from the content. (cliphist was never installed: the session's `wl-paste
+--watch cliphist store` failed on every copy.) Live tests copy with the
+real `wl-copy` inside the sandbox and set `XDG_STATE_HOME`. Closing trims the heap (`memory::release_freed`); the first emoji
 use leaves ~4 MB of font caches, which do not grow after.
 
 **Key repeat** comes from SCTK's calloop timer at the compositor's rate
@@ -559,9 +566,10 @@ every commit.
 
 The installed shell owns `org.freedesktop.Notifications`,
 `org.kde.StatusNotifierWatcher`, the polkit agent, the idle stages and the
-logind sleep lock, and the IPC socket. A second shell needs
+logind sleep lock, the clipboard history, and the IPC socket. A second shell needs
 `[behavior] tray = false`, `notifications = false`, `polkit = false`,
-`[idle] enabled = false` and its own `STRATUM_SOCKET`. To exercise notifications or the
+`[idle] enabled = false`, `[clipboard] enabled = false` and its own
+`STRATUM_SOCKET`. To exercise notifications or the
 tray in a dev build, use a private bus instead:
 
 ```sh

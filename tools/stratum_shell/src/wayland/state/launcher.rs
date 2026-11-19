@@ -10,11 +10,11 @@ use super::idle::Quiet;
 use super::*;
 use crate::launcher::{LauncherAction, Mode};
 
-/// What the launcher's workers finish: the clipboard history, and image
-/// entries' thumbnails.
+/// What the launcher's workers finish: a copy the clipboard history
+/// recorded, and image entries' thumbnails.
 pub(super) enum LauncherEvent {
-    Clips(Result<Vec<crate::launcher::clipboard::Clip>, String>),
-    Thumb(String, Option<crate::icons::IconImage>),
+    ClipsChanged,
+    Thumb(u64, Option<crate::icons::IconImage>),
 }
 
 /// The transparent layer that takes clicks outside the launcher.
@@ -39,7 +39,11 @@ impl App {
         if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
             if let calloop::channel::Event::Msg(event) = event {
                 match event {
-                    LauncherEvent::Clips(clips) => app.launcher.set_clips(clips),
+                    LauncherEvent::ClipsChanged => {
+                        if app.launcher.mode() == Mode::Clipboard {
+                            app.load_clips();
+                        }
+                    }
                     LauncherEvent::Thumb(id, image) => app.launcher.set_thumb(id, image),
                 }
                 app.mark_launcher_dirty();
@@ -49,8 +53,7 @@ impl App {
         }
     }
 
-    /// Open on `output` in `mode`, reading what it searches. The clipboard
-    /// history is listed on a thread: `cliphist` must not block the loop.
+    /// Open on `output` in `mode`, reading what it searches.
     pub(super) fn open_launcher(&mut self, output: &str, mode: Mode) {
         let (windows, commands) = match mode {
             Mode::All => (crate::hyprland::clients(), self.launcher_commands()),
@@ -59,14 +62,7 @@ impl App {
         self.launcher.open_on(output, mode, windows, commands);
         self.launcher.set_emoji_font(&self.config.launcher.emoji_font);
         if mode == Mode::Clipboard {
-            if let Some(sender) = self.launcher_events.clone() {
-                let spawned = std::thread::Builder::new().name("stratum-cliphist".into()).spawn(move || {
-                    let _ = sender.send(LauncherEvent::Clips(crate::launcher::clipboard::list()));
-                });
-                if let Err(err) = spawned {
-                    warn!("could not list the clipboard history: {err}");
-                }
-            }
+            self.load_clips();
         }
         // Sized at every open, so a config reload applies.
         let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows);
@@ -76,6 +72,22 @@ impl App {
             entry.layer.set_margin(margin, 0, 0, 0);
         }
         self.launcher_catcher = self.make_catcher(output);
+        self.mark_launcher_dirty();
+    }
+
+    /// Give the clipboard mode the history (only its index is read).
+    fn load_clips(&mut self) {
+        let clips = match self.clipboard_store() {
+            Some(store) => match store.lock() {
+                Ok(store) => Ok(crate::launcher::clipboard::list(&store)),
+                Err(_) => Err("The clipboard history is unavailable".to_string()),
+            },
+            None if self.config.clipboard.enabled => {
+                Err("The compositor does not let the shell watch the clipboard".to_string())
+            }
+            None => Err("The clipboard history is off ([clipboard] enabled)".to_string()),
+        };
+        self.launcher.set_clips(clips);
         self.mark_launcher_dirty();
     }
 
@@ -136,14 +148,17 @@ impl App {
                     warn!("could not focus window {address}");
                 }
             }
-            LauncherAction::RestoreClip(id) => {
+            LauncherAction::RestoreClip(clip) => {
                 self.launcher_closed();
-                if let Some(command) = crate::launcher::clipboard::restore_command(&id) {
-                    self.actions.push(crate::actions::SystemAction::Spawn(command));
-                }
+                let command = crate::launcher::clipboard::restore_command(&clip);
+                self.actions.push(crate::actions::SystemAction::Spawn(command));
             }
-            LauncherAction::DeleteClip(line) => {
-                self.actions.push(crate::actions::SystemAction::Spawn(crate::launcher::clipboard::delete_command(&line)));
+            LauncherAction::DeleteClip(id) => {
+                if let Some(store) = self.clipboard_store() {
+                    if let Ok(Err(err)) = store.lock().map(|mut s| s.delete(id)) {
+                        warn!("could not delete clipboard entry {id}: {err}");
+                    }
+                }
                 self.mark_launcher_dirty();
             }
             LauncherAction::Ipc(call) => {
@@ -180,6 +195,11 @@ impl App {
                 title: "Clipboard history".into(),
                 glyph: "\u{f0ea}",
                 call: call("launcher", "open", &["clipboard"]),
+            },
+            Command {
+                title: "Clear the clipboard history".into(),
+                glyph: "\u{f0ea}",
+                call: call("clipboard", "clear", &[]),
             },
         ];
         for page in crate::ui::control_center::Page::ALL {
@@ -267,8 +287,8 @@ impl App {
                 if let (false, Some(sender)) = (ids.is_empty(), self.launcher_events.clone()) {
                     let size = self.config.metrics.launcher.icon as u32 * 2;
                     let _ = std::thread::Builder::new().name("stratum-thumbs".into()).spawn(move || {
-                        for id in ids {
-                            let image = crate::launcher::clipboard::thumbnail(&id, size);
+                        for (id, path) in ids {
+                            let image = crate::launcher::clipboard::thumbnail(&path, size);
                             if sender.send(LauncherEvent::Thumb(id, image)).is_err() {
                                 break;
                             }
