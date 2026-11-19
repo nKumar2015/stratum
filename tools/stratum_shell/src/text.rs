@@ -285,6 +285,43 @@ impl TextEngine {
         Some(raster)
     }
 
+    /// `text` (one emoji) in colour, fitted into `size`² pixels and
+    /// premultiplied, for drawing as an image: text runs keep only a
+    /// glyph's coverage. `None` when the font that shapes it has no colour
+    /// glyph for it. Not cached here; the caller keeps what it shows.
+    pub fn rasterize_color(&mut self, text: &str, family: &Arc<str>, size: u32) -> Option<crate::icons::IconImage> {
+        use swash::scale::image::Content;
+        let style = TextStyle { family: Arc::clone(family), size: size as f32, weight: 400, color: Color::WHITE };
+        // An emoji sequence (a flag, a family) shapes to one glyph.
+        let glyph = *self.shape(text, &style, 0.0, 0.0).glyphs.first()?;
+        let (key, _, _) = cosmic_text::CacheKey::new(
+            glyph.font_id,
+            glyph.glyph_id,
+            size as f32,
+            (0.0, 0.0),
+            cosmic_text::Weight(400),
+            cosmic_text::CacheKeyFlags::empty(),
+        );
+        let image = self.swash.get_image_uncached(&mut self.font_system, key)?;
+        let (width, height) = (image.placement.width, image.placement.height);
+        if image.content != Content::Color || width == 0 || height == 0 {
+            return None;
+        }
+        let mut rgba = image::RgbaImage::from_raw(width, height, image.data)?;
+        if width > size || height > size {
+            rgba = image::imageops::thumbnail(&rgba, size.min(width), size.min(height));
+        }
+        let (width, height) = rgba.dimensions();
+        let mut pixels = rgba.into_raw();
+        for px in pixels.chunks_exact_mut(4) {
+            let a = u16::from(px[3]);
+            for c in &mut px[..3] {
+                *c = (u16::from(*c) * a / 255) as u8;
+            }
+        }
+        Some(crate::icons::IconImage { width, height, pixels: pixels.into() })
+    }
+
     /// Rasterize every drawable glyph in a run, in draw order.
     ///
     /// `scale` is the output's buffer scale. Glyphs are rasterized at

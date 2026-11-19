@@ -73,6 +73,7 @@ lock_on_loginctl = true # lock on `loginctl lock-session`; read at start
 [launcher]
 rows = 8                # results shown at once; the list scrolls
 terminal = ["kitty", "-e"] # before a Terminal=true app's command
+emoji_font = "Noto Color Emoji" # a colour font; the picker draws emoji in it
 # Before every app's command. Each app gets a systemd scope of its own, so
 # restarting the shell (systemd stops a unit's processes together) leaves
 # it running. [] runs the command directly.

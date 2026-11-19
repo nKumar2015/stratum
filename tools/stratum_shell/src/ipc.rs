@@ -188,6 +188,19 @@ pub fn parse_request(line: &str) -> Result<IpcCall, IpcError> {
                 args.len()
             )));
         }
+    } else if target == "launcher" && function != "close" {
+        // An optional mode.
+        if args.len() > 1 {
+            return Err(IpcError::BadArgs(format!("launcher {function} expects at most 1 argument, got {}", args.len())));
+        }
+        if let Some(name) = args.first() {
+            if crate::launcher::Mode::from_name(name).is_none() {
+                return Err(IpcError::BadArgs(format!(
+                    "unknown launcher mode: {name} (modes: {})",
+                    crate::launcher::Mode::NAMES.join(", ")
+                )));
+            }
+        }
     } else if target == "todo" {
         // The words of an unquoted `todo add buy milk`, joined by the shell.
         if args.iter().all(|a| a.trim().is_empty()) {
@@ -358,6 +371,15 @@ fn handle_client(stream: UnixStream, tx: &calloop::channel::Sender<Request>) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn launcher_modes_are_checked() {
+        let line = |args: &str| format!(r#"{{"target":"launcher","function":"toggle","args":[{args}]}}"#);
+        assert!(parse_request(&line("")).is_ok());
+        assert!(parse_request(&line(r#""emoji""#)).is_ok());
+        assert!(matches!(parse_request(&line(r#""nope""#)), Err(IpcError::BadArgs(_))));
+        assert!(matches!(parse_request(&line(r#""emoji","clipboard""#)), Err(IpcError::BadArgs(_))));
+    }
     use super::*;
 
     fn parse(value: Value) -> Result<IpcCall, IpcError> {

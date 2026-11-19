@@ -179,6 +179,25 @@ the other order made sway kill the client (the configure race, under
 default `systemd-run --user --scope … setsid --fork`: a child of the shell
 would be in its unit's cgroup and die with every `systemctl restart`.
 
+It has two more modes (`launcher open|toggle emoji|clipboard`, or the
+Emoji and Clipboard history commands). **Emoji** come from a table compiled
+in (`launcher/emoji.txt`, ~40 KB, generated from Unicode's
+`emoji-test.txt` by `launcher/gen_emoji.py`). Text runs keep only a glyph's
+coverage, so each visible emoji is rasterised in colour by
+`TextEngine::rasterize_color` and drawn as an image, in `[launcher]
+emoji_font` asked for by name: under the theme's font, a monochrome font
+shaped the common ones first. Only the rows on screen keep their images.
+The **clipboard** mode is a viewer over cliphist, which the module
+installs; the session's `wl-paste --watch cliphist store` keeps the history
+(before the module shipped cliphist, that command failed on every copy and
+no history existed). `cliphist list` and image thumbnails (`cliphist
+decode`) run on threads and arrive as `LauncherEvent`s; Return restores an
+entry with `cliphist decode | wl-copy`, and Delete removes it with
+`cliphist delete`, values passed as `$1`, never interpolated into the
+script. Live tests use a scratch `XDG_CACHE_HOME`, where cliphist keeps its
+database. Closing trims the heap (`memory::release_freed`); the first emoji
+use leaves ~4 MB of font caches, which do not grow after.
+
 **Key repeat** comes from SCTK's calloop timer at the compositor's rate
 (`get_keyboard_with_repeat`, and `repeat_key` for compositors that repeat
 themselves), and reaches text fields only (`key_repeat.rs`): the lock and

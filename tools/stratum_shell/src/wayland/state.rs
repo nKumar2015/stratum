@@ -181,6 +181,7 @@ pub struct App {
     launcher: crate::launcher::Launcher,
     launcher_surfaces: Vec<SurfaceEntry>,
     launcher_catcher: Option<launcher::Catcher>,
+    launcher_events: Option<calloop::channel::Sender<launcher::LauncherEvent>>,
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
@@ -392,6 +393,7 @@ impl App {
             launcher: crate::launcher::Launcher::default(),
             launcher_surfaces: Vec::new(),
             launcher_catcher: None,
+            launcher_events: None,
             theme_switcher: crate::theme_switcher::ThemeSwitcher::new(
                 &config_for_cc.metrics.theme_switcher,
                 config_for_cc.theme_switcher.wallpaper_delay_ms,
@@ -477,6 +479,7 @@ impl App {
         app.start_screenshot_events(&loop_handle);
         app.start_polkit_events(&loop_handle);
         app.start_logind(&loop_handle);
+        app.start_launcher_events(&loop_handle);
         app.arm_idle();
         app.create_surfaces(&qh);
         app.start_monitors();

@@ -804,6 +804,10 @@ pub struct LauncherConfig {
     pub rows: usize,
     /// Put before a `Terminal=true` app's command.
     pub terminal: Vec<String>,
+    /// The colour font emoji are drawn in. Asked for by name: a
+    /// monochrome font with the same codepoints (the theme's, or a symbol
+    /// font) would otherwise shape the common ones first.
+    pub emoji_font: String,
     /// Put before every command an app is launched with. The default runs it
     /// in a systemd scope of its own, detached, so restarting the shell
     /// (whose unit's processes systemd stops together) leaves it running.

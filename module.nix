@@ -66,6 +66,7 @@ in {
       # Programs the shell runs.
       ++ (with pkgs; [
         brightnessctl # brightness, and the OSD's fallback reading
+        cliphist # the clipboard history the launcher shows (`wl-paste --watch cliphist store` records it)
         curl # the dashboard's weather and calendar sync
         grim # screenshots
         networkmanager # nmcli

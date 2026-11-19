@@ -8,7 +8,14 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use super::idle::Quiet;
 use super::*;
-use crate::launcher::LauncherAction;
+use crate::launcher::{LauncherAction, Mode};
+
+/// What the launcher's workers finish: the clipboard history, and image
+/// entries' thumbnails.
+pub(super) enum LauncherEvent {
+    Clips(Result<Vec<crate::launcher::clipboard::Clip>, String>),
+    Thumb(String, Option<crate::icons::IconImage>),
+}
 
 /// The transparent layer that takes clicks outside the launcher.
 pub(super) struct Catcher {
@@ -25,11 +32,42 @@ impl Drop for Catcher {
 }
 
 impl App {
-    /// Open on `output`, reading what it searches.
-    pub(super) fn open_launcher(&mut self, output: &str) {
-        let windows = crate::hyprland::clients();
-        let commands = self.launcher_commands();
-        self.launcher.open_on(output, windows, commands);
+    /// Route the launcher's worker results into the event loop.
+    pub(super) fn start_launcher_events(&mut self, loop_handle: &calloop::LoopHandle<'static, App>) {
+        let (tx, channel) = calloop::channel::channel();
+        self.launcher_events = Some(tx);
+        if let Err(err) = loop_handle.insert_source(channel, |event, _, app: &mut App| {
+            if let calloop::channel::Event::Msg(event) = event {
+                match event {
+                    LauncherEvent::Clips(clips) => app.launcher.set_clips(clips),
+                    LauncherEvent::Thumb(id, image) => app.launcher.set_thumb(id, image),
+                }
+                app.mark_launcher_dirty();
+            }
+        }) {
+            warn!("failed to insert launcher event source: {err}");
+        }
+    }
+
+    /// Open on `output` in `mode`, reading what it searches. The clipboard
+    /// history is listed on a thread: `cliphist` must not block the loop.
+    pub(super) fn open_launcher(&mut self, output: &str, mode: Mode) {
+        let (windows, commands) = match mode {
+            Mode::All => (crate::hyprland::clients(), self.launcher_commands()),
+            _ => (Vec::new(), Vec::new()),
+        };
+        self.launcher.open_on(output, mode, windows, commands);
+        self.launcher.set_emoji_font(&self.config.launcher.emoji_font);
+        if mode == Mode::Clipboard {
+            if let Some(sender) = self.launcher_events.clone() {
+                let spawned = std::thread::Builder::new().name("stratum-cliphist".into()).spawn(move || {
+                    let _ = sender.send(LauncherEvent::Clips(crate::launcher::clipboard::list()));
+                });
+                if let Err(err) = spawned {
+                    warn!("could not list the clipboard history: {err}");
+                }
+            }
+        }
         // Sized at every open, so a config reload applies.
         let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows);
         let margin = self.config.metrics.launcher.margin_top as i32;
@@ -54,6 +92,9 @@ impl App {
         self.launcher_catcher = None;
         let icon = self.config.metrics.launcher.icon as u32;
         self.icons.forget(icon * 2);
+        // Its entries, emoji and thumbnails were freed above; hand the pages
+        // back, as the other overlays do on closing.
+        crate::memory::release_freed();
         self.mark_launcher_dirty();
     }
 
@@ -95,6 +136,16 @@ impl App {
                     warn!("could not focus window {address}");
                 }
             }
+            LauncherAction::RestoreClip(id) => {
+                self.launcher_closed();
+                if let Some(command) = crate::launcher::clipboard::restore_command(&id) {
+                    self.actions.push(crate::actions::SystemAction::Spawn(command));
+                }
+            }
+            LauncherAction::DeleteClip(line) => {
+                self.actions.push(crate::actions::SystemAction::Spawn(crate::launcher::clipboard::delete_command(&line)));
+                self.mark_launcher_dirty();
+            }
             LauncherAction::Ipc(call) => {
                 self.launcher_closed();
                 if let Err(err) = self.execute_ipc(&call) {
@@ -124,6 +175,12 @@ impl App {
                 call: call("notifications", "toggleDnd", &[]),
             },
             Command { title: "Stay awake".into(), glyph: "\u{f0176}", call: call("idle", "toggle", &[]) },
+            Command { title: "Emoji".into(), glyph: "\u{f0785}", call: call("launcher", "open", &["emoji"]) },
+            Command {
+                title: "Clipboard history".into(),
+                glyph: "\u{f0ea}",
+                call: call("launcher", "open", &["clipboard"]),
+            },
         ];
         for page in crate::ui::control_center::Page::ALL {
             commands.push(Command {
@@ -204,6 +261,20 @@ impl App {
                 self.launcher.paint(&mut ctx, &mut list, rect, rows);
                 entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
                 entry.dirty = false;
+                // Thumbnails for the image entries just shown, decoded one
+                // after another on a thread.
+                let ids = self.launcher.take_thumb_requests();
+                if let (false, Some(sender)) = (ids.is_empty(), self.launcher_events.clone()) {
+                    let size = self.config.metrics.launcher.icon as u32 * 2;
+                    let _ = std::thread::Builder::new().name("stratum-thumbs".into()).spawn(move || {
+                        for id in ids {
+                            let image = crate::launcher::clipboard::thumbnail(&id, size);
+                            if sender.send(LauncherEvent::Thumb(id, image)).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
             }
             if entry.mapped {
                 entry.set_keyboard_exclusive(true);

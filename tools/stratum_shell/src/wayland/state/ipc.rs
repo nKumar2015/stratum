@@ -143,11 +143,19 @@ impl App {
             ("screenshot", "start") => self.start_screenshot(),
             ("lockscreen", "lock") => self.begin_lock()?,
             ("launcher", function) => {
+                use crate::launcher::Mode;
                 let output = self.focused_output();
+                // The parser has already checked the name.
+                let mode = call.args.first().and_then(|name| Mode::from_name(name)).unwrap_or_default();
+                let open = self.launcher.is_open();
                 match function {
-                    "open" | "toggle" if !self.launcher.is_open() => self.open_launcher(&output),
-                    "close" | "toggle" => self.close_launcher(),
-                    _ => {}
+                    // Toggling into another mode switches to it.
+                    "toggle" if open && self.launcher.mode() == mode => self.close_launcher(),
+                    "open" | "toggle" => {
+                        self.close_launcher();
+                        self.open_launcher(&output, mode);
+                    }
+                    _ => self.close_launcher(),
                 }
             }
             ("idle", function) => {

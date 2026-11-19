@@ -1,5 +1,7 @@
 //! The launcher: a search box over applications, open windows, shell
-//! commands and a calculator (`stratum-cli launcher toggle`).
+//! commands and a calculator (`stratum-cli launcher toggle`), and in modes
+//! of its own over emoji and the clipboard history
+//! (`stratum-cli launcher toggle emoji|clipboard`).
 //!
 //! It holds nothing while closed: the desktop entries, windows and results
 //! are read when it opens and dropped when it closes, and its icons are
@@ -8,13 +10,51 @@
 
 pub mod apps;
 pub mod calc;
+pub mod clipboard;
+pub mod emoji;
 pub mod fuzzy;
+
+use std::collections::HashMap;
 
 use crate::ipc::IpcCall;
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::style::LauncherMetrics;
 use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
+
+/// What the launcher searches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    /// Apps, windows, commands and the calculator.
+    #[default]
+    All,
+    Emoji,
+    /// cliphist's history.
+    Clipboard,
+}
+
+impl Mode {
+    /// The names `stratum-cli launcher open <mode>` takes.
+    pub const NAMES: [&'static str; 3] = ["apps", "emoji", "clipboard"];
+
+    pub fn from_name(name: &str) -> Option<Mode> {
+        match name {
+            "apps" => Some(Mode::All),
+            "emoji" => Some(Mode::Emoji),
+            "clipboard" => Some(Mode::Clipboard),
+            _ => None,
+        }
+    }
+}
+
+/// The clipboard history, which loads off the event loop.
+#[derive(Debug, Default)]
+enum Clips {
+    #[default]
+    Loading,
+    Ready(Vec<clipboard::Clip>),
+    Failed(String),
+}
 
 /// An open window, from Hyprland.
 #[derive(Clone, Debug, PartialEq)]
@@ -39,6 +79,8 @@ enum Kind {
     Window(usize),
     Command(usize),
     Calc(String),
+    Emoji(usize),
+    Clip(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -61,11 +103,27 @@ pub enum LauncherAction {
     Copy(String),
     FocusWindow(String),
     Ipc(IpcCall),
+    /// Put clipboard history entry `id` back on the clipboard.
+    RestoreClip(String),
+    /// Remove this `cliphist list` line from the history. The launcher
+    /// stays open.
+    DeleteClip(String),
 }
 
 #[derive(Default)]
 pub struct Launcher {
     target: Option<String>,
+    mode: Mode,
+    emoji: Vec<emoji::Emoji>,
+    /// Emoji drawn in colour, by index, while open.
+    emoji_images: HashMap<usize, Option<crate::icons::IconImage>>,
+    clips: Clips,
+    /// Image entries' thumbnails by id (`None` while decoding or when it
+    /// failed), and the ids a paint found missing.
+    thumbs: HashMap<String, Option<crate::icons::IconImage>>,
+    thumb_requests: Vec<String>,
+    /// The colour emoji font (`[launcher] emoji_font`).
+    emoji_font: Option<std::sync::Arc<str>>,
     field: TextField,
     apps: Vec<apps::App>,
     windows: Vec<Window>,
@@ -91,17 +149,56 @@ impl Launcher {
         self.target.as_deref()
     }
 
-    /// Open on `output` with what to search, besides the apps it reads.
-    pub fn open_on(&mut self, output: &str, windows: Vec<Window>, commands: Vec<Command>) {
-        let started = std::time::Instant::now();
-        self.apps = apps::load();
-        tracing::debug!("launcher: {} apps in {:?}", self.apps.len(), started.elapsed());
-        self.usage = apps::Usage::load();
-        self.windows = windows;
-        self.commands = commands;
-        self.field.clear();
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Open on `output` in `mode`. All searches the apps it reads and the
+    /// given windows and commands; the clipboard history arrives later
+    /// through [`Launcher::set_clips`].
+    pub fn open_on(&mut self, output: &str, mode: Mode, windows: Vec<Window>, commands: Vec<Command>) {
+        *self = Self::default();
+        self.mode = mode;
+        match mode {
+            Mode::All => {
+                let started = std::time::Instant::now();
+                self.apps = apps::load();
+                tracing::debug!("launcher: {} apps in {:?}", self.apps.len(), started.elapsed());
+                self.usage = apps::Usage::load();
+                self.windows = windows;
+                self.commands = commands;
+            }
+            Mode::Emoji => self.emoji = emoji::all(),
+            Mode::Clipboard => self.clips = Clips::Loading,
+        }
         self.target = Some(output.to_string());
         self.refilter();
+    }
+
+    /// The font emoji are drawn in, set after opening.
+    pub fn set_emoji_font(&mut self, family: &str) {
+        self.emoji_font = Some(std::sync::Arc::from(family));
+    }
+
+    /// The clipboard history, listed off the event loop.
+    pub fn set_clips(&mut self, clips: Result<Vec<clipboard::Clip>, String>) {
+        if self.is_open() && self.mode == Mode::Clipboard {
+            self.clips = clips.map_or_else(Clips::Failed, Clips::Ready);
+            self.refilter();
+        }
+    }
+
+    /// A decoded thumbnail for an image entry.
+    pub fn set_thumb(&mut self, id: String, image: Option<crate::icons::IconImage>) {
+        if self.is_open() {
+            self.thumbs.insert(id, image);
+        }
+    }
+
+    /// Image entries the last paint showed without a thumbnail, each asked
+    /// for once.
+    pub fn take_thumb_requests(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.thumb_requests)
     }
 
     /// Close, dropping everything it read.
@@ -117,6 +214,54 @@ impl Launcher {
 
     fn refilter(&mut self) {
         let query = self.field.text().trim().to_string();
+        let mut results = match self.mode {
+            Mode::All => self.search_all(&query),
+            Mode::Emoji => self
+                .emoji
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| {
+                    let score = if query.is_empty() {
+                        Some(0)
+                    } else {
+                        // Names are phrases ("face with tears of joy"):
+                        // match whole words, not scattered letters.
+                        let lower = query.to_lowercase();
+                        let named = e.name.to_lowercase().contains(&lower);
+                        named.then(|| fuzzy::score(&query, e.name)).flatten().or_else(|| {
+                            e.group.to_lowercase().contains(&lower).then_some(-200)
+                        })
+                    };
+                    score.map(|s| Item { kind: Kind::Emoji(i), score: s as f32 })
+                })
+                .collect(),
+            Mode::Clipboard => match &self.clips {
+                Clips::Ready(clips) => {
+                    let lower = query.to_lowercase();
+                    clips
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| lower.is_empty() || c.preview.to_lowercase().contains(&lower))
+                        // Newest first, as cliphist lists them.
+                        .map(|(i, _)| Item { kind: Kind::Clip(i), score: -(i as f32) })
+                        .collect()
+                }
+                _ => Vec::new(),
+            },
+        };
+        // Stable, so equal scores keep their order (apps by name, emoji
+        // as Unicode orders them).
+        results.sort_by(|a, b| b.score.total_cmp(&a.score));
+        if self.mode == Mode::All {
+            results.truncate(MAX_RESULTS);
+        }
+        self.results = results;
+        self.selected = 0;
+        self.first = 0;
+    }
+
+    fn search_all(&self, query: &str) -> Vec<Item> {
+        let query = query.to_string();
         let now = Self::now();
         let mut results = Vec::new();
         if let Some(value) = calc::evaluate(&query) {
@@ -166,12 +311,7 @@ impl Launcher {
                 }
             }
         }
-        // Stable, so apps of equal score stay in name order.
-        results.sort_by(|a, b| b.score.total_cmp(&a.score));
-        results.truncate(MAX_RESULTS);
-        self.results = results;
-        self.selected = 0;
-        self.first = 0;
+        results
     }
 
     fn select(&mut self, index: usize, rows: usize) {
@@ -212,6 +352,9 @@ impl Launcher {
             Keysym::Page_Up => return step(self, -(rows as isize)),
             Keysym::Page_Down => return step(self, rows as isize),
             Keysym::Return | Keysym::KP_Enter => return self.activate(self.selected),
+            // The field has no cursor, so Delete is free to remove the
+            // selected history entry.
+            Keysym::Delete if self.mode == Mode::Clipboard => return self.delete_selected(rows),
             Keysym::Escape => {
                 if self.field.text().is_empty() {
                     self.close();
@@ -232,6 +375,17 @@ impl Launcher {
         }
     }
 
+    fn delete_selected(&mut self, rows: usize) -> LauncherAction {
+        let (Some(Item { kind: Kind::Clip(i), .. }), Clips::Ready(clips)) = (self.results.get(self.selected), &mut self.clips) else {
+            return LauncherAction::None;
+        };
+        let clip = clips.remove(*i);
+        let selected = self.selected;
+        self.refilter();
+        self.select(selected, rows);
+        LauncherAction::DeleteClip(clip.line)
+    }
+
     /// Act on result `index`, closing the launcher.
     fn activate(&mut self, index: usize) -> LauncherAction {
         let Some(item) = self.results.get(index) else {
@@ -247,6 +401,11 @@ impl Launcher {
             Kind::Window(i) => LauncherAction::FocusWindow(self.windows[*i].address.clone()),
             Kind::Command(i) => LauncherAction::Ipc(self.commands[*i].call.clone()),
             Kind::Calc(value) => LauncherAction::Copy(value.clone()),
+            Kind::Emoji(i) => LauncherAction::Copy(self.emoji[*i].glyph.to_string()),
+            Kind::Clip(i) => match &self.clips {
+                Clips::Ready(clips) => LauncherAction::RestoreClip(clips[*i].id.clone()),
+                _ => LauncherAction::None,
+            },
         };
         self.close();
         action
@@ -301,6 +460,18 @@ impl Launcher {
             }
             Kind::Command(i) => (self.commands[*i].title.clone(), "Stratum".to_string()),
             Kind::Calc(value) => (format!("= {value}"), "Enter copies the result".to_string()),
+            Kind::Emoji(i) => (self.emoji[*i].name.to_string(), self.emoji[*i].group.to_string()),
+            Kind::Clip(i) => {
+                let Clips::Ready(clips) = &self.clips else {
+                    return (String::new(), String::new());
+                };
+                let clip = &clips[*i];
+                match &clip.image {
+                    Some(image) => ("Image".to_string(), format!("{} · {}×{}", image.format, image.width, image.height)),
+                    // One line: cliphist keeps a preview's newlines.
+                    None => (clip.preview.split_whitespace().collect::<Vec<_>>().join(" "), String::new()),
+                }
+            }
         }
     }
 
@@ -338,7 +509,11 @@ impl Launcher {
                 padding: 0.0,
                 caret_width: m.caret_width,
                 masked: false,
-                placeholder: Some("Search apps, windows and commands, or calculate"),
+                placeholder: Some(match self.mode {
+                    Mode::All => "Search apps, windows and commands, or calculate",
+                    Mode::Emoji => "Search emoji: Return copies",
+                    Mode::Clipboard => "Search the clipboard: Return copies, Delete removes",
+                }),
             },
             false,
         );
@@ -347,12 +522,28 @@ impl Launcher {
         self.rows.clear();
         let mut y = field.y + field.height + m.gap;
         let shown: Vec<usize> = (self.first..self.results.len()).take(rows).collect();
+        // Only the emoji on screen keep their images: scrolling through all
+        // of them would otherwise hold ~30 MB until the picker closes.
+        let visible: std::collections::HashSet<usize> = shown
+            .iter()
+            .filter_map(|&r| match self.results[r].kind {
+                Kind::Emoji(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        self.emoji_images.retain(|i, _| visible.contains(i));
         if shown.is_empty() {
             let empty = Rect { y, height: m.row_height, ..inner };
+            let message = match (&self.clips, self.mode) {
+                (Clips::Loading, Mode::Clipboard) => "Loading the clipboard history…".to_string(),
+                (Clips::Failed(err), Mode::Clipboard) => err.clone(),
+                (Clips::Ready(clips), Mode::Clipboard) if clips.is_empty() => "The clipboard history is empty".to_string(),
+                _ => "No matches".to_string(),
+            };
             ui::paint_text_centered_weighted(
                 ctx,
                 list,
-                "No matches",
+                &message,
                 empty,
                 m.title_text,
                 ctx.metrics.typography.weight_regular,
@@ -387,8 +578,30 @@ impl Launcher {
         }
     }
 
-    fn paint_icon(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, item: &Item, area: Rect, m: &LauncherMetrics) {
+    fn paint_icon(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, item: &Item, area: Rect, m: &LauncherMetrics) {
         let image = match &item.kind {
+            Kind::Emoji(i) => {
+                let glyph = self.emoji[*i].glyph;
+                let family = self.emoji_font.clone().unwrap_or_else(|| std::sync::Arc::from(ctx.theme.font.as_str()));
+                self.emoji_images
+                    .entry(*i)
+                    .or_insert_with(|| ctx.text.rasterize_color(glyph, &family, m.icon as u32 * 2))
+                    .clone()
+            }
+            Kind::Clip(i) => match &self.clips {
+                Clips::Ready(clips) if clips[*i].image.is_some() => {
+                    let id = &clips[*i].id;
+                    match self.thumbs.get(id) {
+                        Some(image) => image.clone(),
+                        None => {
+                            self.thumbs.insert(id.clone(), None);
+                            self.thumb_requests.push(id.clone());
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            },
             Kind::App(i) => self.apps[*i].icon.as_deref().and_then(|name| {
                 // An absolute path is allowed in `Icon`; the theme lookup
                 // only takes names, so fall back to the generic icon.
@@ -412,6 +625,9 @@ impl Launcher {
         let glyph = match &item.kind {
             Kind::Command(i) => self.commands[*i].glyph,
             Kind::Calc(_) => "\u{f00ec}",
+            // nf-fa-image and nf-fa-clipboard.
+            Kind::Clip(i) if matches!(&self.clips, Clips::Ready(c) if c[*i].image.is_some()) => "\u{f03e}",
+            Kind::Clip(_) => "\u{f0ea}",
             // nf-md-application for an app without an icon.
             _ => "\u{f08c6}",
         };
@@ -510,6 +726,48 @@ mod tests {
         assert!(l.is_open());
         assert_eq!(l.key(Keysym::Escape, None, false, 8), LauncherAction::Close);
         assert!(!l.is_open());
+    }
+
+    #[test]
+    fn the_emoji_mode_finds_by_name_and_copies() {
+        let mut l = Launcher::default();
+        l.open_on("OUT", Mode::Emoji, Vec::new(), Vec::new());
+        assert!(l.results.len() > 1800, "an empty query lists them all");
+        type_text(&mut l, "face with tears of joy");
+        assert!(matches!(l.results[0].kind, Kind::Emoji(i) if l.emoji[i].name == "face with tears of joy"));
+        assert_eq!(l.key(Keysym::Return, None, false, 8), LauncherAction::Copy("😂".into()));
+
+        // Names have capitals ("flag: Japan"); the query's case is ignored.
+        let mut l = Launcher::default();
+        l.open_on("OUT", Mode::Emoji, Vec::new(), Vec::new());
+        type_text(&mut l, "flag: jap");
+        assert!(matches!(l.results[0].kind, Kind::Emoji(i) if l.emoji[i].name == "flag: Japan"));
+    }
+
+    #[test]
+    fn the_clipboard_mode_filters_restores_and_deletes() {
+        let mut l = Launcher::default();
+        l.open_on("OUT", Mode::Clipboard, Vec::new(), Vec::new());
+        assert!(l.results.is_empty(), "nothing until the history arrives");
+        l.set_clips(Ok(clipboard::parse_list("3\tssh key fingerprint\n2\t[[ binary data 9 KiB png 10x10 ]]\n1\tnix build\n")));
+        assert_eq!(l.results.len(), 3);
+        assert!(matches!(l.results[0].kind, Kind::Clip(0)), "newest first");
+        type_text(&mut l, "NIX");
+        assert_eq!(l.results.len(), 1);
+        assert_eq!(l.key(Keysym::Delete, None, false, 8), LauncherAction::DeleteClip("1\tnix build".into()));
+        assert!(l.is_open() && l.results.is_empty(), "deleting keeps the launcher open");
+        l.key(Keysym::Escape, None, false, 8);
+        assert_eq!(l.results.len(), 2);
+        assert_eq!(l.key(Keysym::Return, None, false, 8), LauncherAction::RestoreClip("3".into()));
+    }
+
+    #[test]
+    fn a_late_history_is_ignored_in_another_mode() {
+        let mut l = Launcher::default();
+        l.open_on("OUT", Mode::Emoji, Vec::new(), Vec::new());
+        let before = l.results.len();
+        l.set_clips(Ok(clipboard::parse_list("1\tx\n")));
+        assert_eq!(l.results.len(), before);
     }
 
     #[test]
