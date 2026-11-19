@@ -492,9 +492,11 @@ enough to test a change. When the system moves ahead, a devshell build stops
 rendering ("no suitable Vulkan adapter") and refuses to lock until the lock
 is moved too. To try a change in the session,
 `systemctl --user stop stratum-shell`, run the build, and start the unit
-again afterwards. Never leave the user without a bar or a lock. A Nix build
-of the package (`nix build .#stratum-shell`) takes ~13 min: it compiles the
-release build a second time for `cargo test` in `checkPhase`.
+again afterwards. Never leave the user without a bar or a lock. The Nix
+packages skip `checkPhase` (`doCheck = false`): it compiled the whole release
+build a second time for `cargo test`, doubling a ~7 min build. That makes
+`cargo test --workspace` in the devshell the only test run, so run it before
+every commit.
 
 ### Running a dev build beside the installed shell
 

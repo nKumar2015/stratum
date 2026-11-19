@@ -69,6 +69,8 @@
         src = workspaceSrc;
         buildAndTestSubdir = "tools/stratum_cli";
         cargoLock.lockFile = ./Cargo.lock;
+        # As for the shell: the tests run in the devshell.
+        doCheck = false;
       };
 
       stratum-shell = pkgs.rustPlatform.buildRustPackage {
@@ -78,6 +80,11 @@
         src = workspaceSrc;
         buildAndTestSubdir = "tools/stratum_shell";
         cargoLock.lockFile = ./Cargo.lock;
+
+        # `cargo test` in checkPhase compiles the whole release build a
+        # second time (fat LTO, one codegen unit): 6m51s on top of the 6m41s
+        # build. The tests run in the devshell before every commit instead.
+        doCheck = false;
 
         nativeBuildInputs = shellNativeInputs pkgs;
         buildInputs = shellInputs pkgs;
