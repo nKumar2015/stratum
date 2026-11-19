@@ -33,6 +33,7 @@ mod tray;
 mod tray_menu;
 mod icons;
 mod idle;
+mod key_repeat;
 mod logind;
 mod render;
 mod sys_state;

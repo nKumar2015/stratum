@@ -206,6 +206,8 @@ pub struct App {
     /// Last frame time, for animation.
     last_frame: std::time::Instant,
     queue_handle: QueueHandle<App>,
+    /// For sources added after the start: SCTK's key-repeat timer.
+    loop_handle: calloop::LoopHandle<'static, App>,
     xdg_shell: XdgShell,
     activation: Option<ActivationState>,
     /// `wp_cursor_shape_v1`, and its device for the pointer once there is one.
@@ -404,6 +406,7 @@ impl App {
             settings_press: false,
             last_frame: std::time::Instant::now(),
             queue_handle: qh.clone(),
+            loop_handle: loop_handle.clone(),
             xdg_shell,
             activation,
             cursor_shapes,

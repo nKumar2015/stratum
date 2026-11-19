@@ -159,7 +159,17 @@ notification. `stratum-cli todo add …` and `timer start|pause|toggle|stop`
 drive it. Keys go to a focused field first; Tab moves between fields and
 Ctrl+Tab still switches tabs. Other keys act only where their panel shows,
 and `Dashboard::key_hint` lists them in the tab bar: keep it in step when
-adding one. There is no key repeat anywhere in the shell, the note included.
+adding one.
+
+**Key repeat** comes from SCTK's calloop timer at the compositor's rate
+(`get_keyboard_with_repeat`, and `repeat_key` for compositors that repeat
+themselves), and reaches text fields only (`key_repeat.rs`): the lock and
+polkit fields, a toast reply, a focused Focus-tab field and the settings
+window's fields get every key but Return, Escape and Tab; the theme
+switcher's search gets typing and deleting only, since its arrows move the
+band; menus and overlays get none, so a held arrow moves once. When testing
+it live, rebuild `target/debug/stratum-shell` with `cargo build`: `cargo
+test` and `clippy` leave a stale binary.
 
 **Idle** (`idle.rs` policy, pure and tested; `wayland/state/idle.rs`
 plumbing; `logind.rs`). Each `[idle]` stage (dim, lock, screens off,

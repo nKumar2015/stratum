@@ -33,7 +33,11 @@ impl SeatHandler for App {
             }
         }
         if capability == Capability::Keyboard {
-            match self.seat_state.get_keyboard(qh, &seat, None) {
+            // SCTK repeats held keys on a calloop timer at the compositor's
+            // rate; `repeat_key_event` decides which reach anything.
+            let repeat: smithay_client_toolkit::seat::keyboard::repeat::RepeatCallback<App> =
+                Box::new(|app, _keyboard, event| app.repeat_key_event(event));
+            match self.seat_state.get_keyboard_with_repeat(qh, &seat, None, self.loop_handle.clone(), repeat) {
                 Ok(_keyboard) => info!("keyboard capability acquired"),
                 Err(err) => tracing::warn!("failed to create keyboard: {err}"),
             }
@@ -464,6 +468,48 @@ impl KeyboardHandler for App {
         _serial: u32,
         event: KeyboardEvent,
     ) {
+        self.key_event(event);
+    }
+
+    fn repeat_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: KeyboardEvent,
+    ) {
+        // Compositors on wl_keyboard v10 send repeats themselves.
+        self.repeat_key_event(event);
+    }
+
+    fn release_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _event: KeyboardEvent,
+    ) {
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
+        _serial: u32,
+        modifiers: Modifiers,
+        _raw_modifiers: RawModifiers,
+        _layout: u32,
+    ) {
+        self.modifiers = modifiers;
+    }
+}
+
+impl App {
+    /// A key press, routed to whatever holds the keyboard.
+    fn key_event(&mut self, event: KeyboardEvent) {
         // While locked every key belongs to the lock screen, whatever else is
         // open.
         if self.lock.active() {
@@ -591,38 +637,36 @@ impl KeyboardHandler for App {
         }
     }
 
-    fn repeat_key(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
-        _serial: u32,
-        _event: KeyboardEvent,
-    ) {
-        // Navigation keys do not need key repeat; ignoring it keeps held arrows
-        // from racing across the menu.
-    }
-
-    fn release_key(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
-        _serial: u32,
-        _event: KeyboardEvent,
-    ) {
-    }
-
-    fn update_modifiers(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
-        _serial: u32,
-        modifiers: Modifiers,
-        _raw_modifiers: RawModifiers,
-        _layout: u32,
-    ) {
-        self.modifiers = modifiers;
+    /// A held key's repeat: only text fields get it (`crate::key_repeat`).
+    pub(super) fn repeat_key_event(&mut self, event: KeyboardEvent) {
+        use crate::key_repeat::Target;
+        let focused = |surface: Option<&wl_surface::WlSurface>| {
+            surface.is_some() && surface == self.keyboard_focus.as_ref()
+        };
+        let viewer_focused = focused(self.viewer_window.as_ref().map(|w| w.window.wl_surface()));
+        let settings_focused = focused(self.settings.as_ref().map(|w| w.window.wl_surface()));
+        // In `key_event`'s order, so the target is the one a press reaches.
+        let target = if self.lock.active() || self.polkit_dialog.is_open() || self.toasts.wants_keys() {
+            Target::Field
+        } else if self.screenshot.is_open() || viewer_focused {
+            Target::None
+        } else if self.dashboard.is_open() {
+            if self.dashboard.editing() {
+                Target::Field
+            } else {
+                Target::None
+            }
+        } else if self.theme_switcher.is_open() {
+            Target::Search
+        } else if self.power_menu.is_open() {
+            Target::None
+        } else if settings_focused && self.control_center.wants_keys() {
+            Target::Field
+        } else {
+            Target::None
+        };
+        if crate::key_repeat::repeats(target, event.keysym, event.utf8.as_deref()) {
+            self.key_event(event);
+        }
     }
 }

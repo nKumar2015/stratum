@@ -358,6 +358,11 @@ impl Dashboard {
         }
     }
 
+    /// Whether keys type into a focused Focus-tab field.
+    pub fn editing(&self) -> bool {
+        self.open && self.focus.field.is_some()
+    }
+
     pub fn is_open(&self) -> bool {
         self.open
     }
