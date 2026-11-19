@@ -15,6 +15,7 @@ use crate::launcher::{LauncherAction, Mode};
 pub(super) enum LauncherEvent {
     ClipsChanged,
     Thumb(u64, Option<crate::icons::IconImage>),
+    Preview(u64, Option<crate::icons::IconImage>),
 }
 
 /// The transparent layer that takes clicks outside the launcher.
@@ -45,6 +46,7 @@ impl App {
                         }
                     }
                     LauncherEvent::Thumb(id, image) => app.launcher.set_thumb(id, image),
+                    LauncherEvent::Preview(id, image) => app.launcher.set_preview(id, image),
                 }
                 app.mark_launcher_dirty();
             }
@@ -64,8 +66,8 @@ impl App {
         if mode == Mode::Clipboard {
             self.load_clips();
         }
-        // Sized at every open, so a config reload applies.
-        let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows);
+        // Sized at every open, for the mode and so a config reload applies.
+        let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows, mode);
         let margin = self.config.metrics.launcher.margin_top as i32;
         if let Some(entry) = self.launcher_surfaces.iter_mut().find(|e| e.output_name == output) {
             entry.layer.set_size(width, height);
@@ -281,6 +283,15 @@ impl App {
                 self.launcher.paint(&mut ctx, &mut list, rect, rows);
                 entry.render_list(&self.gpu, self.display, &list, &mut self.text)?;
                 entry.dirty = false;
+                // The selected image, decoded at the preview's size.
+                if let (Some((id, path, w, h)), Some(sender)) =
+                    (self.launcher.take_preview_request(), self.launcher_events.clone())
+                {
+                    let _ = std::thread::Builder::new().name("stratum-preview".into()).spawn(move || {
+                        let image = crate::launcher::clipboard::preview(&path, w, h);
+                        let _ = sender.send(LauncherEvent::Preview(id, image));
+                    });
+                }
                 // Thumbnails for the image entries just shown, decoded one
                 // after another on a thread.
                 let ids = self.launcher.take_thumb_requests();

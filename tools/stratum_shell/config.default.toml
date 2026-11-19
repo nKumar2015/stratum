@@ -405,6 +405,17 @@ glyph = 22.0            # commands and the calculator
 icon_gap = 4.0
 title_text = 14.0
 detail_text = 11.0
+wide_width = 860.0      # the emoji grid and the clipboard list with preview
+emoji_cell = 56.0
+emoji_glyph = 34.0
+section_height = 26.0   # a group's header in the emoji grid
+section_text = 11.0
+footer_height = 30.0    # the selected emoji's name, under the grid
+list_fraction = 0.42    # the clipboard list's share; the preview gets the rest
+pane_gap = 10.0
+pane_padding = 14.0
+preview_text = 12.0
+info_row = 22.0         # a line of the preview's information
 
 [metrics.lock]
 clock = 50.0            # time above the avatar

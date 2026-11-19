@@ -180,7 +180,15 @@ default `systemd-run --user --scope … setsid --fork`: a child of the shell
 would be in its unit's cgroup and die with every `systemctl restart`.
 
 It has two more modes (`launcher open|toggle emoji|clipboard`, or the
-Emoji and Clipboard history commands). **Emoji** come from a table compiled
+Emoji and Clipboard history commands), laid out like vicinae's in a wider
+box (`[metrics.launcher] wide_width`, set each time it opens): emoji in a
+grid of cells under their group's header (`launcher/grid.rs`, pure and
+tested: rows, two-dimensional arrows, scrolling that keeps the selection
+and its header in view; one headerless ranked grid while searching), and
+the clipboard as a list beside a preview pane (the entry's text, read 16 KB
+at most, lines kept as written and only long ones wrapped with their
+indent; or the image, decoded at the pane's size on a thread and drawn as
+a texture of its own) over an information section. **Emoji** come from a table compiled
 in (`launcher/emoji.txt`, ~40 KB, generated from Unicode's
 `emoji-test.txt` by `launcher/gen_emoji.py`). Text runs keep only a glyph's
 coverage, so each visible emoji is rasterised in colour by

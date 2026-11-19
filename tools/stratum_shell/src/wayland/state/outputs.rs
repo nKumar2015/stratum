@@ -208,7 +208,8 @@ impl App {
             );
             launcher.set_anchor(Anchor::TOP);
             launcher.set_keyboard_interactivity(KeyboardInteractivity::None);
-            let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows);
+            let (width, height) =
+                crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows, crate::launcher::Mode::All);
             launcher.set_size(width, height);
             launcher.set_margin(self.config.metrics.launcher.margin_top as i32, 0, 0, 0);
             launcher.commit();

@@ -223,6 +223,24 @@ pub struct LauncherMetrics {
     pub icon_gap: f32,
     pub title_text: f32,
     pub detail_text: f32,
+    /// The emoji and clipboard modes' width: a grid, or a list beside a
+    /// preview.
+    pub wide_width: f32,
+    /// An emoji cell's height (its width stretches to fill the row).
+    pub emoji_cell: f32,
+    pub emoji_glyph: f32,
+    /// A group's header line in the emoji grid.
+    pub section_height: f32,
+    pub section_text: f32,
+    /// The line under the emoji grid naming the selection.
+    pub footer_height: f32,
+    /// The clipboard list's share of the width; the preview takes the rest.
+    pub list_fraction: f32,
+    pub pane_gap: f32,
+    pub pane_padding: f32,
+    pub preview_text: f32,
+    /// One line of the preview's information section.
+    pub info_row: f32,
 }
 
 /// The power menu overlay.
