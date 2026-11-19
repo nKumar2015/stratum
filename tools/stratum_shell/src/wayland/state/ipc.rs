@@ -49,7 +49,7 @@ impl App {
         let _ = request.reply.send(result);
     }
 
-    fn execute_ipc(&mut self, call: &IpcCall) -> Result<(), IpcError> {
+    pub(super) fn execute_ipc(&mut self, call: &IpcCall) -> Result<(), IpcError> {
         use crate::ipc::IpcError;
 
         match (call.target.as_str(), call.function.as_str()) {
@@ -142,6 +142,14 @@ impl App {
             }
             ("screenshot", "start") => self.start_screenshot(),
             ("lockscreen", "lock") => self.begin_lock()?,
+            ("launcher", function) => {
+                let output = self.focused_output();
+                match function {
+                    "open" | "toggle" if !self.launcher.is_open() => self.open_launcher(&output),
+                    "close" | "toggle" => self.close_launcher(),
+                    _ => {}
+                }
+            }
             ("idle", function) => {
                 let inhibited = match function {
                     "inhibit" => true,

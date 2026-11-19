@@ -22,6 +22,7 @@ pub struct Metrics {
     pub osd: OsdMetrics,
     pub toasts: ToastMetrics,
     pub power_menu: PowerMenuMetrics,
+    pub launcher: LauncherMetrics,
     pub tray_menu: TrayMenuMetrics,
     pub lock: LockMetrics,
     pub polkit: PolkitMetrics,
@@ -195,6 +196,33 @@ pub struct OsdMetrics {
     pub fade_out_seconds: f32,
     /// How long the fill takes to slide to a new value.
     pub fill_seconds: f32,
+}
+
+/// The launcher: a search field over a list of results.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherMetrics {
+    pub width: f32,
+    /// Distance from the top of the output.
+    pub margin_top: f32,
+    /// Inside the frame, around the field and the list.
+    pub padding: f32,
+    pub field_height: f32,
+    pub field_text: f32,
+    pub search_icon: f32,
+    pub caret_width: f32,
+    /// Between the field and the list.
+    pub gap: f32,
+    pub row_height: f32,
+    pub row_radius: f32,
+    /// App and window icons.
+    pub icon: f32,
+    /// Glyphs for commands and the calculator.
+    pub glyph: f32,
+    /// Between the icon column and the text.
+    pub icon_gap: f32,
+    pub title_text: f32,
+    pub detail_text: f32,
 }
 
 /// The power menu overlay.

@@ -220,6 +220,15 @@ impl PointerHandler for App {
                 self.mark_hover_dirty();
                 return;
             }
+            if self.launcher_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                let action = self.launcher.on_click(point);
+                self.apply_launcher_action(action);
+                return;
+            }
+            if self.is_catcher(&surface) {
+                self.close_launcher();
+                return;
+            }
             if self.dashboard_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
                 let music = self.state.music.get();
                 let action = self.dashboard.on_click(point, &music);
@@ -335,6 +344,13 @@ impl PointerHandler for App {
             }
         }
 
+        if let Some((surface, _, _, delta)) = &scroll_at {
+            if self.launcher_surfaces.iter().any(|t| t.layer.wl_surface() == surface) {
+                let action = self.launcher.on_wheel(delta / 120.0, self.config.launcher.rows);
+                self.apply_launcher_action(action);
+                return;
+            }
+        }
         if let Some((surface, x, y, delta)) = scroll_at {
             // Over the theme switcher, a notch (120) moves it a theme.
             if self.theme_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
@@ -399,6 +415,18 @@ impl PointerHandler for App {
         });
         if over_hover || self.pointer_pressed {
             self.mark_hover_dirty();
+        }
+
+        // Hovering a result selects it.
+        let over_launcher = self.pointer.as_ref().and_then(|(surface, x, y)| {
+            self.launcher_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == surface)
+                .then(|| crate::render::display_list::Point::new(*x, *y))
+        });
+        if let Some(point) = over_launcher {
+            let action = self.launcher.on_hover(point);
+            self.apply_launcher_action(action);
         }
 
         // Hovering a slice highlights it.
@@ -559,6 +587,13 @@ impl App {
             return;
         }
 
+        if self.launcher.is_open() {
+            let rows = self.config.launcher.rows;
+            let action = self.launcher.key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl, rows);
+            self.apply_launcher_action(action);
+            return;
+        }
+
         if self.screenshot.is_open() {
             if event.keysym == Keysym::Escape {
                 self.screenshot.close();
@@ -646,7 +681,11 @@ impl App {
         let viewer_focused = focused(self.viewer_window.as_ref().map(|w| w.window.wl_surface()));
         let settings_focused = focused(self.settings.as_ref().map(|w| w.window.wl_surface()));
         // In `key_event`'s order, so the target is the one a press reaches.
-        let target = if self.lock.active() || self.polkit_dialog.is_open() || self.toasts.wants_keys() {
+        let target = if self.lock.active()
+            || self.polkit_dialog.is_open()
+            || self.toasts.wants_keys()
+            || self.launcher.is_open()
+        {
             Target::Field
         } else if self.screenshot.is_open() || viewer_focused {
             Target::None

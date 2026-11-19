@@ -40,6 +40,7 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         "dashboard" => Some(&["open", "close", "toggle"]),
         // Stay awake: hold the idle stages off.
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
+        "launcher" => Some(&["open", "close", "toggle"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),

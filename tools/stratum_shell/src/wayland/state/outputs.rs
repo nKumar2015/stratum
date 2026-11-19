@@ -196,6 +196,28 @@ impl App {
             self.dashboard_surfaces.push(dashboard);
             self.screenshot_surfaces.push(screenshot);
 
+            // The launcher: only as big as its box, at the top of the
+            // output, so an open launcher holds a small swapchain. Its size
+            // is set again whenever it opens, which picks up a reload.
+            let launcher = self.layer_shell.create_layer_surface(
+                qh,
+                self.compositor_state.create_surface(qh),
+                Layer::Overlay,
+                Some("stratum-launcher"),
+                Some(output),
+            );
+            launcher.set_anchor(Anchor::TOP);
+            launcher.set_keyboard_interactivity(KeyboardInteractivity::None);
+            let (width, height) = crate::launcher::Launcher::size(&self.config.metrics.launcher, self.config.launcher.rows);
+            launcher.set_size(width, height);
+            launcher.set_margin(self.config.metrics.launcher.margin_top as i32, 0, 0, 0);
+            launcher.commit();
+            self.launcher_surfaces.push(
+                SurfaceEntry::new(launcher, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
             // Hover menu: sized to its contents and moved beside the icon with
             // margins, like the tray menu. A size is set before the first
             // commit so it cannot come up output-sized and swallow clicks.
@@ -393,6 +415,8 @@ impl LayerShellHandler for App {
         layer: &LayerSurface,
     ) {
         self.dim_closed(layer);
+        self.catcher_closed(layer);
+        self.launcher_surfaces.retain(|entry| &entry.layer != layer);
         self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.power_surfaces.retain(|entry| &entry.layer != layer);
@@ -416,7 +440,7 @@ impl LayerShellHandler for App {
     ) {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
-        if self.configure_dim(layer, width, height) {
+        if self.configure_dim(layer, width, height) || self.configure_catcher(layer, width, height) {
             return;
         }
 
@@ -444,6 +468,7 @@ impl LayerShellHandler for App {
             .tray_menu_surfaces
             .iter_mut()
             .chain(self.hover_surfaces.iter_mut())
+            .chain(self.launcher_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // The compositor may grant a different size than requested; keep

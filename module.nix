@@ -73,6 +73,7 @@ in {
         pipewire # pw-link, and pw-cli for the EQ when the native path is unavailable
         playerctl # media controls
         upower # battery details
+        util-linux # setsid, which the launcher starts apps with
         wl-clipboard # copying screenshots
         xdg-utils # xdg-open, for links in calendar events
       ]);

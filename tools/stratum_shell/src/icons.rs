@@ -140,6 +140,13 @@ impl IconTheme {
         Some(ThemeEntry { roots: vec![root], directories })
     }
 
+    /// Drop every cached icon rasterized at `physical` pixels: what a
+    /// surface that closed (the launcher) loaded, so it does not stay
+    /// resident.
+    pub fn forget(&mut self, physical: u32) {
+        self.cache.retain(|(_, size, _), _| *size != physical);
+    }
+
     /// Look up and rasterize `name` at `size` logical pixels on a `scale`x
     /// output. Returns `None` when the icon is not found.
     pub fn load_icon(&mut self, name: &str, size: u32, scale: u32) -> Option<IconImage> {

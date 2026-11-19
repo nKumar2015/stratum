@@ -39,6 +39,7 @@ pub struct Config {
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
     pub idle: IdleConfig,
+    pub launcher: LauncherConfig,
     pub screenshot: ScreenshotConfig,
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
@@ -102,6 +103,9 @@ impl Config {
         }
         if self.displays.scales.is_empty() || self.displays.scales.iter().any(|s| !(*s >= 0.25 && *s <= 8.0)) {
             return Err("displays.scales must list scales from 0.25 to 8".into());
+        }
+        if !(1..=20).contains(&self.launcher.rows) {
+            return Err("launcher.rows must be 1-20".into());
         }
         if !(0.0..=1.0).contains(&self.idle.dim_opacity) {
             return Err("idle.dim_opacity must be 0-1".into());
@@ -789,6 +793,21 @@ pub struct IdleConfig {
     pub lock_before_sleep: bool,
     /// Lock on `loginctl lock-session`. Read at start.
     pub lock_on_loginctl: bool,
+}
+
+/// The launcher (`stratum-cli launcher toggle`); its sizes are
+/// `[metrics.launcher]`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LauncherConfig {
+    /// Results shown at once; the list scrolls past them.
+    pub rows: usize,
+    /// Put before a `Terminal=true` app's command.
+    pub terminal: Vec<String>,
+    /// Put before every command an app is launched with. The default runs it
+    /// in a systemd scope of its own, detached, so restarting the shell
+    /// (whose unit's processes systemd stops together) leaves it running.
+    pub launch_prefix: Vec<String>,
 }
 
 /// A resolved, ready-to-draw palette.

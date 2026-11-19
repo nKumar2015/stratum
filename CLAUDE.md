@@ -161,6 +161,24 @@ Ctrl+Tab still switches tabs. Other keys act only where their panel shows,
 and `Dashboard::key_hint` lists them in the tab bar: keep it in step when
 adding one.
 
+The **launcher** (`launcher/`, `wayland/state/launcher.rs`,
+`stratum-cli launcher open|close|toggle`) searches applications (desktop
+entries, `launcher/apps.rs`), Hyprland's windows (`j/clients`, focused with
+`hl.dsp.focus({ window = "address:0x…" })`), the shell's own commands (IPC
+calls: lock, power menu, settings pages, themes, stay awake…) and a
+calculator (`launcher/calc.rs`; Return copies the result). Ranking is
+`launcher/fuzzy.rs` plus decaying launch counts in
+`$XDG_STATE_HOME/stratum/launcher.json`, so live tests set
+`XDG_STATE_HOME`. It holds nothing while closed: entries and windows are
+read on open, and its icons are evicted from the icon cache on close
+(`IconTheme::forget`). Its surface is only as big as its box, and clicks
+outside land on a transparent catcher, a single-pixel layer on the `Top`
+layer under it. Closing unmaps the box *before* destroying the catcher;
+the other order made sway kill the client (the configure race, under
+"Overlays on wlroots"). Apps start under `[launcher] launch_prefix`, by
+default `systemd-run --user --scope … setsid --fork`: a child of the shell
+would be in its unit's cgroup and die with every `systemctl restart`.
+
 **Key repeat** comes from SCTK's calloop timer at the compositor's rate
 (`get_keyboard_with_repeat`, and `repeat_key` for compositors that repeat
 themselves), and reaches text fields only (`key_repeat.rs`): the lock and

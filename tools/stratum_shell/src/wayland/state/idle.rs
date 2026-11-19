@@ -35,6 +35,12 @@ pub(super) struct IdleGlobals {
 }
 
 impl IdleGlobals {
+    /// Single-pixel buffers and viewports, for surfaces that show one colour
+    /// stretched (the dim, the launcher's click catcher).
+    pub(super) fn pixels(&self) -> Option<(&WpSinglePixelBufferManagerV1, &WpViewporter)> {
+        Some((self.pixels.as_ref()?, self.viewporter.as_ref()?))
+    }
+
     pub(super) fn bind(globals: &GlobalList, qh: &QueueHandle<App>) -> Self {
         let this = Self {
             notifier: globals.bind(qh, 1..=1, Quiet).ok(),

@@ -73,6 +73,7 @@ macro_rules! paint_ctx {
 mod idle;
 mod input;
 mod ipc;
+mod launcher;
 mod lock;
 mod monitors;
 mod outputs;
@@ -175,6 +176,11 @@ pub struct App {
     polkit_agent: Option<Arc<stratum_sys::managers::polkit::PolkitAgent>>,
     polkit_runtime: Option<tokio::runtime::Handle>,
     polkit_events: Option<calloop::channel::Sender<PolkitEvent>>,
+    /// The launcher, its box-sized surface per output, and the transparent
+    /// catcher behind it while open.
+    launcher: crate::launcher::Launcher,
+    launcher_surfaces: Vec<SurfaceEntry>,
+    launcher_catcher: Option<launcher::Catcher>,
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
@@ -383,6 +389,9 @@ impl App {
             polkit_agent: None,
             polkit_runtime: None,
             polkit_events: None,
+            launcher: crate::launcher::Launcher::default(),
+            launcher_surfaces: Vec::new(),
+            launcher_catcher: None,
             theme_switcher: crate::theme_switcher::ThemeSwitcher::new(
                 &config_for_cc.metrics.theme_switcher,
                 config_for_cc.theme_switcher.wallpaper_delay_ms,

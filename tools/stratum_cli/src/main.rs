@@ -30,6 +30,7 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open [tab]", "close", "toggle [tab]"]),
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
+        "launcher" => Some(&["open", "close", "toggle"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),

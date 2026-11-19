@@ -154,6 +154,47 @@ pub fn focus_workspace(id: i32) -> bool {
     dispatch(&format!("hl.dsp.focus({{ workspace = \"{id}\" }})"))
 }
 
+/// Focus the window at `address` (`0x…`).
+pub fn focus_window(address: &str) -> bool {
+    // Only hex digits reach the Lua call.
+    let hex = address.trim_start_matches("0x");
+    if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    dispatch(&format!("hl.dsp.focus({{ window = \"address:0x{hex}\" }})"))
+}
+
+/// The mapped windows, most recently focused first, for the launcher.
+pub fn clients() -> Vec<crate::launcher::Window> {
+    let Some(text) = query("j/clients") else {
+        return Vec::new();
+    };
+    parse_clients(&text)
+}
+
+fn parse_clients(text: &str) -> Vec<crate::launcher::Window> {
+    let Ok(serde_json::Value::Array(list)) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let mut windows: Vec<(i64, crate::launcher::Window)> = list
+        .iter()
+        .filter(|c| c["mapped"].as_bool() != Some(false) && c["hidden"].as_bool() != Some(true))
+        .filter_map(|c| {
+            Some((
+                c["focusHistoryID"].as_i64().unwrap_or(i64::MAX),
+                crate::launcher::Window {
+                    address: c["address"].as_str()?.to_string(),
+                    class: c["class"].as_str().unwrap_or_default().to_string(),
+                    title: c["title"].as_str().unwrap_or_default().to_string(),
+                    workspace: c["workspace"]["name"].as_str().unwrap_or_default().to_string(),
+                },
+            ))
+        })
+        .collect();
+    windows.sort_by_key(|(history, _)| *history);
+    windows.into_iter().map(|(_, w)| w).collect()
+}
+
 impl HyprState {
     /// Query the current state once.
     pub fn read() -> Self {
@@ -319,6 +360,24 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn clients_are_listed_by_focus_history() {
+        let text = r#"[
+            {"address":"0xb","class":"kitty","title":"zsh","workspace":{"name":"2"},"focusHistoryID":1,"mapped":true,"hidden":false},
+            {"address":"0xa","class":"zen","title":"Docs","workspace":{"name":"1"},"focusHistoryID":0,"mapped":true,"hidden":false},
+            {"address":"0xc","class":"x","title":"hidden","workspace":{"name":"1"},"focusHistoryID":2,"mapped":true,"hidden":true}
+        ]"#;
+        let windows = parse_clients(text);
+        assert_eq!(windows.iter().map(|w| w.address.as_str()).collect::<Vec<_>>(), ["0xa", "0xb"]);
+        assert_eq!(windows[1].workspace, "2");
+    }
+
+    #[test]
+    fn a_window_address_must_be_hex() {
+        assert!(!focus_window("0x12\" }) os.execute(\"x"));
+        assert!(!focus_window(""));
+    }
     use super::*;
 
     fn client(workspace: i32, focus_history: i64, title: &str) -> Client {

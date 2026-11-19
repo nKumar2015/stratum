@@ -34,6 +34,7 @@ mod tray_menu;
 mod icons;
 mod idle;
 mod key_repeat;
+mod launcher;
 mod logind;
 mod render;
 mod sys_state;

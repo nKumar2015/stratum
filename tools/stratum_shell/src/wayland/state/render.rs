@@ -68,6 +68,7 @@ impl App {
             .chain(&mut self.screenshot_surfaces)
             .chain(&mut self.theme_surfaces)
             .chain(&mut self.tray_menu_surfaces)
+            .chain(&mut self.launcher_surfaces)
         {
             entry.release_retired();
         }
@@ -85,6 +86,7 @@ impl App {
         self.render_viewer(theme, dt);
         self.render_theme_switcher(theme, dt, state_changed)?;
         self.render_tray_menu(theme, dt)?;
+        self.render_launcher(theme, dt)?;
         self.render_bars(theme, dt)
     }
 
