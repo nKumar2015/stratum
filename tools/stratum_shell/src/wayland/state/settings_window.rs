@@ -197,6 +197,10 @@ impl App {
                     tracing::warn!("failed to focus workspace {id}");
                 }
             }
+            Action::ToggleIdleInhibit => {
+                let inhibited = !self.idle_inhibited();
+                self.set_idle_inhibited(inhibited);
+            }
             Action::OpenDashboard(output) => {
                 if !self.dashboard.is_open() {
                     self.dashboard.open_on(&output, None);

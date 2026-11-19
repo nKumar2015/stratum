@@ -142,6 +142,14 @@ impl App {
             }
             ("screenshot", "start") => self.start_screenshot(),
             ("lockscreen", "lock") => self.begin_lock()?,
+            ("idle", function) => {
+                let inhibited = match function {
+                    "inhibit" => true,
+                    "uninhibit" => false,
+                    _ => !self.idle_inhibited(),
+                };
+                self.set_idle_inhibited(inhibited);
+            }
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
                 // first: the QML shell routed popups the same way.

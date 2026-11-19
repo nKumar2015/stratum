@@ -184,6 +184,7 @@ impl App {
         self.lock_surfaces.clear();
         self.lock_auth = None;
         self.lock.finish();
+        self.release_sleep_when_locked();
         self.mark_all_dirty();
     }
 }

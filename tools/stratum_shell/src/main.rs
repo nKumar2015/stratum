@@ -32,6 +32,8 @@ mod toasts;
 mod tray;
 mod tray_menu;
 mod icons;
+mod idle;
+mod logind;
 mod render;
 mod sys_state;
 mod text;

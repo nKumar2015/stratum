@@ -70,6 +70,7 @@ macro_rules! paint_ctx {
     };
 }
 
+mod idle;
 mod input;
 mod ipc;
 mod lock;
@@ -241,6 +242,21 @@ pub struct App {
     /// The wallpaper shown before a theme edit previewed another: put back
     /// when the edit ends unsaved. `Some(None)` when there was none.
     wallpaper_before: Option<Option<std::path::PathBuf>>,
+    /// What idling has done, the compositor's idle notifications (one per
+    /// stage), the dim layer while dimmed, and each output's power control
+    /// while the screens are off.
+    idle: crate::idle::Idle,
+    idle_globals: idle::IdleGlobals,
+    idle_notifications: Vec<
+        wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::ExtIdleNotificationV1,
+    >,
+    dim: Option<idle::Dim>,
+    output_power: Vec<
+        wayland_protocols_wlr::output_power_management::v1::client::zwlr_output_power_v1::ZwlrOutputPowerV1,
+    >,
+    /// The logind watchers, and whether a sleep waits for the lock screen.
+    logind: Option<crate::logind::Logind>,
+    sleep_pending: bool,
     /// The display manager's commands; `None` until it starts.
     display_tx: Option<std::sync::mpsc::Sender<crate::display_manager::Command>>,
     /// The configuration before a theme being edited was shown live, to go
@@ -320,6 +336,7 @@ impl App {
         // Optional too: without ext-session-lock, `lockscreen lock` answers
         // unsupported and the CLI leaves locking to another client.
         let session_lock_state = SessionLockState::new(&globals, &qh);
+        let idle_globals = idle::IdleGlobals::bind(&globals, &qh);
         let registry_state = RegistryState::new(&globals);
 
         let mut app = App {
@@ -403,6 +420,13 @@ impl App {
             custom_themes,
             theme_preview: None,
             display_tx: None,
+            idle: crate::idle::Idle::default(),
+            idle_globals,
+            idle_notifications: Vec::new(),
+            dim: None,
+            output_power: Vec::new(),
+            logind: None,
+            sleep_pending: false,
             wallpaper_tx: None,
             wallpaper_links: crate::wallpapers::load_links(),
             wallpaper_before: None,
@@ -440,6 +464,8 @@ impl App {
         app.start_lock_events(&loop_handle);
         app.start_screenshot_events(&loop_handle);
         app.start_polkit_events(&loop_handle);
+        app.start_logind(&loop_handle);
+        app.arm_idle();
         app.create_surfaces(&qh);
         app.start_monitors();
         // Decode the lock artwork now, off-thread, so the wallpaper is already
@@ -472,6 +498,7 @@ impl App {
             || self.control_center.animating()
             || self.dashboard.animating()
             || self.theme_switcher.animating()
+            || self.dim_fading()
         {
             return std::time::Duration::from_millis(16);
         }

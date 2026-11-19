@@ -25,8 +25,11 @@ impl App {
             .min(0.1);
         self.last_frame = now;
 
+        self.tick_idle();
         // First, so a failure on any other surface cannot keep it from drawing.
         self.render_lock(dt);
+        // A sleep held back for the lock screen goes ahead once it has drawn.
+        self.release_sleep_when_locked();
         // While locked, nothing else is shown, and the compositor stops
         // releasing the buffers of hidden surfaces: presenting to one blocks
         // in the swapchain acquire and freezes the whole loop, lock screen

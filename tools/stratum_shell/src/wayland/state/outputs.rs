@@ -392,6 +392,7 @@ impl LayerShellHandler for App {
         _qh: &QueueHandle<Self>,
         layer: &LayerSurface,
     ) {
+        self.dim_closed(layer);
         self.toast_surfaces.retain(|entry| &entry.layer != layer);
         self.osd_surfaces.retain(|entry| &entry.layer != layer);
         self.power_surfaces.retain(|entry| &entry.layer != layer);
@@ -415,6 +416,9 @@ impl LayerShellHandler for App {
     ) {
         let (width, height) = configure.new_size;
         debug!("layer configure {width}x{height}");
+        if self.configure_dim(layer, width, height) {
+            return;
+        }
 
         if let Some(entry) = self
             .power_surfaces

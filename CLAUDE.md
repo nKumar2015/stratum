@@ -59,7 +59,8 @@ Implemented and working: sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with ten
 pages (overview, audio, equalizer, bluetooth, wifi, battery, notifications,
 display (monitor layout), theme, power),
-volume/brightness OSD, notification toasts, notification server, tray watcher,
+volume/brightness OSD, idle (dim, lock, screens off, suspend, and a lock
+before every sleep), notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
 the IPC socket, the lock screen, and the polkit dialog (both verified only
 against fixtures in a nested compositor; see below).
@@ -159,6 +160,27 @@ drive it. Keys go to a focused field first; Tab moves between fields and
 Ctrl+Tab still switches tabs. Other keys act only where their panel shows,
 and `Dashboard::key_hint` lists them in the tab bar: keep it in step when
 adding one. There is no key repeat anywhere in the shell, the note included.
+
+**Idle** (`idle.rs` policy, pure and tested; `wayland/state/idle.rs`
+plumbing; `logind.rs`). Each `[idle]` stage (dim, lock, screens off,
+suspend) is its own `ext-idle-notify-v1` notification, so a client holding
+an idle inhibitor (a video) holds them all off, and so does the stay-awake
+icon (`idle_inhibit` widget, `stratum-cli idle inhibit|uninhibit|toggle`).
+The dim is an overlay layer per output holding a single-pixel buffer that
+`wp_viewporter` stretches, never a swapchain; its fade commits one cached
+buffer per opacity step. Screens go off through
+`wlr-output-power-management`, and input turns them back on (Hyprland does
+not by itself). Suspend runs `systemctl suspend`, on battery only unless
+`suspend_on_ac`, and not while `playerctl` reports `Playing` unless
+`suspend_while_playing`. **Lock before sleep**: the shell holds a logind
+`sleep` *delay* inhibitor; on `PrepareForSleep(true)` it locks and closes
+the descriptor once every lock surface has drawn (or the lock was refused),
+with a 4 s give-up under logind's 5 s, and takes a new one on wake. It also
+locks on the session's `Lock` signal (`loginctl lock-session`), finding the
+user's display session because a user unit is in none. Test it against a
+stand-in logind on a private bus (`DBUS_SYSTEM_BUS_ADDRESS`) in headless sway
+with a stub `systemctl` first in `PATH`: the suspend stage otherwise
+suspends the real machine.
 
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`. Restored notifications are
@@ -477,9 +499,10 @@ release build a second time for `cargo test` in `checkPhase`.
 ### Running a dev build beside the installed shell
 
 The installed shell owns `org.freedesktop.Notifications`,
-`org.kde.StatusNotifierWatcher`, the polkit agent and the IPC socket. A second
-shell needs `[behavior] tray = false`, `notifications = false`,
-`polkit = false` and its own `STRATUM_SOCKET`. To exercise notifications or the
+`org.kde.StatusNotifierWatcher`, the polkit agent, the idle stages and the
+logind sleep lock, and the IPC socket. A second shell needs
+`[behavior] tray = false`, `notifications = false`, `polkit = false`,
+`[idle] enabled = false` and its own `STRATUM_SOCKET`. To exercise notifications or the
 tray in a dev build, use a private bus instead:
 
 ```sh

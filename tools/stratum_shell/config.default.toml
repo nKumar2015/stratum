@@ -47,6 +47,27 @@ avatar = "~/Pictures/pfp.png"                      # PNG; missing = a user glyph
 # could never be undone; `stratum-cli lockscreen lock` then reports why.
 pam_service = "stratum-shell"
 
+# What happens when there is no input. Each stage counts from the last input
+# and 0 turns it off. Apps that ask the compositor to keep the screen on (a
+# video playing) hold every stage off, and so does the stay-awake icon
+# (`idle_inhibit` in the sidebar, or `stratum-cli idle inhibit|uninhibit|toggle`).
+[idle]
+enabled = true          # all of it, the sleep lock too; off in a second shell
+dim_s = 240             # dim the screens
+dim_opacity = 0.6       # how dark the dim gets, 0-1
+dim_fade_ms = 3000      # how long it takes; any input undoes it
+dim_color = "#000000"
+lock_s = 300            # lock the session
+dpms_s = 330            # turn the screens off; input turns them back on
+suspend_s = 900         # suspend, on battery only unless suspend_on_ac
+suspend_on_ac = false
+suspend_while_playing = false # false: a playing media player holds suspend off
+# Lock before every suspend (the lid, the power menu, `systemctl suspend`):
+# the shell holds a logind delay lock until the lock screen is up. Read at
+# start.
+lock_before_sleep = true
+lock_on_loginctl = true # lock on `loginctl lock-session`; read at start
+
 [render]
 # GPU to draw on: "auto", "nvidia", "radeon" or "intel". Only that vendor's
 # Vulkan driver is loaded, which saves memory (the NVIDIA driver alone costs
@@ -210,11 +231,12 @@ framed = false
 [[sidebar.widgets]]
 kind = "quick_panel"
 framed = true
-height = 86
+height = 112
 children = [
   { kind = "audio", framed = false },
   { kind = "bluetooth", framed = false },
   { kind = "wifi", framed = false },
+  { kind = "idle_inhibit", framed = false }, # stay awake: click to hold idle off
 ]
 
 [[sidebar.widgets]]

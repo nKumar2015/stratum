@@ -8,7 +8,12 @@ impl SeatHandler for App {
         &mut self.seat_state
     }
 
-    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {
+        // Idle notifications need a seat; one may arrive after the start.
+        if self.idle_notifications.is_empty() {
+            self.arm_idle();
+        }
+    }
 
     fn new_capability(
         &mut self,

@@ -123,6 +123,8 @@ pub struct SystemState {
     pub notifications: Cell<Vec<crate::notifications::Notification>>,
     /// Do-not-disturb: notifications still collect, but no toasts appear.
     pub dnd: Cell<bool>,
+    /// The user asked to stay awake: the idle stages are held off.
+    pub idle_inhibit: Cell<bool>,
     /// How the last tracked action ended (`SystemAction::Tracked`), so the
     /// page that issued it can report the outcome.
     pub action_result: Cell<ActionResult>,
@@ -163,6 +165,7 @@ impl SystemState {
             wallpaper_previews: Cell::default(),
             theme_wallpapers: Cell::default(),
             dnd: Cell::new(false),
+            idle_inhibit: Cell::new(false),
             action_result: Cell::new(ActionResult::default()),
             waker: Mutex::new(None),
             tray_handle: Mutex::new(None),
@@ -219,6 +222,7 @@ impl SystemState {
             | self.wallpaper_previews.take_dirty()
             | self.theme_wallpapers.take_dirty()
             | self.dnd.take_dirty()
+            | self.idle_inhibit.take_dirty()
             | self.action_result.take_dirty()
     }
 

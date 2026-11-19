@@ -38,6 +38,8 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
 pub fn functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open", "close", "toggle"]),
+        // Stay awake: hold the idle stages off.
+        "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),
         "powermenu" => Some(&["toggle"]),

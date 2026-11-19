@@ -38,6 +38,7 @@ pub struct Config {
     pub behavior: BehaviorConfig,
     pub control_center: ControlCenterConfig,
     pub lock: LockConfig,
+    pub idle: IdleConfig,
     pub screenshot: ScreenshotConfig,
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
@@ -101,6 +102,12 @@ impl Config {
         }
         if self.displays.scales.is_empty() || self.displays.scales.iter().any(|s| !(*s >= 0.25 && *s <= 8.0)) {
             return Err("displays.scales must list scales from 0.25 to 8".into());
+        }
+        if !(0.0..=1.0).contains(&self.idle.dim_opacity) {
+            return Err("idle.dim_opacity must be 0-1".into());
+        }
+        if parse_color(&self.idle.dim_color).is_none() {
+            return Err(format!("idle.dim_color: `{}` is not a colour", self.idle.dim_color));
         }
         if self.screenshot.pen_colors.is_empty() {
             return Err("screenshot.pen_colors is empty".into());
@@ -439,6 +446,8 @@ pub enum WidgetKind {
     Battery,
     Clock,
     Spacer,
+    /// Stay awake: holds the idle stages off while on.
+    IdleInhibit,
 }
 
 /// Look-and-feel knobs that are not colours.
@@ -747,6 +756,39 @@ pub struct LockConfig {
     /// shell refuses to lock when none exists rather than lock with a service
     /// that can never succeed.
     pub pam_service: String,
+}
+
+/// What idling does (`crate::idle`). Each stage's timeout counts from the
+/// last input; 0 turns that stage off.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdleConfig {
+    /// Everything below, the sleep lock included. A dev build beside the
+    /// installed shell turns it off, or both would act.
+    pub enabled: bool,
+    /// Seconds until the screens dim.
+    pub dim_s: u32,
+    /// How dark the dim gets, 0-1, and how long it takes to get there.
+    pub dim_opacity: f32,
+    pub dim_fade_ms: u32,
+    /// The dim's colour. Dimming takes light away, so it is not themed.
+    pub dim_color: String,
+    /// Seconds until the session locks.
+    pub lock_s: u32,
+    /// Seconds until the screens turn off.
+    pub dpms_s: u32,
+    /// Seconds until the machine suspends, on battery only unless
+    /// `suspend_on_ac`.
+    pub suspend_s: u32,
+    pub suspend_on_ac: bool,
+    /// Suspend even while a media player is playing.
+    pub suspend_while_playing: bool,
+    /// Lock before every suspend (the lid, the power menu, `systemctl
+    /// suspend`), holding a logind delay lock until the lock screen is up.
+    /// Read at start.
+    pub lock_before_sleep: bool,
+    /// Lock on `loginctl lock-session`. Read at start.
+    pub lock_on_loginctl: bool,
 }
 
 /// A resolved, ready-to-draw palette.

@@ -115,6 +115,8 @@ pub enum Action {
     FocusWorkspace(i32),
     /// Open the dashboard on the named output (the clock's tap, as in QML).
     OpenDashboard(String),
+    /// Stay awake, or stop (the idle_inhibit icon).
+    ToggleIdleInhibit,
 }
 
 /// Which mouse button produced a click.
