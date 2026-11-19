@@ -34,6 +34,13 @@ tracing = "0.1"
 # `tracing-log` forwards wgpu's `log` records.
 tracing-subscriber = "0.3"
 
+# Debug builds optimise every dependency but leave the workspace crates
+# unoptimised: wgpu, naga, cosmic-text and swash are slow enough at opt-level
+# 0 to make a dev shell sluggish, and they compile once, while a change to
+# the shell still recompiles only the shell.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 opt-level = 3
 lto = "fat"

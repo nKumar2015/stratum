@@ -313,11 +313,11 @@ Safety rules it depends on — keep them:
   means the screen does not lock, so the installed build must link the
   system's glibc (see below) and `/etc/pam.d/stratum-shell` must exist (the
   user's NixOS config defines it).
-- **The glibc trap.** This repo's `flake.lock` nixpkgs is older than the
-  system's, so a devshell build links glibc 2.42 while the system's PAM modules
-  need 2.43. Such a build *must* refuse to lock against the real
-  `/etc/pam.d` — and it does. A shell that should lock for real has to be built
-  against the system's nixpkgs (`inputs.nixpkgs.follows`).
+- **The glibc trap.** A build must link the glibc the system's PAM modules
+  (and Vulkan drivers) were built against. One linked against an older glibc
+  *must* refuse to lock against the real `/etc/pam.d`, and it does. The
+  installed shell follows the system's nixpkgs (`inputs.nixpkgs.follows`);
+  the devshell is kept on the same revision through `flake.lock` (below).
 - `SessionLock` is released only through `unlock()` after PAM success, or by
   dropping it after the compositor's `finished`. Dropping it while locked is a
   protocol error, which keeps the session locked (fail secure).
@@ -460,15 +460,19 @@ A change reaches the session by pushing to `main`, `nix flake update stratum`
 in `~/nixos-config`, and the user's `nixos-rebuild switch`. Ask before
 pushing.
 
-A devshell build cannot replace it for real use, and since the system moved
-to glibc 2.44 it cannot render at all: RADV and the NVIDIA driver both need
-a newer glibc than the devshell's ("no suitable Vulkan adapter"). It still
-builds and runs the tests, and it refuses to lock. To try a change
-in the session, build against the system nixpkgs
-(`nix build .#stratum-shell --override-input nixpkgs path:<system nixpkgs>
---no-write-lock-file`; the path is `nix registry list`'s `system flake:nixpkgs`),
-`systemctl --user stop stratum-shell`, and run that binary; start the unit
-again afterwards. Never leave the user without a bar or a lock.
+**Keep `flake.lock`'s nixpkgs on the system's revision**
+(`nixos-version --json` → `nixpkgsRevision`; copy `rev`, `narHash` and
+`lastModified` from `~/nixos-config/flake.lock`'s root nixpkgs node, keeping
+`original`). Then a devshell build links the system's glibc, renders on the
+real drivers and passes the lock's PAM check, so `cargo build` (seconds
+incrementally; dependencies are built at opt-level 2 even in debug) is
+enough to test a change. When the system moves ahead, a devshell build stops
+rendering ("no suitable Vulkan adapter") and refuses to lock until the lock
+is moved too. To try a change in the session,
+`systemctl --user stop stratum-shell`, run the build, and start the unit
+again afterwards. Never leave the user without a bar or a lock. A Nix build
+of the package (`nix build .#stratum-shell`) takes ~13 min: it compiles the
+release build a second time for `cargo test` in `checkPhase`.
 
 ### Running a dev build beside the installed shell
 
