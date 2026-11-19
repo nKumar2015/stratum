@@ -28,6 +28,16 @@ pub fn run() -> Result<(), String> {
             // anything else.
             break Err(format!("event loop failed: {err}"));
         }
+        // After a protocol error the connection is dead but dispatch keeps
+        // succeeding, so the loop spun, logging, with no bar and nothing to
+        // restart it. Failing lets the unit's Restart=on-failure bring the
+        // shell back.
+        if let Some(err) = conn.protocol_error() {
+            break Err(format!(
+                "protocol error {} on {}@{}: {}",
+                err.code, err.object_interface, err.object_id, err.message
+            ));
+        }
         if let Err(err) = app.render_pending() {
             // Presentation failures are usually transient (resize, disabled
             // output). Log and keep the loop alive so a monitor hotplug does

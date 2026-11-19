@@ -414,6 +414,16 @@ rules found in sway, both handled by `SurfaceEntry`:
 - After an unmap, wlroots sends no configure until a fresh bufferless commit.
   Overlay loops call `entry.ready()`, which makes that commit once, instead of
   checking `entry.configured` directly.
+- **The configure race.** A map, unmap or destroy makes wlroots send every
+  layer surface a configure. If another surface unmaps after that configure
+  was sent but before it is dispatched, SCTK still acks it (it acks before
+  our handler runs) and sway kills the client: "wrong configure serial".
+  Opening one overlay while closing another in the same frame does it
+  (`theme toggle` and `powermenu toggle` together reproduce it). Hyprland
+  tolerates the late ack. When one action changes two surfaces, unmap first,
+  in the same handler, as the launcher does. After any protocol error
+  `wayland::run` exits with failure, so the unit restarts the shell; it used
+  to loop with a dead connection and no bar.
 
 The renderer must also release a `Suboptimal` frame before reconfiguring the
 surface; reconfiguring while holding it is a fatal wgpu validation error.
