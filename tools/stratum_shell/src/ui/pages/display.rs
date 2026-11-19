@@ -82,6 +82,7 @@ pub struct DisplayPage {
     /// How far the open list is scrolled; `None` until it is first painted,
     /// which scrolls to the chosen option.
     list_scroll: Option<f32>,
+    night_light: crate::ui::pages::night_light::NightLightSection,
 }
 
 /// The resolution dropdown's contents for this frame.
@@ -162,7 +163,9 @@ impl DisplayPage {
         };
         let (head, body) = layout::header(ctx, list, area, "Display", &summary);
         if !snap.available || snap.monitors.is_empty() {
-            return devices::empty_card(ctx, list, body, body.y, "No monitors to configure", "Display settings need Hyprland");
+            // Night light needs only the gamma protocol, not Hyprland.
+            let y = devices::empty_card(ctx, list, body, body.y, "No monitors to configure", "Display settings need Hyprland");
+            return self.night_light.paint(ctx, list, body, y + m.section_spacing, input, clicked, pending);
         }
 
         // Follow the monitors while the draft is untouched, or when the set
@@ -259,7 +262,8 @@ impl DisplayPage {
                 self.base = current;
             }
         }
-        let bottom = y + m.badge;
+        let y = y + m.badge + m.section_spacing;
+        let bottom = self.night_light.paint(ctx, list, body, y, input, clicked, pending);
 
         // The resolution list, over everything else. A click anywhere but
         // the list or its face closes it.

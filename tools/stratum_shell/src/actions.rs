@@ -101,6 +101,13 @@ pub enum SystemAction {
     MusicRefresh(Option<String>),
     /// Switch the active theme by name.
     SetTheme(String),
+    /// Change a setting by its dotted path (`idle.dim_s`), kept over the
+    /// config (`settings_override`).
+    SetSetting { path: &'static str, value: toml::Value },
+    /// Night light by hand: `on`, `off`, `toggle` or `auto`.
+    NightLight(&'static str),
+    /// Stay awake, or stop.
+    IdleInhibit(bool),
     /// Show an unsaved theme live, under this name, until it is saved or the
     /// preview ends. Boxed: a palette is large next to the other actions.
     PreviewTheme(Box<(String, crate::config::ThemeConfig)>),
@@ -435,6 +442,9 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         | SystemAction::DismissAll
         | SystemAction::InvokeNotification(..)
         | SystemAction::SetTheme(_)
+        | SystemAction::SetSetting { .. }
+        | SystemAction::NightLight(_)
+        | SystemAction::IdleInhibit(_)
         | SystemAction::PreviewTheme(_)
         | SystemAction::SaveTheme { .. }
         | SystemAction::EndThemePreview

@@ -63,6 +63,8 @@ macro_rules! paint_ctx {
             themes: &$app.config.themes,
             custom_themes: &$app.custom_themes,
             displays: &$app.config.displays,
+            idle: &$app.config.idle,
+            night_light: &$app.config.night_light,
             output_name: $output,
             axis: $app.config.sidebar.axis(),
             dt: $dt,
@@ -77,6 +79,7 @@ mod ipc;
 mod launcher;
 mod lock;
 mod monitors;
+mod night_light;
 mod outputs;
 mod overlays;
 mod render;
@@ -266,6 +269,8 @@ pub struct App {
     output_power: Vec<
         wayland_protocols_wlr::output_power_management::v1::client::zwlr_output_power_v1::ZwlrOutputPowerV1,
     >,
+    /// Night light's gamma controls and hand setting.
+    night: night_light::NightLight,
     /// The logind watchers, and whether a sleep waits for the lock screen.
     logind: Option<crate::logind::Logind>,
     sleep_pending: bool,
@@ -443,6 +448,7 @@ impl App {
             idle_notifications: Vec::new(),
             dim: None,
             output_power: Vec::new(),
+            night: night_light::NightLight::default(),
             logind: None,
             sleep_pending: false,
             wallpaper_tx: None,
@@ -486,6 +492,7 @@ impl App {
         app.start_launcher_events(&loop_handle);
         // After the launcher's events, which it notifies of new copies.
         app.start_clipboard(&globals);
+        app.bind_night_light(&globals);
         app.arm_idle();
         app.create_surfaces(&qh);
         app.start_monitors();

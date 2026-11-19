@@ -201,6 +201,7 @@ impl App {
                 let inhibited = !self.idle_inhibited();
                 self.set_idle_inhibited(inhibited);
             }
+            Action::ToggleNightLight => self.night_light_command("toggle"),
             Action::OpenDashboard(output) => {
                 if !self.dashboard.is_open() {
                     self.dashboard.open_on(&output, None);

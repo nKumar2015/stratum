@@ -26,6 +26,9 @@ impl App {
         self.last_frame = now;
 
         self.tick_idle();
+        // Before the lock's early return: the colours follow the clock while
+        // locked too.
+        self.tick_night_light();
         // First, so a failure on any other surface cannot keep it from drawing.
         self.render_lock(dt);
         // A sleep held back for the lock screen goes ahead once it has drawn.
@@ -225,6 +228,9 @@ impl App {
                             self.mark_all_dirty();
                         }
                     }
+                    crate::actions::SystemAction::SetSetting { path, value } => self.apply_setting(path, value),
+                    crate::actions::SystemAction::NightLight(command) => self.night_light_command(command),
+                    crate::actions::SystemAction::IdleInhibit(on) => self.set_idle_inhibited(on),
                     crate::actions::SystemAction::PreviewTheme(preview) => {
                         let (name, theme) = *preview;
                         self.preview_theme(name, theme);

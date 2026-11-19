@@ -244,6 +244,32 @@ stand-in logind on a private bus (`DBUS_SYSTEM_BUS_ADDRESS`) in headless sway
 with a stub `systemctl` first in `PATH`: the suspend stage otherwise
 suspends the real machine.
 
+The Battery page's **Idle and sleep** section (`ui/pages/idle_settings.rs`)
+sets every `[idle]` key but `dim_color`, and the stay-awake switch.
+
+**Night light** (`night_light.rs` pure and tested: the sunrise equation,
+the schedule and its fade, kelvin to RGB, the ramps;
+`wayland/state/night_light.rs`) holds a `wlr-gamma-control` per output
+only while warmer than daylight, and destroys them in daylight, which gives
+the outputs back their own colours. It looks at the schedule every 5 s and
+resends the ramps only after a 15 K move. `schedule = "sun"` takes the
+location from `[night_light]` or the dashboard weather's `weather.json`,
+and without one uses the fixed times. `nightlight on|off|toggle` holds
+until the schedule would change anyway; `auto` returns to it. A control
+that fails (another program such as gammastep holds the gamma, *or* the
+output has none: headless sway's and nested outputs never have it, so the
+sandbox can only test the page) is reported on the Display page's card
+(`ui/pages/night_light.rs`) and not retried until something changes.
+
+**Settings changed on a page** (idle, night light) are saved by dotted
+path in `$XDG_STATE_HOME/stratum/settings.json` (`settings_override.rs`),
+with the config's value when each was changed, and laid over the merged
+config in `ConfigSource::load`. An override applies only while the config
+still has that value: editing the key in the config wins and drops it. A
+page sends `SystemAction::SetSetting`, and the shell reloads at once.
+Their rows are `ui/pages/settings_card.rs`, whose label column widens to
+its longest label. Live tests set `XDG_STATE_HOME`.
+
 Notifications persist (`notification_store.rs`) to
 `$XDG_STATE_HOME/stratum/notifications.json`. Restored notifications are
 marked as already toasted.

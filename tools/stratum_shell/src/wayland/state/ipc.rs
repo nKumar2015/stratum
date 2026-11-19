@@ -175,6 +175,12 @@ impl App {
                 };
                 self.set_idle_inhibited(inhibited);
             }
+            ("nightlight", function) => self.night_light_command(match function {
+                "on" => "on",
+                "off" => "off",
+                "toggle" => "toggle",
+                _ => "auto",
+            }),
             ("powermenu", "toggle") => {
                 // The menu opens on the focused monitor, not on whichever is
                 // first: the QML shell routed popups the same way.

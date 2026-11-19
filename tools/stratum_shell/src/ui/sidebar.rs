@@ -242,6 +242,7 @@ fn build_widget(entry: &WidgetConfig) -> Box<dyn Widget> {
         WidgetKind::Battery => Box::new(Battery::new()),
         WidgetKind::Clock => Box::new(Clock::new()),
         WidgetKind::IdleInhibit => Box::new(IdleInhibit::default()),
+        WidgetKind::NightLight => Box::new(crate::ui::widgets::NightLight::default()),
         WidgetKind::Spacer => Box::new(Spacer {
             size: entry.height.unwrap_or(12) as f32,
         }),

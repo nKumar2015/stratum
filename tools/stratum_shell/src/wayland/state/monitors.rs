@@ -214,7 +214,12 @@ impl App {
             return;
         }
         self.config_stamp = stamp;
+        self.reload_config();
+    }
 
+    /// Load the configuration again and apply it: after the file changed,
+    /// or a page changed a setting.
+    pub(super) fn reload_config(&mut self) {
         // The same loader as at startup, so the defaults and the checks are
         // identical.
         match self.config_source.load() {
@@ -236,7 +241,11 @@ impl App {
                     || config.metrics.bar.corner_size != self.config.metrics.bar.corner_size;
                 let idle_changed = config.idle != self.config.idle;
                 let clipboard_changed = config.clipboard.max_entries != self.config.clipboard.max_entries;
+                let night_changed = config.night_light != self.config.night_light;
                 self.config = Arc::new(config);
+                if night_changed {
+                    self.night_light_changed();
+                }
                 if idle_changed {
                     self.arm_idle();
                 }
@@ -256,6 +265,22 @@ impl App {
                 tracing::error!("config reload rejected: {err}\nkeeping the previous configuration");
             }
         }
+    }
+
+    /// A setting changed on a page: kept over the config in the settings
+    /// file, then applied by reloading.
+    pub(super) fn apply_setting(&mut self, path: &str, value: toml::Value) {
+        let base = match self.config_source.load_table() {
+            Ok((table, _)) => crate::settings_override::get(&table, path).cloned(),
+            Err(err) => {
+                tracing::error!("not changing {path}: the config does not load: {err}");
+                return;
+            }
+        };
+        let mut overrides = crate::settings_override::Overrides::load();
+        overrides.set(path, value, base);
+        overrides.save();
+        self.reload_config();
     }
 }
 

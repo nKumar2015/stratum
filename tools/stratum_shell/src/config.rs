@@ -41,6 +41,7 @@ pub struct Config {
     pub idle: IdleConfig,
     pub launcher: LauncherConfig,
     pub clipboard: ClipboardConfig,
+    pub night_light: NightLightConfig,
     pub screenshot: ScreenshotConfig,
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
@@ -55,19 +56,12 @@ impl Config {
     /// Merge `layers` in order, each over the ones before it, and check the
     /// result. Each layer is a file's path (for errors) and its text.
     pub fn from_layers(layers: &[(&Path, &str)]) -> Result<Self, ConfigError> {
-        let mut merged = toml::Table::new();
-        for (path, text) in layers {
-            let table: toml::Table = toml::from_str(text).map_err(|err| ConfigError::Parse {
-                path: path.to_path_buf(),
-                message: err.to_string(),
-            })?;
-            merge(&mut merged, table);
-        }
-        let sources = layers
-            .iter()
-            .map(|(path, _)| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(" + ");
+        Self::from_table(merged_layers(layers)?, &sources(layers))
+    }
+
+    /// Check and deserialise an already merged table.
+    pub fn from_table(merged: toml::Table, sources: &str) -> Result<Self, ConfigError> {
+        let sources = sources.to_string();
         let config: Config = toml::Value::Table(merged)
             .try_into()
             .map_err(|err: toml::de::Error| ConfigError::Invalid {
@@ -104,6 +98,21 @@ impl Config {
         }
         if self.displays.scales.is_empty() || self.displays.scales.iter().any(|s| !(*s >= 0.25 && *s <= 8.0)) {
             return Err("displays.scales must list scales from 0.25 to 8".into());
+        }
+        let night = &self.night_light;
+        if !(1000..=6500).contains(&night.temperature) {
+            return Err("night_light.temperature must be 1000-6500".into());
+        }
+        for (key, time) in [("start", &night.start), ("end", &night.end)] {
+            if crate::night_light::parse_time(time).is_none() {
+                return Err(format!("night_light.{key}: `{time}` is not HH:MM"));
+            }
+        }
+        if night.fade_min > 180 {
+            return Err("night_light.fade_min must be at most 180".into());
+        }
+        if night.latitude.is_some() != night.longitude.is_some() {
+            return Err("night_light: set both latitude and longitude, or neither".into());
         }
         if !(1..=10_000).contains(&self.clipboard.max_entries) {
             return Err("clipboard.max_entries must be 1-10000".into());
@@ -220,15 +229,32 @@ impl ConfigSource {
         })
     }
 
-    /// The defaults with the user's file, when it exists, merged over them.
+    /// The defaults with the user's file, when it exists, merged over them,
+    /// and the settings changed in the settings window over both.
     pub fn load(&self) -> Result<Config, ConfigError> {
+        let (mut table, sources) = self.load_table()?;
+        let mut overrides = crate::settings_override::Overrides::load();
+        if overrides.apply(&mut table) {
+            // The config changed a key a setting had overridden: it wins.
+            overrides.save();
+        }
+        Config::from_table(table, &format!("{sources} + settings"))
+    }
+
+    /// The defaults and the user's file merged, without the settings window's
+    /// overrides, and where they came from.
+    pub fn load_table(&self) -> Result<(toml::Table, String), ConfigError> {
         let defaults = read(&self.defaults)?;
         match self.user.as_deref().filter(|path| path.is_file()) {
             Some(user) => {
                 let text = read(user)?;
-                Config::from_layers(&[(&self.defaults, &defaults), (user, &text)])
+                let layers = [(self.defaults.as_path(), defaults.as_str()), (user, text.as_str())];
+                Ok((merged_layers(&layers)?, sources(&layers)))
             }
-            None => Config::from_layers(&[(&self.defaults, &defaults)]),
+            None => {
+                let layers = [(self.defaults.as_path(), defaults.as_str())];
+                Ok((merged_layers(&layers)?, sources(&layers)))
+            }
         }
     }
 
@@ -248,6 +274,23 @@ impl ConfigSource {
         let modified = std::fs::metadata(&target).ok()?.modified().ok()?;
         Some((target, modified))
     }
+}
+
+/// `layers` merged in order, each over the ones before it.
+fn merged_layers(layers: &[(&Path, &str)]) -> Result<toml::Table, ConfigError> {
+    let mut merged = toml::Table::new();
+    for (path, text) in layers {
+        let table: toml::Table = toml::from_str(text).map_err(|err| ConfigError::Parse {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        })?;
+        merge(&mut merged, table);
+    }
+    Ok(merged)
+}
+
+fn sources(layers: &[(&Path, &str)]) -> String {
+    layers.iter().map(|(path, _)| path.display().to_string()).collect::<Vec<_>>().join(" + ")
 }
 
 /// Merge `over` into `base`: tables key by key, anything else replaced. A
@@ -459,6 +502,8 @@ pub enum WidgetKind {
     Spacer,
     /// Stay awake: holds the idle stages off while on.
     IdleInhibit,
+    /// Night light: warmer screens now, or back to the schedule.
+    NightLight,
 }
 
 /// Look-and-feel knobs that are not colours.
@@ -832,6 +877,37 @@ pub struct ClipboardConfig {
     pub max_entries: usize,
     /// A copy larger than this is not recorded.
     pub max_entry_mb: usize,
+}
+
+/// When night light is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NightSchedule {
+    /// Sunset to sunrise where you are.
+    Sun,
+    /// From `start` to `end`.
+    Fixed,
+}
+
+/// Night light (`crate::night_light`): warmer screens at night.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NightLightConfig {
+    pub enabled: bool,
+    pub schedule: NightSchedule,
+    /// The colour temperature at night, in kelvin (6500 is unchanged).
+    pub temperature: u32,
+    /// The fixed schedule's times, `"HH:MM"`; also the sun schedule's
+    /// fallback without a location.
+    pub start: String,
+    pub end: String,
+    /// Minutes over which it fades in after night starts, and out before
+    /// it ends.
+    pub fade_min: u32,
+    /// Where the sun schedule takes the sun from. Without them, the
+    /// dashboard weather's location is used.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// A resolved, ready-to-draw palette.

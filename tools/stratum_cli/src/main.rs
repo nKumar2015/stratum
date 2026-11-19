@@ -31,6 +31,7 @@ fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
         "dashboard" => Some(&["open [tab]", "close", "toggle [tab]"]),
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
         "launcher" => Some(&["open [apps|emoji|clipboard]", "close", "toggle [apps|emoji|clipboard]"]),
+        "nightlight" => Some(&["on", "off", "toggle", "auto"]),
         "clipboard" => Some(&["clear"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),

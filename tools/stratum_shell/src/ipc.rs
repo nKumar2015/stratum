@@ -41,6 +41,8 @@ pub fn functions(target: &str) -> Option<&'static [&'static str]> {
         // Stay awake: hold the idle stages off.
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
         "launcher" => Some(&["open", "close", "toggle"]),
+        // By hand until the schedule changes; `auto` returns to it.
+        "nightlight" => Some(&["on", "off", "toggle", "auto"]),
         "clipboard" => Some(&["clear"]),
         "lockscreen" => Some(&["lock"]),
         "notifications" => Some(&["open", "close", "toggle", "clear", "toggleDnd"]),

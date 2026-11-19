@@ -4,6 +4,7 @@
 //! The facts the battery hover menu shows (`BatteryHoverMenu.qml`: screen-on
 //! time, the projection, the rate) follow as cards, then the power profiles
 //! as tiles. Profiles switch on one click: they are easily changed back.
+//! The idle and sleep settings follow (`idle_settings`).
 
 use crate::actions::SystemAction;
 use crate::config::Theme;
@@ -24,12 +25,14 @@ const PROFILES: [(&str, &str, &str, &str); 3] = [
 
 pub struct BatteryPage {
     profile: Optimistic<String>,
+    idle: crate::ui::pages::idle_settings::IdleSection,
 }
 
 impl BatteryPage {
     pub fn new() -> Self {
         Self {
             profile: Optimistic::new(),
+            idle: Default::default(),
         }
     }
 
@@ -116,7 +119,10 @@ impl BatteryPage {
                 pending.push(SystemAction::SetPowerProfile(key.to_string()));
             }
         }
-        y + layout::grid_height(PROFILES.len(), cols, m.tile_height, m.grid_gap)
+        y += layout::grid_height(PROFILES.len(), cols, m.tile_height, m.grid_gap);
+
+        y += m.section_spacing;
+        self.idle.paint(ctx, list, body, y, input, clicked, pending)
     }
 }
 

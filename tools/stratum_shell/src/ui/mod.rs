@@ -39,6 +39,9 @@ pub struct PaintCtx<'a> {
     pub themes: &'a std::collections::BTreeMap<String, crate::config::ThemeConfig>,
     /// The Display page's settings.
     pub displays: &'a crate::config::DisplaysConfig,
+    /// The settings the Battery and Display pages edit.
+    pub idle: &'a crate::config::IdleConfig,
+    pub night_light: &'a crate::config::NightLightConfig,
     /// Which of `themes` are custom themes the user made (and may edit).
     pub custom_themes: &'a std::collections::BTreeSet<String>,
     /// Which output's bar is being painted (for per-monitor workspace focus).
@@ -117,6 +120,8 @@ pub enum Action {
     OpenDashboard(String),
     /// Stay awake, or stop (the idle_inhibit icon).
     ToggleIdleInhibit,
+    /// Night light on or off by hand (the night_light icon).
+    ToggleNightLight,
 }
 
 /// Which mouse button produced a click.

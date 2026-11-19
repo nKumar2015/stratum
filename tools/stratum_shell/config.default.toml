@@ -88,6 +88,22 @@ enabled = true          # read at start; off in a second shell
 max_entries = 250       # the oldest go first
 max_entry_mb = 16       # larger copies are not kept
 
+# Night light: warmer screens at night, set on the Display page or with
+# `stratum-cli nightlight on|off|toggle|auto`. Only one program may set an
+# output's colours, so it reports a conflict while gammastep or hyprsunset
+# runs.
+[night_light]
+enabled = false
+schedule = "sun"        # "sun": sunset to sunrise; "fixed": start to end
+temperature = 4000      # kelvin at night; 6500 leaves colours unchanged
+start = "21:00"         # the fixed schedule, and the sun's without a location
+end = "07:00"
+fade_min = 30           # fades in after night starts and out before it ends
+# Where the sun schedule takes the sun from; without these, the dashboard
+# weather's location.
+# latitude = 37.23
+# longitude = -80.41
+
 [render]
 # GPU to draw on: "auto", "nvidia", "radeon" or "intel". Only that vendor's
 # Vulkan driver is loaded, which saves memory (the NVIDIA driver alone costs
@@ -251,12 +267,13 @@ framed = false
 [[sidebar.widgets]]
 kind = "quick_panel"
 framed = true
-height = 112
+height = 140
 children = [
   { kind = "audio", framed = false },
   { kind = "bluetooth", framed = false },
   { kind = "wifi", framed = false },
   { kind = "idle_inhibit", framed = false }, # stay awake: click to hold idle off
+  { kind = "night_light", framed = false },  # warmer screens now, or back to the schedule
 ]
 
 [[sidebar.widgets]]
