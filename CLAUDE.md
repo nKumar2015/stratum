@@ -751,6 +751,13 @@ desktop portal's FileChooser, ahead of GTK's.
 - The clipboard is `wl-copy`/`wl-paste` with `text/uri-list`, so copying in
   one window pastes in another; a cut is remembered in
   `$XDG_RUNTIME_DIR/stratum-files-cut`.
+- The preview pane (`preview.rs`, F9, `[files] preview`) shows the
+  selection, else the folder: a picture decoded at the pane's size, a text
+  file's first 16 KB (`widgets::draw::paint_text_preview`, shared with the
+  launcher's clipboard pane), a folder's size added up (capped, and
+  stopped when the selection moves on), and the type's comment from
+  shared-mime-info's `mime/<type>.xml`. All loading is on one thread of
+  its own; it holds one picture at most, and nothing while hidden.
 - Live tests: run it in headless sway with a scratch `HOME`,
   `XDG_DATA_HOME` (the trash), `XDG_CONFIG_HOME` (bookmarks, user dirs) and
   `XDG_STATE_HOME`; never browse or delete in the user's home. Test the

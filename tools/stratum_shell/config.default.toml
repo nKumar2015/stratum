@@ -80,6 +80,7 @@ sort_descending = false
 thumbnails = true       # pictures as themselves, decoded on a thread
 thumbnail_max_mb = 20   # larger pictures keep their icon
 confirm_delete = true   # ask before deleting for good; the trash never asks
+preview = true          # the selection's preview at the right; F9 toggles
 terminal_here = ["kitty", "--directory"] # the folder is appended
 
 [launcher]
@@ -447,6 +448,11 @@ radius = 6.0
 menu_width = 200.0     # the context menu
 chooser_height = 56.0   # the file chooser's name field and buttons
 dialog_width = 380.0    # asking before deleting for good
+preview_width = 280.0   # the preview pane at the right
+preview_text = 11.0     # a text file's lines in it
+preview_icon = 96.0     # the type's icon, for what has no picture
+preview_row = 20.0      # an information row under it
+preview_label = 84.0    # their labels' column
 
 [metrics.launcher]
 width = 640.0

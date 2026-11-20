@@ -24,6 +24,7 @@ use crate::chooser::Chooser;
 use crate::entries::{self, Entry, SortKey};
 use crate::mime::MimeDb;
 use crate::places::{self, Place, Section};
+use crate::preview::{self, Preview};
 use crate::undo::{self, Step};
 use crate::{clipboard, open, ops, trash};
 
@@ -38,6 +39,7 @@ const FOLDER: &str = "\u{f024b}";
 const FILE: &str = "\u{f0214}";
 const SORT_UP: &str = "\u{f0360}";
 const SORT_DOWN: &str = "\u{f035d}";
+const PREVIEW: &str = "\u{f10ab}";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
@@ -141,6 +143,10 @@ pub struct Browser {
     pub chooser: Option<Chooser>,
     pub quit: bool,
     history: undo::History,
+    /// The preview pane, its contents, and what is known of the item in it.
+    pub preview_shown: bool,
+    preview: Preview,
+    facts: Option<preview::Facts>,
 }
 
 /// A decoded thumbnail, or `None` for a picture that did not decode.
@@ -199,6 +205,9 @@ impl Browser {
             chooser: None,
             quit: false,
             history: undo::History::default(),
+            preview_shown: config.preview,
+            preview: Preview::default(),
+            facts: None,
         };
         browser.load(dir);
         browser
@@ -818,13 +827,15 @@ impl Browser {
 
         // At the right: view, hidden files, search.
         let mut right = bar.x + bar.width - m.padding;
-        for (glyph, on, action) in [(GRID, self.view == View::Grid, 0), (LIST, self.view == View::List, 1), (HIDDEN, self.show_hidden, 2)] {
+        let buttons = [(PREVIEW, self.preview_shown, 3), (GRID, self.view == View::Grid, 0), (LIST, self.view == View::List, 1), (HIDDEN, self.show_hidden, 2)];
+        for (glyph, on, action) in buttons {
             right -= m.button;
             if layout::icon_button(ui, list, right, y, glyph, on, theme.primary, input, clicked) {
                 match action {
                     0 => self.view = View::Grid,
                     1 => self.view = View::List,
-                    _ => self.show_hidden = !self.show_hidden,
+                    2 => self.show_hidden = !self.show_hidden,
+                    _ => self.preview_shown = !self.preview_shown,
                 }
             }
             right -= m.gap * 0.5;
@@ -1187,6 +1198,160 @@ impl Browser {
         field.paint(ui, list, area, style, false);
     }
 
+    /// What the pane shows: the selection, else the folder itself (but
+    /// not the Trash, which is many folders).
+    fn preview_targets(&self) -> Vec<PathBuf> {
+        let selected = self.selected_paths();
+        if selected.is_empty() && !trash::is_trash(&self.dir) {
+            vec![self.dir.clone()]
+        } else {
+            selected
+        }
+    }
+
+    /// Start showing `targets`: what is known now, and the rest loading.
+    fn show_preview(&mut self, targets: Vec<PathBuf>, px: u32, config: &stratum_ui::config::FilesConfig) {
+        self.facts = None;
+        let mut kind = preview::Kind::Icon;
+        if let [one] = targets.as_slice() {
+            let entry = self.entries.iter().find(|e| &e.path == one);
+            let is_dir = entry.map_or_else(|| one.is_dir(), |e| e.is_dir);
+            let mime = entry.map_or_else(|| self.db.of(one, is_dir), |e| e.mime.clone());
+            let size = entry.map_or(0, |e| e.size);
+            kind = if is_dir {
+                preview::Kind::Folder
+            } else if config.thumbnails && matches!(mime.as_str(), "image/png" | "image/jpeg") && size <= config.thumbnail_max_mb * 1024 * 1024 {
+                preview::Kind::Picture
+            } else if self.db.ancestors(&mime).iter().any(|m| m == "text/plain") {
+                preview::Kind::Text
+            } else {
+                preview::Kind::Icon
+            };
+            self.facts = Some(preview::Facts::read(one, &mime));
+        }
+        self.preview.show(targets, kind, px, self.waker.as_ref());
+    }
+
+    fn paint_preview(&mut self, ui: &mut AppUi, list: &mut DisplayList, pane: Rect, config: &stratum_ui::config::FilesConfig) {
+        let m = ui.config.metrics.files.clone();
+        let theme = ui.theme.clone();
+        list.push_rect(Rect { width: 1.0, color: theme.border_inactive, ..pane });
+        let inner = rect(pane.x + m.padding, pane.y + m.padding, pane.width - m.padding * 2.0, pane.height - m.padding * 2.0);
+        let side = inner.width.min(inner.height * 0.5);
+        let visual = rect(inner.x, inner.y, inner.width, side);
+        // Twice the logical size, for scaled outputs.
+        let px = (side * 2.0) as u32;
+
+        let targets = self.preview_targets();
+        if targets != self.preview.showing {
+            self.show_preview(targets, px, config);
+        }
+        let targets = self.preview.showing.clone();
+        let entry = |path: &Path| self.entries.iter().find(|e| e.path == path).cloned();
+
+        // The top: the picture, the text, or an icon.
+        match self.preview.visual.clone() {
+            preview::Visual::Picture { image, .. } => {
+                let fit = (visual.width / image.width as f32).min(visual.height / image.height as f32).min(1.0);
+                let (w, h) = (image.width as f32 * fit, image.height as f32 * fit);
+                let (x, y) = (visual.x + (visual.width - w) * 0.5, visual.y + (visual.height - h) * 0.5);
+                use stratum_ui::render::display_list::{Point, TexturedQuad};
+                list.push_texture(TexturedQuad {
+                    // A new key for each new picture.
+                    key: 0x5052_4556_0000_0000 ^ self.preview.generation(),
+                    width: image.width,
+                    height: image.height,
+                    pixels: image.pixels.clone(),
+                    corners: [Point::new(x, y), Point::new(x + w, y), Point::new(x + w, y + h), Point::new(x, y + h)],
+                    uv: [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+                    alpha: 1.0,
+                });
+            }
+            preview::Visual::Text { text, more } => {
+                list.push_rect(Rect { radius: m.radius, color: theme.surface_high, ..visual });
+                let view = rect(visual.x + m.gap, visual.y + m.gap, visual.width - m.gap * 2.0, visual.height - m.gap * 2.0);
+                ui::paint_text_preview(ui, list, &text, more, view, m.preview_text);
+            }
+            preview::Visual::Pending => {}
+            preview::Visual::Icon => {
+                let icon_box = rect(visual.x + (visual.width - m.preview_icon) * 0.5, visual.y + (visual.height - m.preview_icon) * 0.5, m.preview_icon, m.preview_icon);
+                let one = match targets.as_slice() {
+                    [one] => Some(entry(one).unwrap_or_else(|| folder_entry(one))),
+                    _ => None,
+                };
+                let names = match &one {
+                    Some(e) if e.is_dir => folder_icons(&e.path),
+                    Some(e) => self.db.icon_names(&e.mime),
+                    None => Vec::new(),
+                };
+                match names.iter().find_map(|n| ui.icons.load_icon(n, m.preview_icon as u32, 2)) {
+                    Some(image) => {
+                        let (image, at) = fit(image, icon_box);
+                        push_image(list, image, at);
+                    }
+                    None => {
+                        let glyph = if one.as_ref().is_some_and(|e| e.is_dir) { FOLDER } else { FILE };
+                        ui::paint_icon_centered(ui, list, glyph, icon_box, m.preview_icon * 0.8, theme.text_muted);
+                    }
+                }
+            }
+        }
+
+        // Under it: the name, then the information.
+        let mut y = visual.y + visual.height + m.gap;
+        let title = match targets.as_slice() {
+            [one] => entry(one).map(|e| e.name).unwrap_or_else(|| one.file_name().map_or_else(|| one.display().to_string(), |n| n.to_string_lossy().into_owned())),
+            [] => "Nothing selected".into(),
+            many => format!("{} selected", count(many.len(), "item")),
+        };
+        let title = if trash::is_trash(&self.dir) && targets.is_empty() { "Trash".to_string() } else { title };
+        let weight = ui.config.metrics.typography.weight_medium;
+        for line in ui::wrap_text(ui, &title, m.text, weight, inner.width, 2) {
+            let line = ui::elide(ui, &line, m.text, weight, inner.width);
+            ui::paint_text_centered_weighted(ui, list, &line, rect(inner.x, y, inner.width, m.preview_row), m.text, weight, theme.text_main);
+            y += m.preview_row;
+        }
+        y += m.gap;
+
+        let pixels = match &self.preview.visual {
+            preview::Visual::Picture { width, height, .. } => Some((*width, *height)),
+            _ => None,
+        };
+        let mut lines: Vec<(&str, String)> = match (&self.facts, targets.as_slice()) {
+            (Some(facts), [_]) => preview::info_lines(facts, self.preview.folder, pixels, chrono::Local::now()),
+            (_, []) => vec![("Contains", count(self.entries.len(), "item"))],
+            (_, many) => {
+                let picked: Vec<Entry> = many.iter().filter_map(|p| entry(p)).collect();
+                let folders = picked.iter().filter(|e| e.is_dir).count();
+                let bytes: u64 = picked.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
+                let mut lines = vec![("Files", (picked.len() - folders).to_string()), ("Size", entries::format_size(bytes))];
+                if folders > 0 {
+                    lines.insert(1, ("Folders", folders.to_string()));
+                }
+                lines
+            }
+        };
+        // In the Trash, where an item came from.
+        if let [one] = targets.as_slice() {
+            if let Some(folder) = self.origins.get(one) {
+                lines.insert(1, ("From", tilde(folder)));
+            }
+        }
+        list.push_clip(inner);
+        let value_x = inner.x + m.preview_label;
+        for (label, value) in lines {
+            if y + m.preview_row > inner.y + inner.height {
+                break;
+            }
+            let row = rect(inner.x, y, inner.width, m.preview_row);
+            ui::paint_text_vcentered(ui, list, label, inner.x, row, m.detail_text, 400, theme.text_muted);
+            let value = ui::elide(ui, &value, m.detail_text, 400, inner.x + inner.width - value_x);
+            ui::paint_text_vcentered(ui, list, &value, value_x, row, m.detail_text, 400, theme.text_main);
+            y += m.preview_row;
+        }
+        list.pop_clip();
+    }
+
     fn paint_status(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
@@ -1307,6 +1472,8 @@ impl Browser {
         let stamp = self.stamp();
         if stamp != self.dir_stamp {
             self.reload();
+            // What is shown may have changed too.
+            self.preview.forget();
             return true;
         }
         false
@@ -1370,6 +1537,19 @@ fn pointer_double(input: &InputState, area: Rect, clicked: bool) -> bool {
     clicked && layout::hovered(input, area)
 }
 
+/// An entry for a folder that is not in the list (the one shown).
+fn folder_entry(path: &Path) -> Entry {
+    Entry {
+        name: path.file_name().map_or_else(|| "/".into(), |n| n.to_string_lossy().into_owned()),
+        path: path.to_path_buf(),
+        is_dir: true,
+        is_link: false,
+        size: 0,
+        modified: None,
+        mime: crate::mime::DIRECTORY.into(),
+    }
+}
+
 /// `path` with the home folder written `~`.
 fn tilde(path: &Path) -> String {
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -1418,9 +1598,19 @@ impl App for Browser {
         let body_h = status.y - body_y;
         let sidebar = rect(area.x, body_y, m.sidebar_width.min(area.width * 0.4), body_h);
         let main = rect(sidebar.x + sidebar.width, body_y, area.width - sidebar.width, body_h);
+        // The preview pane takes the right, if the folder keeps half.
+        let pane_w = if self.preview_shown { m.preview_width.min(main.width * 0.5) } else { 0.0 };
+        let main = Rect { width: main.width - pane_w, ..main };
 
         self.paint_sidebar(ui, list, sidebar, input, clicked);
         self.paint_entries(ui, list, main, input, &inner, clicked, &config);
+        if pane_w > 0.0 {
+            self.paint_preview(ui, list, rect(main.x + main.width, body_y, pane_w, body_h), &config);
+        } else if !self.preview.showing.is_empty() {
+            // Hidden: its picture is not kept.
+            self.preview.clear();
+            self.facts = None;
+        }
         self.paint_status(ui, list, status, input, clicked);
         if let Some(mut chooser) = self.chooser.take() {
             let bar = rect(area.x, status.y + status.height, area.width, chooser_h);
@@ -1566,6 +1756,7 @@ impl App for Browser {
             }
             Keysym::Delete => self.trash_selected(),
             Keysym::F2 => self.start_rename(),
+            Keysym::F9 => self.preview_shown = !self.preview_shown,
             Keysym::F5 => self.reload(),
             Keysym::Escape => {
                 if self.chooser.is_some() {
@@ -1629,7 +1820,8 @@ impl App for Browser {
     fn poll(&mut self) -> bool {
         let thumbs = self.take_thumbnails();
         let job = self.take_job();
-        thumbs || job
+        let preview = self.preview.take();
+        thumbs || job || preview
     }
 
     fn done(&self) -> bool {

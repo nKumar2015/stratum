@@ -863,7 +863,7 @@ impl Launcher {
         if clip.image.is_some() {
             self.paint_preview_image(list, &clip, view);
         } else if let Some((_, text, more)) = self.preview_text.clone() {
-            self.paint_preview_text(ctx, list, &text, more, view, m);
+            ui::paint_text_preview(ctx, list, &text, more, view, m.preview_text);
         }
     }
 
@@ -898,58 +898,6 @@ impl Launcher {
             uv: [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
             alpha: 1.0,
         });
-    }
-
-    /// The selected text: each line as written, tabs expanded, wrapped only
-    /// when it does not fit.
-    fn paint_preview_text(&self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, text: &str, more: bool, view: Rect, m: &LauncherMetrics) {
-        let theme = ctx.theme;
-        let regular = ctx.metrics.typography.weight_regular;
-        let style = crate::text::TextStyle {
-            family: std::sync::Arc::from(theme.font.as_str()),
-            size: m.preview_text,
-            weight: regular,
-            color: theme.text_main,
-        };
-        let line_height = ctx.text.metrics(&style).1;
-        let max_lines = ((view.height / line_height).floor() as usize).max(1);
-        let mut lines: Vec<String> = Vec::new();
-        'source: for source in text.lines() {
-            let source = source.replace('\t', "    ");
-            if ctx.text.measure(&source, &style).0 <= view.width {
-                lines.push(source);
-            } else {
-                // Wrapping collapses whitespace, so the indent is put back in
-                // front of every part.
-                let body = source.trim_start();
-                let indent = &source[..source.len() - body.len()];
-                let indent_width = ctx.text.measure(indent, &style).0;
-                let width = (view.width - indent_width).max(view.width * 0.5);
-                for wrapped in ui::wrap_text(ctx, body, m.preview_text, regular, width, max_lines) {
-                    let line = format!("{indent}{wrapped}");
-                    lines.push(ui::elide(ctx, &line, m.preview_text, regular, view.width));
-                    if lines.len() >= max_lines {
-                        break 'source;
-                    }
-                }
-            }
-            if lines.len() >= max_lines {
-                break;
-            }
-        }
-        let cut = lines.len() >= max_lines || more;
-        lines.truncate(max_lines);
-        if cut {
-            if let Some(last) = lines.last_mut() {
-                *last = ui::elide(ctx, &format!("{last} …"), m.preview_text, regular, view.width);
-            }
-        }
-        list.push_clip(view);
-        for (n, line) in lines.iter().enumerate() {
-            let row = Rect { y: view.y + n as f32 * line_height, height: line_height, ..view };
-            ui::paint_text_vcentered(ctx, list, line, view.x, row, m.preview_text, regular, theme.text_main);
-        }
-        list.pop_clip();
     }
 
     fn paint_icon(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, item: &Item, area: Rect, m: &LauncherMetrics) {

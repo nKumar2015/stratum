@@ -867,6 +867,8 @@ pub struct FilesConfig {
     pub thumbnail_max_mb: u64,
     /// Ask before deleting for good (the trash never asks).
     pub confirm_delete: bool,
+    /// The preview pane at the right, for a new window (F9 toggles).
+    pub preview: bool,
     /// A terminal opened in the current folder: the folder is appended.
     pub terminal_here: Vec<String>,
 }

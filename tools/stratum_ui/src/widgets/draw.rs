@@ -241,6 +241,54 @@ fn elide_with(text: &str, max_width: f32, measure: &mut impl FnMut(&str) -> f32)
     }
 }
 
+/// Text shown as a preview (a clipboard entry, a file): each line as
+/// written, tabs expanded, wrapped only when it does not fit, clipped to
+/// `view`. `more` means the text was cut short, which the last line says.
+pub fn paint_text_preview(ctx: &mut impl Ui, list: &mut DisplayList, text: &str, more: bool, view: Rect, size: f32) {
+    let regular = ctx.metrics().typography.weight_regular;
+    let color = ctx.theme().text_main;
+    let style = TextStyle { family: std::sync::Arc::from(ctx.theme().font.as_str()), size, weight: regular, color };
+    let line_height = ctx.text().metrics(&style).1;
+    let max_lines = ((view.height / line_height).floor() as usize).max(1);
+    let mut lines: Vec<String> = Vec::new();
+    'source: for source in text.lines() {
+        let source = source.replace('\t', "    ");
+        if ctx.text().measure(&source, &style).0 <= view.width {
+            lines.push(source);
+        } else {
+            // Wrapping collapses whitespace, so the indent is put back in
+            // front of every part.
+            let body = source.trim_start();
+            let indent = &source[..source.len() - body.len()];
+            let indent_width = ctx.text().measure(indent, &style).0;
+            let width = (view.width - indent_width).max(view.width * 0.5);
+            for wrapped in wrap_text(ctx, body, size, regular, width, max_lines) {
+                let line = format!("{indent}{wrapped}");
+                lines.push(elide(ctx, &line, size, regular, view.width));
+                if lines.len() >= max_lines {
+                    break 'source;
+                }
+            }
+        }
+        if lines.len() >= max_lines {
+            break;
+        }
+    }
+    let cut = lines.len() >= max_lines || more;
+    lines.truncate(max_lines);
+    if cut {
+        if let Some(last) = lines.last_mut() {
+            *last = elide(ctx, &format!("{last} \u{2026}"), size, regular, view.width);
+        }
+    }
+    list.push_clip(view);
+    for (n, line) in lines.iter().enumerate() {
+        let row = Rect { y: view.y + n as f32 * line_height, height: line_height, ..view };
+        paint_text_vcentered(ctx, list, line, view.x, row, size, regular, color);
+    }
+    list.pop_clip();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

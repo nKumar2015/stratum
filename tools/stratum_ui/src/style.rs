@@ -238,6 +238,13 @@ pub struct FilesMetrics {
     pub chooser_height: f32,
     /// A dialog over the window (deleting for good).
     pub dialog_width: f32,
+    /// The preview pane: its width, a text file's text, the icon shown
+    /// for what has no picture, an information row and its label column.
+    pub preview_width: f32,
+    pub preview_text: f32,
+    pub preview_icon: f32,
+    pub preview_row: f32,
+    pub preview_label: f32,
 }
 
 /// The launcher: a search field over a list of results.
