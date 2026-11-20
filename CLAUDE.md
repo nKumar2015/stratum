@@ -56,6 +56,9 @@ tools/stratum_ui/      what the shell and its apps share: the renderer,
                        controls, text field, page layout) and `app`, a
                        window runner for standalone apps
 tools/stratum_shell/   the native shell
+tools/stratum_files/   the file manager, `stratum-files`, and the desktop
+                       portal's file chooser (its own binary, an output of
+                       the shell's Nix package)
 module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 ```
 
@@ -710,6 +713,43 @@ integer buffer scale from the outputs it is on, a `Waker` for background
 threads, and the config and theme reloaded when the user's file,
 `theme.json`, `settings.json` or the custom themes change, so an app
 follows a theme switched in the shell. One window per process.
+
+### The file manager
+
+`stratum-files` (`tools/stratum_files`) is a separate binary on
+`stratum_ui::app`, so it looks like the shell and follows its theme. The
+flake builds it in the same derivation as the shell (the dependencies
+compile once) as the `files` output, which the Home Manager module installs
+only with `programs.stratum.fileManager.enable`; that also makes it the
+desktop portal's FileChooser, ahead of GTK's.
+
+- Modes: `stratum-files [FOLDER|FILE|URI]` browses (a file opens its folder
+  with it selected); `--choose` is the file chooser (request JSON on stdin,
+  answer JSON on stdout, one process per dialog); `--portal` serves
+  `org.freedesktop.impl.portal.FileChooser` as
+  `org.freedesktop.impl.portal.desktop.stratum` (zbus only, no GPU),
+  starting a chooser per call and exporting the call's `Request` so Close
+  kills it. The package ships the `.portal` file and a D-Bus service file
+  that starts `--portal` on demand.
+- The model is pure and tested: `mime` (shared-mime-info's `globs2`,
+  `subclasses`, `generic-icons`; no content sniffing beyond "short and
+  UTF-8 is text/plain"), `entries` (folders first, natural order), `places`
+  (user dirs, GTK bookmarks, `/run/media` mounts), `trash` (the freedesktop
+  spec in `$XDG_DATA_HOME/Trash`; a file on another file system is refused,
+  and Shift+Delete deletes it), `ops` (copy and move on a thread with
+  progress and cancel; never overwrites, a taken name gets ` (copy)`),
+  `open` (`mimeapps.list` defaults and associations, then entries whose
+  `MimeType` names the type or an ancestor; apps start with `setsid`).
+- Desktop entries (the launcher's list and "Open with") are
+  `stratum_ui::apps`; `App::command(files)` fills `%f %F %u %U`.
+- The clipboard is `wl-copy`/`wl-paste` with `text/uri-list`, so copying in
+  one window pastes in another; a cut is remembered in
+  `$XDG_RUNTIME_DIR/stratum-files-cut`.
+- Live tests: run it in headless sway with a scratch `HOME`,
+  `XDG_DATA_HOME` (the trash), `XDG_CONFIG_HOME` (bookmarks, user dirs) and
+  `XDG_STATE_HOME`; never browse or delete in the user's home. Test the
+  portal on a private bus with `busctl call ... SaveFile osssa{sv} ...` and
+  `Request.Close`.
 
 ### UI layer
 

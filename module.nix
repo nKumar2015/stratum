@@ -58,11 +58,47 @@ in {
     };
 
     installPortal = lib.mkEnableOption "the GTK and Hyprland desktop portals (Save As in the screenshot viewer)";
+
+    fileManager = {
+      enable = lib.mkEnableOption ''
+        the file manager, `stratum-files`, and every app's Open and Save
+        dialogs through it (the desktop portal's FileChooser, with GTK's as
+        the fallback when `installPortal` is on). Its options are `[files]`
+        and `[metrics.files]` in `settings`'';
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = cfg.package.files or self.packages.${hostSystem}.stratum-files;
+        defaultText = lib.literalExpression "config.programs.stratum.package.files";
+        description = "`stratum-files`: the `files` output of the shell's package, built with it.";
+      };
+
+      setDefault = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Make it the app that opens folders (`inode/directory`). Needs
+          `xdg.mimeApps.enable`, which makes Home Manager own
+          {file}`~/.config/mimeapps.list`; without it, run
+          `xdg-mime default org.stratum.Files.desktop inode/directory`.
+        '';
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    warnings = lib.optional (cfg.fileManager.setDefault && !config.xdg.mimeApps.enable) ''
+      programs.stratum.fileManager.setDefault needs xdg.mimeApps.enable; folders
+      still open in the previous app.
+    '';
+
+    xdg.mimeApps.defaultApplications = lib.mkIf (cfg.fileManager.enable && cfg.fileManager.setDefault) {
+      "inode/directory" = ["org.stratum.Files.desktop"];
+    };
+
     home.packages =
       [cfg.package cfg.cliPackage]
+      ++ lib.optional cfg.fileManager.enable cfg.fileManager.package
       # Programs the shell runs.
       ++ (with pkgs; [
         brightnessctl # brightness, and the OSD's fallback reading
@@ -97,16 +133,22 @@ in {
       Install.WantedBy = ["graphical-session.target"];
     };
 
-    xdg.portal = lib.mkIf cfg.installPortal {
+    xdg.portal = lib.mkIf (cfg.installPortal || cfg.fileManager.enable) {
       enable = true;
-      extraPortals = [
-        pkgs.xdg-desktop-portal-gtk
-        pkgs.xdg-desktop-portal-hyprland
-      ];
-      config.common = {
-        default = ["gtk"];
-        "org.freedesktop.impl.portal.FileChooser" = ["gtk"];
-      };
+      extraPortals =
+        lib.optionals cfg.installPortal [
+          pkgs.xdg-desktop-portal-gtk
+          pkgs.xdg-desktop-portal-hyprland
+        ]
+        ++ lib.optional cfg.fileManager.enable cfg.fileManager.package;
+      config.common =
+        lib.optionalAttrs cfg.installPortal {default = ["gtk"];}
+        // {
+          # The first one found answers: ours, then GTK's.
+          "org.freedesktop.impl.portal.FileChooser" =
+            lib.optional cfg.fileManager.enable "stratum"
+            ++ lib.optional cfg.installPortal "gtk";
+        };
     };
   };
 }

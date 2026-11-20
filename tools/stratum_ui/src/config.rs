@@ -42,6 +42,7 @@ pub struct Config {
     pub launcher: LauncherConfig,
     pub clipboard: ClipboardConfig,
     pub night_light: NightLightConfig,
+    pub files: FilesConfig,
     pub screenshot: ScreenshotConfig,
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
@@ -113,6 +114,12 @@ impl Config {
         }
         if night.latitude.is_some() != night.longitude.is_some() {
             return Err("night_light: set both latitude and longitude, or neither".into());
+        }
+        if !matches!(self.files.view.as_str(), "list" | "grid") {
+            return Err(format!("files.view: `{}` is not list or grid", self.files.view));
+        }
+        if !matches!(self.files.sort.as_str(), "name" | "size" | "modified" | "type") {
+            return Err(format!("files.sort: `{}` is not name, size, modified or type", self.files.sort));
         }
         if !(1..=10_000).contains(&self.clipboard.max_entries) {
             return Err("clipboard.max_entries must be 1-10000".into());
@@ -842,6 +849,26 @@ pub struct IdleConfig {
     pub lock_before_sleep: bool,
     /// Lock on `loginctl lock-session`. Read at start.
     pub lock_on_loginctl: bool,
+}
+
+/// The file manager (`stratum-files`); its sizes are `[metrics.files]`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FilesConfig {
+    /// `"list"` or `"grid"`, for a new window.
+    pub view: String,
+    pub show_hidden: bool,
+    /// `"name"`, `"size"`, `"modified"` or `"type"`.
+    pub sort: String,
+    pub sort_descending: bool,
+    /// Pictures shown as themselves rather than an icon, if no larger than
+    /// this.
+    pub thumbnails: bool,
+    pub thumbnail_max_mb: u64,
+    /// Ask before deleting for good (the trash never asks).
+    pub confirm_delete: bool,
+    /// A terminal opened in the current folder: the folder is appended.
+    pub terminal_here: Vec<String>,
 }
 
 /// The launcher (`stratum-cli launcher toggle`); its sizes are

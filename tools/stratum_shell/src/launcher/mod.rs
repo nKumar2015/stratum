@@ -1017,6 +1017,9 @@ mod tests {
             icon: None,
             argv: vec![name.to_lowercase()],
             terminal: false,
+            exec: vec![name.to_lowercase()],
+            mime_types: Vec::new(),
+            hidden: false,
         }
     }
 

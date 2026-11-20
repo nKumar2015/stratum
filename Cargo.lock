@@ -2035,6 +2035,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "stratum-files"
+version = "0.1.0"
+dependencies = [
+ "async-process",
+ "chrono",
+ "futures-lite",
+ "image",
+ "libc",
+ "serde",
+ "serde_json",
+ "stratum_ui",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "stratum-shell"
 version = "0.1.0"
 dependencies = [

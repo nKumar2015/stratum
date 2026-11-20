@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.stratum
+Exec=@bin@/stratum-files --portal

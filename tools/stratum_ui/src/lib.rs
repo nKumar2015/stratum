@@ -8,6 +8,7 @@
 //! crate.
 
 pub mod animation;
+pub mod apps;
 pub mod app;
 pub mod color;
 pub mod config;
@@ -22,4 +23,5 @@ pub mod settings_override;
 pub mod style;
 pub mod text;
 pub mod theme_choice;
+pub mod uri;
 pub mod widgets;

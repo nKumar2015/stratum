@@ -23,6 +23,7 @@ pub struct Metrics {
     pub toasts: ToastMetrics,
     pub power_menu: PowerMenuMetrics,
     pub launcher: LauncherMetrics,
+    pub files: FilesMetrics,
     pub tray_menu: TrayMenuMetrics,
     pub lock: LockMetrics,
     pub polkit: PolkitMetrics,
@@ -196,6 +197,47 @@ pub struct OsdMetrics {
     pub fade_out_seconds: f32,
     /// How long the fill takes to slide to a new value.
     pub fill_seconds: f32,
+}
+
+/// The file manager's window.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FilesMetrics {
+    /// A new window's size, and the smallest it may be.
+    pub width: u32,
+    pub height: u32,
+    pub min_width: u32,
+    pub min_height: u32,
+    pub padding: f32,
+    pub gap: f32,
+    /// The bar of buttons, path and search along the top.
+    pub toolbar_height: f32,
+    pub button: f32,
+    pub search_width: f32,
+    pub sidebar_width: f32,
+    pub sidebar_row: f32,
+    pub sidebar_icon: f32,
+    pub section_height: f32,
+    /// The list view: column headers, rows and their icons, and the size
+    /// and date columns' widths.
+    pub header_height: f32,
+    pub row_height: f32,
+    pub row_icon: f32,
+    pub size_column: f32,
+    pub modified_column: f32,
+    /// The grid view: a cell and its icon.
+    pub cell_width: f32,
+    pub cell_height: f32,
+    pub cell_icon: f32,
+    pub status_height: f32,
+    pub text: f32,
+    pub detail_text: f32,
+    pub radius: f32,
+    /// The context menu's width, and the file chooser's bottom bar.
+    pub menu_width: f32,
+    pub chooser_height: f32,
+    /// A dialog over the window (deleting for good).
+    pub dialog_width: f32,
 }
 
 /// The launcher: a search field over a list of results.

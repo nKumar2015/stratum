@@ -1,0 +1,26 @@
+[package]
+name = "stratum-files"
+version.workspace = true
+edition.workspace = true
+description = "Stratum's file manager, and the desktop portal's file chooser"
+
+[[bin]]
+name = "stratum-files"
+path = "src/main.rs"
+
+[dependencies]
+# The renderer, theme, widgets and window runner the shell uses.
+stratum_ui = { path = "../stratum_ui" }
+# Thumbnails: PNG and JPEG, as the shell decodes.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The FileChooser portal's D-Bus service.
+zbus = { workspace = true }
+# Waiting for each chooser without blocking the bus; zbus already builds it.
+async-process = "2"
+futures-lite = { version = "2", default-features = false }
+chrono = { workspace = true }
+libc = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

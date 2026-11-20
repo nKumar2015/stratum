@@ -70,6 +70,18 @@ lock_on_loginctl = true # lock on `loginctl lock-session`; read at start
 
 # The launcher: apps, open windows, shell commands and a calculator
 # (`stratum-cli launcher toggle`).
+# The file manager (`stratum-files`), installed with the Home Manager
+# module's `programs.stratum.fileManager.enable`.
+[files]
+view = "list"           # "list" or "grid", for a new window
+show_hidden = false     # Ctrl+H toggles
+sort = "name"           # "name", "size", "modified" or "type"; folders first
+sort_descending = false
+thumbnails = true       # pictures as themselves, decoded on a thread
+thumbnail_max_mb = 20   # larger pictures keep their icon
+confirm_delete = true   # ask before deleting for good; the trash never asks
+terminal_here = ["kitty", "--directory"] # the folder is appended
+
 [launcher]
 rows = 8                # results shown at once; the list scrolls
 terminal = ["kitty", "-e"] # before a Terminal=true app's command
@@ -405,6 +417,36 @@ tile_radius = 8.0
 icon = 48.0
 label = 10.0
 scrim_alpha = 0.63      # dimming behind the menu
+
+[metrics.files]
+width = 1000            # a new window
+height = 640
+min_width = 560
+min_height = 360
+padding = 10.0
+gap = 8.0
+toolbar_height = 48.0   # back, forward, up, the path and search
+button = 32.0
+search_width = 220.0
+sidebar_width = 190.0
+sidebar_row = 32.0
+sidebar_icon = 18.0
+section_height = 28.0   # a sidebar section's name
+header_height = 28.0    # the list's column names
+row_height = 32.0
+row_icon = 20.0
+size_column = 90.0
+modified_column = 150.0
+cell_width = 104.0      # the grid view
+cell_height = 104.0
+cell_icon = 52.0
+status_height = 28.0
+text = 13.0
+detail_text = 11.0
+radius = 6.0
+menu_width = 200.0     # the context menu
+chooser_height = 56.0   # the file chooser's name field and buttons
+dialog_width = 380.0    # asking before deleting for good
 
 [metrics.launcher]
 width = 640.0
