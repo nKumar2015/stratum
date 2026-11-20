@@ -751,6 +751,16 @@ desktop portal's FileChooser, ahead of GTK's.
 - The clipboard is `wl-copy`/`wl-paste` with `text/uri-list`, so copying in
   one window pastes in another; a cut is remembered in
   `$XDG_RUNTIME_DIR/stratum-files-cut`.
+- Thumbnails (`thumbs.rs`): PNG, JPEG, WebP, GIF and BMP through `image`
+  (WebP is 261 KB of the binary on its own), SVG through resvg, anything
+  else through the system's `.thumbnailer` files (the Home Manager
+  option `fileManager.thumbnailers`; `[files] thumbnail_external`), run
+  with a 10 s limit. All go through the freedesktop cache,
+  `$XDG_CACHE_HOME/thumbnails/<size>/<md5 of the URI>.png`, valid while
+  its `Thumb::MTime` matches; files under the temp directory are not
+  cached, so live tests set `TMPDIR` (and `XDG_CACHE_HOME`). Test
+  thumbnailers with a stand-in script, or nixpkgs' `ffmpegthumbnailer`
+  on a video made with `ffmpeg -f lavfi -i testsrc`.
 - The preview pane (`preview.rs`, F9, `[files] preview`) shows the
   selection, else the folder: a picture decoded at the pane's size, a text
   file's first 16 KB (`widgets::draw::paint_text_preview`, shared with the

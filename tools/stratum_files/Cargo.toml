@@ -11,8 +11,13 @@ path = "src/main.rs"
 [dependencies]
 # The renderer, theme, widgets and window runner the shell uses.
 stratum_ui = { path = "../stratum_ui" }
-# Thumbnails: PNG and JPEG, as the shell decodes.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Thumbnails decoded here; anything else goes to the thumbnailers installed.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+# The thumbnail cache's Thumb::URI and Thumb::MTime text chunks; image
+# already builds it.
+png = "0.18"
+# SVG thumbnails; stratum_ui already links it for icons.
+resvg = { version = "0.48", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The FileChooser portal's D-Bus service.

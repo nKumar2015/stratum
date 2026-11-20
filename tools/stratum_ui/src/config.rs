@@ -865,6 +865,9 @@ pub struct FilesConfig {
     /// this.
     pub thumbnails: bool,
     pub thumbnail_max_mb: u64,
+    /// Run the thumbnailers installed on the system (videos, PDFs, fonts)
+    /// for what is not decoded here.
+    pub thumbnail_external: bool,
     /// Ask before deleting for good (the trash never asks).
     pub confirm_delete: bool,
     /// The preview pane at the right, for a new window (F9 toggles).

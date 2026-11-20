@@ -28,8 +28,9 @@ const WALK_TIME: Duration = Duration::from_secs(3);
 pub enum Visual {
     /// Being loaded.
     Pending,
-    /// A picture: decoded at the pane's size, and its own size in pixels.
-    Picture { image: IconImage, width: u32, height: u32 },
+    /// A picture at the pane's size, and its own size in pixels when it
+    /// was decoded here (a thumbnailer's says nothing of the original).
+    Picture { image: IconImage, size: Option<(u32, u32)> },
     Text { text: String, more: bool },
     /// The type's icon (a folder, or anything else).
     Icon,
@@ -49,6 +50,7 @@ pub struct FolderSize {
 /// What a request asks the thread for.
 enum Job {
     Picture { path: PathBuf, px: u32 },
+    Thumbnail(Thumb, u32),
     Text(PathBuf),
     Folder(PathBuf),
 }
@@ -75,10 +77,25 @@ impl Default for Preview {
     }
 }
 
+/// What a thumbnailer (or resvg) is asked for, with the thumbnailers.
+#[derive(Clone)]
+pub struct Thumb {
+    pub path: PathBuf,
+    pub mime: String,
+    pub modified: Option<SystemTime>,
+    pub bytes: u64,
+    pub max_bytes: u64,
+    pub external: bool,
+    pub thumbnailers: Arc<Vec<crate::thumbs::Thumbnailer>>,
+}
+
 /// How a selected file is previewed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone)]
 pub enum Kind {
+    /// Decoded here, at the pane's size.
     Picture,
+    /// Its thumbnail, at the pane's size.
+    Thumbnail(Thumb),
     Text,
     Folder,
     Icon,
@@ -95,6 +112,7 @@ impl Preview {
         self.folder = None;
         let job = match (paths.as_slice(), kind) {
             ([one], Kind::Picture) => Some(Job::Picture { path: one.clone(), px }),
+            ([_], Kind::Thumbnail(thumb)) => Some(Job::Thumbnail(thumb, px)),
             ([one], Kind::Text) => Some(Job::Text(one.clone())),
             ([one], Kind::Folder) => Some(Job::Folder(one.clone())),
             _ => None,
@@ -156,7 +174,20 @@ fn spawn(generation: Arc<AtomicU64>, done: Arc<Mutex<Vec<(u64, Loaded)>>>, waker
             }
             let loaded = match job {
                 Job::Picture { path, px } => {
-                    Loaded::Visual(picture(&path, px).map_or(Visual::Icon, |(image, width, height)| Visual::Picture { image, width, height }))
+                    Loaded::Visual(picture(&path, px).map_or(Visual::Icon, |(image, width, height)| Visual::Picture { image, size: Some((width, height)) }))
+                }
+                Job::Thumbnail(thumb, px) => {
+                    let request = crate::thumbs::Request {
+                        path: &thumb.path,
+                        mime: &thumb.mime,
+                        modified: thumb.modified,
+                        bytes: thumb.bytes,
+                        px,
+                        max_bytes: thumb.max_bytes,
+                        external: thumb.external,
+                    };
+                    let made = crate::thumbs::make(&request, &thumb.thumbnailers);
+                    Loaded::Visual(made.map_or(Visual::Icon, |image| Visual::Picture { image: crate::thumbs::premultiplied(image), size: None }))
                 }
                 Job::Text(path) => Loaded::Visual(read_text(&path).map_or(Visual::Icon, |(text, more)| Visual::Text { text, more })),
                 Job::Folder(path) => Loaded::Folder(folder_size(&path, || asked != generation.load(Ordering::Relaxed))),
@@ -181,16 +212,7 @@ pub fn picture(path: &Path, px: u32) -> Option<(IconImage, u32, u32)> {
     let image = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
     let (width, height) = (image.width(), image.height());
     let image = if width > px || height > px { image.thumbnail(px, px) } else { image };
-    let image = image.to_rgba8();
-    let (w, h) = image.dimensions();
-    let mut pixels = image.into_raw();
-    for px in pixels.chunks_exact_mut(4) {
-        let a = u16::from(px[3]);
-        for c in &mut px[..3] {
-            *c = (u16::from(*c) * a / 255) as u8;
-        }
-    }
-    Some((IconImage { width: w, height: h, pixels: pixels.into() }, width, height))
+    Some((crate::thumbs::premultiplied(image.into_rgba8()), width, height))
 }
 
 /// The start of a text file, and whether there is more. `None` for one

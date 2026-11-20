@@ -26,7 +26,7 @@ use crate::mime::MimeDb;
 use crate::places::{self, Place, Section};
 use crate::preview::{self, Preview};
 use crate::undo::{self, Step};
-use crate::{clipboard, open, ops, trash};
+use crate::{clipboard, open, ops, thumbs, trash};
 
 const BACK: &str = "\u{f004d}";
 const FORWARD: &str = "\u{f0054}";
@@ -131,7 +131,9 @@ pub struct Browser {
     thumbs: HashMap<PathBuf, Option<IconImage>>,
     /// In the Trash view, the folder each item was deleted from.
     origins: HashMap<PathBuf, PathBuf>,
-    thumb_tx: Option<std::sync::mpsc::Sender<(PathBuf, u32)>>,
+    thumb_tx: Option<std::sync::mpsc::Sender<ThumbJob>>,
+    /// The installed thumbnailers, read when the first thumbnail is wanted.
+    thumbnailers: Option<Arc<Vec<thumbs::Thumbnailer>>>,
     thumb_done: Arc<Mutex<Vec<Thumbnail>>>,
     waker: Option<Waker>,
     /// Hit areas from the last paint: entries by visible index, and the
@@ -151,6 +153,17 @@ pub struct Browser {
 
 /// A decoded thumbnail, or `None` for a picture that did not decode.
 type Thumbnail = (PathBuf, Option<IconImage>);
+
+/// What the thumbnail thread is asked to make.
+struct ThumbJob {
+    path: PathBuf,
+    mime: String,
+    modified: Option<SystemTime>,
+    bytes: u64,
+    px: u32,
+    max_bytes: u64,
+    external: bool,
+}
 
 /// Seconds a status message stays.
 const MESSAGE_SECONDS: f32 = 4.0;
@@ -196,6 +209,7 @@ impl Browser {
             thumbs: HashMap::new(),
             origins: HashMap::new(),
             thumb_tx: None,
+            thumbnailers: None,
             thumb_done: Arc::default(),
             waker: None,
             hits: Vec::new(),
@@ -760,24 +774,42 @@ impl Browser {
 
     // ---- Thumbnails ----------------------------------------------------
 
+    fn thumbnailers(&mut self) -> Arc<Vec<thumbs::Thumbnailer>> {
+        Arc::clone(self.thumbnailers.get_or_insert_with(|| Arc::new(thumbs::load_thumbnailers())))
+    }
+
     fn want_thumbnail(&mut self, entry: &Entry, size: u32, config: &stratum_ui::config::FilesConfig) -> Option<IconImage> {
-        if !config.thumbnails || !matches!(entry.mime.as_str(), "image/png" | "image/jpeg") || entry.size > config.thumbnail_max_mb * 1024 * 1024 {
+        let max_bytes = config.thumbnail_max_mb * 1024 * 1024;
+        if !config.thumbnails || entry.is_dir {
+            return None;
+        }
+        let thumbnailers = self.thumbnailers();
+        if !thumbs::can(&entry.mime, entry.size, max_bytes, config.thumbnail_external, &thumbnailers) {
             return None;
         }
         if let Some(found) = self.thumbs.get(&entry.path) {
             return found.clone();
         }
         let tx = self.thumb_tx.get_or_insert_with(|| {
-            let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, u32)>();
+            let (tx, rx) = std::sync::mpsc::channel::<ThumbJob>();
             let done = Arc::clone(&self.thumb_done);
             let waker = self.waker.clone();
             std::thread::Builder::new()
                 .name("stratum-thumbs".into())
                 .spawn(move || {
-                    for (path, size) in rx {
-                        let image = thumbnail(&path, size);
+                    for job in rx {
+                        let request = thumbs::Request {
+                            path: &job.path,
+                            mime: &job.mime,
+                            modified: job.modified,
+                            bytes: job.bytes,
+                            px: job.px,
+                            max_bytes: job.max_bytes,
+                            external: job.external,
+                        };
+                        let image = thumbs::make(&request, &thumbnailers).map(thumbs::premultiplied);
                         if let Ok(mut done) = done.lock() {
-                            done.push((path, image));
+                            done.push((job.path, image));
                         }
                         if let Some(w) = &waker {
                             w.wake();
@@ -789,7 +821,15 @@ impl Browser {
         });
         // Asked once: `None` marks it pending until the thread answers.
         self.thumbs.insert(entry.path.clone(), None);
-        let _ = tx.send((entry.path.clone(), size));
+        let _ = tx.send(ThumbJob {
+            path: entry.path.clone(),
+            mime: entry.mime.clone(),
+            modified: entry.modified,
+            bytes: entry.size,
+            px: size,
+            max_bytes,
+            external: config.thumbnail_external,
+        });
         None
     }
 
@@ -1214,14 +1254,28 @@ impl Browser {
         self.facts = None;
         let mut kind = preview::Kind::Icon;
         if let [one] = targets.as_slice() {
-            let entry = self.entries.iter().find(|e| &e.path == one);
+            let entry = self.entries.iter().find(|e| &e.path == one).cloned();
+            let entry = entry.as_ref();
             let is_dir = entry.map_or_else(|| one.is_dir(), |e| e.is_dir);
             let mime = entry.map_or_else(|| self.db.of(one, is_dir), |e| e.mime.clone());
             let size = entry.map_or(0, |e| e.size);
+            let max_bytes = config.thumbnail_max_mb * 1024 * 1024;
+            let thumbnailers = self.thumbnailers();
+            let thumbnail = config.thumbnails && thumbs::can(&mime, size, max_bytes, config.thumbnail_external, &thumbnailers);
             kind = if is_dir {
                 preview::Kind::Folder
-            } else if config.thumbnails && matches!(mime.as_str(), "image/png" | "image/jpeg") && size <= config.thumbnail_max_mb * 1024 * 1024 {
+            } else if thumbnail && thumbs::in_process(&mime) && mime != "image/svg+xml" {
                 preview::Kind::Picture
+            } else if thumbnail {
+                preview::Kind::Thumbnail(preview::Thumb {
+                    path: one.clone(),
+                    mime: mime.clone(),
+                    modified: entry.and_then(|e| e.modified),
+                    bytes: size,
+                    max_bytes,
+                    external: config.thumbnail_external,
+                    thumbnailers,
+                })
             } else if self.db.ancestors(&mime).iter().any(|m| m == "text/plain") {
                 preview::Kind::Text
             } else {
@@ -1314,7 +1368,7 @@ impl Browser {
         y += m.gap;
 
         let pixels = match &self.preview.visual {
-            preview::Visual::Picture { width, height, .. } => Some((*width, *height)),
+            preview::Visual::Picture { size, .. } => *size,
             _ => None,
         };
         let mut lines: Vec<(&str, String)> = match (&self.facts, targets.as_slice()) {
@@ -1497,20 +1551,6 @@ fn folder_icons(path: &Path) -> Vec<String> {
     special.into_iter().chain(["folder"]).map(str::to_string).collect()
 }
 
-/// A picture scaled down to fit `size` pixels, for a thumbnail.
-fn thumbnail(path: &Path, size: u32) -> Option<IconImage> {
-    let image = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
-    let image = image.thumbnail(size, size).to_rgba8();
-    let (width, height) = image.dimensions();
-    let mut pixels = image.into_raw();
-    for px in pixels.chunks_exact_mut(4) {
-        let a = u16::from(px[3]);
-        for c in &mut px[..3] {
-            *c = (u16::from(*c) * a / 255) as u8;
-        }
-    }
-    Some(IconImage { width, height, pixels: pixels.into() })
-}
 
 /// `image` placed in `area` with its aspect ratio kept.
 fn fit(image: IconImage, area: Rect) -> (IconImage, Rect) {

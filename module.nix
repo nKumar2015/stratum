@@ -83,6 +83,22 @@ in {
           `xdg-mime default org.stratum.Files.desktop inode/directory`.
         '';
       };
+
+      thumbnailers = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [];
+        example = lib.literalExpression "[pkgs.ffmpegthumbnailer]";
+        description = ''
+          Thumbnailers for what `stratum-files` does not decode itself
+          (it does PNG, JPEG, WebP, GIF, BMP and SVG): any package with a
+          {file}`share/thumbnailers/*.thumbnailer` file, such as
+          `ffmpegthumbnailer` (videos and audio covers), `papers` or
+          `evince` (PDFs), `gnome-font-viewer` (fonts). Installed with the
+          file manager; `[files] thumbnail_external = false` stops their
+          use. Thumbnails are kept in {file}`~/.cache/thumbnails`, shared
+          with other apps.
+        '';
+      };
     };
   };
 
@@ -99,6 +115,7 @@ in {
     home.packages =
       [cfg.package cfg.cliPackage]
       ++ lib.optional cfg.fileManager.enable cfg.fileManager.package
+      ++ lib.optionals cfg.fileManager.enable cfg.fileManager.thumbnailers
       # Programs the shell runs.
       ++ (with pkgs; [
         brightnessctl # brightness, and the OSD's fallback reading

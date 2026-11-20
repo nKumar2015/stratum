@@ -17,6 +17,7 @@ mod ops;
 mod places;
 mod portal;
 mod preview;
+mod thumbs;
 mod trash;
 mod undo;
 
