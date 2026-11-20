@@ -6,13 +6,15 @@ use std::env;
 use serde_json::json;
 use common::{emit_help, emit_json, fail, is_help_flag};
 
-const ROOT_COMMANDS: [&str; 9] = [
+const ROOT_COMMANDS: [&str; 11] = [
     "dashboard",
     "lockscreen",
     "notifications",
+    "overview",
     "powermenu",
     "screenshot",
     "settings",
+    "switcher",
     "theme",
     "timer",
     "todo",
@@ -29,6 +31,8 @@ fn print_help() {
 fn ipc_functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open [tab]", "close", "toggle [tab]"]),
+        "overview" => Some(&["open", "close", "toggle"]),
+        "switcher" => Some(&["next", "prev", "close"]),
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
         "launcher" => Some(&["open [apps|emoji|clipboard]", "close", "toggle [apps|emoji|clipboard]"]),
         "nightlight" => Some(&["on", "off", "toggle", "auto"]),

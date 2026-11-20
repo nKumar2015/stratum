@@ -146,6 +146,9 @@ impl App {
             }
             LauncherAction::FocusWindow(address) => {
                 self.launcher_closed();
+                // The box must be gone before the focus, or Hyprland hands
+                // the keyboard back to the window from before it opened.
+                self.settle();
                 if !crate::hyprland::focus_window(&address) {
                     warn!("could not focus window {address}");
                 }
@@ -185,6 +188,7 @@ impl App {
             Command { title: "Power menu".into(), glyph: "\u{f0425}", call: call("powermenu", "toggle", &[]) },
             Command { title: "Screenshot".into(), glyph: "\u{f0104}", call: call("screenshot", "start", &[]) },
             Command { title: "Dashboard".into(), glyph: "\u{f056e}", call: call("dashboard", "open", &[]) },
+            Command { title: "Overview".into(), glyph: "\u{f0570}", call: call("overview", "open", &[]) },
             Command { title: "Theme switcher".into(), glyph: "\u{f03d8}", call: call("theme", "open", &[]) },
             Command {
                 title: "Do not disturb".into(),

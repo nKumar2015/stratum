@@ -29,6 +29,8 @@ pub struct Metrics {
     pub polkit: PolkitMetrics,
     pub notification_card: NotificationCardMetrics,
     pub theme_switcher: ThemeSwitcherMetrics,
+    pub overview: OverviewMetrics,
+    pub switcher: SwitcherMetrics,
     pub hover_menu: HoverMenuMetrics,
     pub equalizer: EqualizerMetrics,
     pub dashboard: DashboardMetrics,
@@ -443,6 +445,67 @@ pub struct NotificationCardMetrics {
     pub reply_text: f32,
     pub send_width: f32,
     pub caret_width: f32,
+}
+
+/// The overview: the output's workspaces in a grid, each a small copy of
+/// the output with its windows.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverviewMetrics {
+    /// Around the grid, inside the output.
+    pub margin: f32,
+    /// Between workspaces.
+    pub gap: f32,
+    /// A workspace's name, above it.
+    pub label_text: f32,
+    pub label_gap: f32,
+    /// Dimming over the desktop, 0..1.
+    pub scrim: f32,
+    pub outline: f32,
+    /// The workspace the output shows, and the one the keys select.
+    pub outline_active: f32,
+    /// The window under the pointer.
+    pub outline_hover: f32,
+    /// The app icon on each window, at most.
+    pub icon: f32,
+    /// A window's title, shown while it is under the pointer.
+    pub title_text: f32,
+    pub title_padding: f32,
+    pub title_radius: f32,
+    pub hint_text: f32,
+    /// How far the pointer moves with the button held before a window is
+    /// dragged rather than clicked.
+    pub drag_threshold: f32,
+    /// Opacity of a dragged window, 0..1.
+    pub drag_alpha: f32,
+    pub open_ms: u32,
+}
+
+/// The window switcher: a row of windows, most recently used first.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SwitcherMetrics {
+    /// One window's cell.
+    pub cell_width: f32,
+    /// The picture's part of a cell.
+    pub thumb_height: f32,
+    /// The icon and title under the picture.
+    pub title_height: f32,
+    pub title_text: f32,
+    pub icon: f32,
+    /// Shown, larger, for a window without a picture.
+    pub placeholder_icon: f32,
+    pub padding: f32,
+    pub gap: f32,
+    /// Inside a cell, around its picture and title.
+    pub cell_padding: f32,
+    pub radius: f32,
+    pub cell_radius: f32,
+    pub outline: f32,
+    pub outline_selected: f32,
+    /// The least distance between the row and the output's sides.
+    pub margin: f32,
+    pub open_ms: u32,
 }
 
 /// The theme switcher: a band of slanted slices, one per theme, across the

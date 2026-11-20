@@ -128,6 +128,12 @@ impl PointerHandler for App {
                     smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape::Default,
                 );
             }
+            // The overview needs every press, motion and release in order:
+            // dragging a window to another workspace is all three.
+            if self.overview_surfaces.iter().any(|e| e.layer.wl_surface() == &event.surface) {
+                self.overview_pointer(&event.kind, x, y);
+                continue;
+            }
             // The settings window is immediate-mode: hover highlights and a
             // drag (a slider, a monitor on the Display page's map) are only
             // seen by a paint, so every move over it needs one.
@@ -220,6 +226,11 @@ impl PointerHandler for App {
             if self.hover_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
                 self.hover_clicked = true;
                 self.mark_hover_dirty();
+                return;
+            }
+            if self.switcher_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
+                let action = self.window_switcher.on_click(point);
+                self.apply_window_switcher_action(action);
                 return;
             }
             if self.launcher_surfaces.iter().any(|t| t.layer.wl_surface() == &surface) {
@@ -431,6 +442,18 @@ impl PointerHandler for App {
             self.apply_launcher_action(action);
         }
 
+        // Hovering a window in the switcher chooses it.
+        let over_switcher = self.pointer.as_ref().and_then(|(surface, x, y)| {
+            self.switcher_surfaces
+                .iter()
+                .any(|t| t.layer.wl_surface() == surface)
+                .then(|| crate::render::display_list::Point::new(*x, *y))
+        });
+        if let Some(point) = over_switcher {
+            let action = self.window_switcher.on_hover(point);
+            self.apply_window_switcher_action(action);
+        }
+
         // Hovering a slice highlights it.
         let over_themes = self.pointer.as_ref().and_then(|(surface, x, y)| {
             self.theme_surfaces
@@ -472,9 +495,12 @@ impl KeyboardHandler for App {
         surface: &wl_surface::WlSurface,
         _serial: u32,
         _raw: &[u32],
-        _keysyms: &[Keysym],
+        keysyms: &[Keysym],
     ) {
         self.keyboard_focus = Some(surface.clone());
+        if self.switcher_surfaces.iter().any(|e| e.layer.wl_surface() == surface) {
+            self.window_switcher_entered(keysyms);
+        }
     }
 
     fn leave(
@@ -519,8 +545,11 @@ impl KeyboardHandler for App {
         _qh: &QueueHandle<Self>,
         _keyboard: &wayland_client::protocol::wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: KeyboardEvent,
+        event: KeyboardEvent,
     ) {
+        if self.window_switcher.is_open() {
+            self.window_switcher_released(event.keysym);
+        }
     }
 
     fn update_modifiers(
@@ -534,6 +563,10 @@ impl KeyboardHandler for App {
         _layout: u32,
     ) {
         self.modifiers = modifiers;
+        // The switcher chooses once the modifier that opened it is let go.
+        if self.window_switcher.is_open() {
+            self.window_switcher_modifiers(&modifiers);
+        }
     }
 }
 
@@ -586,6 +619,19 @@ impl App {
                 .toasts
                 .key(event.keysym, event.utf8.as_deref(), self.modifiers.ctrl);
             self.apply_toast_action(action);
+            return;
+        }
+
+        // Opened from a key binding, the switcher and the overview hold the
+        // keyboard over anything else open.
+        if self.window_switcher.is_open() {
+            let action = self.window_switcher.key(event.keysym, self.modifiers.shift);
+            self.apply_window_switcher_action(action);
+            return;
+        }
+        if self.overview.is_open() {
+            let action = self.overview.key(event.keysym, event.utf8.as_deref());
+            self.apply_overview_action(action);
             return;
         }
 
@@ -683,11 +729,11 @@ impl App {
         let viewer_focused = focused(self.viewer_window.as_ref().map(|w| w.window.wl_surface()));
         let settings_focused = focused(self.settings.as_ref().map(|w| w.window.wl_surface()));
         // In `key_event`'s order, so the target is the one a press reaches.
-        let target = if self.lock.active()
-            || self.polkit_dialog.is_open()
-            || self.toasts.wants_keys()
-            || self.launcher.is_open()
-        {
+        let target = if self.lock.active() || self.polkit_dialog.is_open() || self.toasts.wants_keys() {
+            Target::Field
+        } else if self.window_switcher.is_open() || self.overview.is_open() {
+            Target::None
+        } else if self.launcher.is_open() {
             Target::Field
         } else if self.screenshot.is_open() || viewer_focused {
             Target::None

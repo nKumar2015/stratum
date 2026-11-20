@@ -23,6 +23,7 @@ mod memory;
 mod net_rates;
 mod night_light;
 mod osd;
+mod overview;
 mod pam;
 mod polkit_dialog;
 mod screenshot;
@@ -39,6 +40,8 @@ mod logind;
 mod sys_state;
 mod ui;
 mod wayland;
+mod window_capture;
+mod window_switcher;
 
 use std::process::ExitCode;
 

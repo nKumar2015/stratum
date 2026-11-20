@@ -47,6 +47,8 @@ pub struct Config {
     pub displays: DisplaysConfig,
     pub wallpapers: WallpapersConfig,
     pub theme_switcher: ThemeSwitcherConfig,
+    pub overview: OverviewConfig,
+    pub switcher: SwitcherConfig,
     pub dashboard: DashboardConfig,
     pub render: RenderConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
@@ -578,6 +580,29 @@ pub struct BehaviorConfig {
     /// password dialog. polkit allows one agent per session; turn it off
     /// while another agent holds it.
     pub polkit: bool,
+}
+
+/// The overview's behaviour; its sizes are `[metrics.overview]`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverviewConfig {
+    /// The longer side of a window's picture, in pixels.
+    pub thumbnail_px: u32,
+    /// How often each window's picture is taken again while open; 0 takes
+    /// each once.
+    pub refresh_ms: u32,
+    /// Draw the wallpaper behind each workspace.
+    pub wallpaper: bool,
+}
+
+/// The window switcher's behaviour; its sizes are `[metrics.switcher]`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SwitcherConfig {
+    /// The longer side of a window's picture, in pixels.
+    pub thumbnail_px: u32,
+    /// As for the overview.
+    pub refresh_ms: u32,
 }
 
 /// The theme switcher's behaviour; its sizes are `[metrics.theme_switcher]`.

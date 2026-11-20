@@ -55,6 +55,7 @@ impl App {
         self.render_settings_window(dt);
         // Before the theme is resolved: the switcher's tick may preview one.
         self.tick_theme_switcher(dt);
+        self.tick_windows(dt);
 
         let theme = self.config.active_theme();
         let result = self.render_surfaces(&theme, dt, state_changed);
@@ -72,6 +73,8 @@ impl App {
             .chain(&mut self.theme_surfaces)
             .chain(&mut self.tray_menu_surfaces)
             .chain(&mut self.launcher_surfaces)
+            .chain(&mut self.overview_surfaces)
+            .chain(&mut self.switcher_surfaces)
         {
             entry.release_retired();
         }
@@ -90,6 +93,8 @@ impl App {
         self.render_theme_switcher(theme, dt, state_changed)?;
         self.render_tray_menu(theme, dt)?;
         self.render_launcher(theme, dt)?;
+        self.render_overview(theme, dt)?;
+        self.render_window_switcher(theme, dt)?;
         self.render_bars(theme, dt)
     }
 

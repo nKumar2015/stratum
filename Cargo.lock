@@ -2092,6 +2092,7 @@ dependencies = [
 name = "stratum-shell"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.2",
  "bytemuck",
  "calloop",
  "chrono",
@@ -2111,6 +2112,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+ "wayland-scanner",
  "zbus",
 ]
 

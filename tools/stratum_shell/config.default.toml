@@ -141,6 +141,22 @@ wallpaper_delay_ms = 250  # a theme's wallpaper is previewed once the focus
                         # has rested on it this long
 preview_px = 1280       # long edge of a slice's wallpaper, in pixels
 
+# The overview (`stratum-cli overview toggle`): the workspaces of the
+# output it opens on, with pictures of their windows. Click a window to go
+# to it, a workspace to show it; drag a window to another workspace to move
+# it there.
+[overview]
+thumbnail_px = 512      # longer side of a window's picture, in pixels
+refresh_ms = 1000       # each picture is taken again this often; 0: once
+wallpaper = true        # behind each workspace
+
+# The window switcher (`stratum-cli switcher next|prev`, bound to a key with
+# a modifier, such as SUPER + Tab): windows, most recently used first. It
+# goes to the one chosen when the modifier is let go.
+[switcher]
+thumbnail_px = 384
+refresh_ms = 1000
+
 [displays]              # the Display page's monitor settings
 confirm_s = 15          # an applied layout reverts unless kept within this
 scales = [1.0, 1.25, 1.333333, 1.5, 1.6, 1.666667, 1.75, 2.0, 2.5, 3.0]
@@ -562,6 +578,41 @@ reply_padding = 8.0
 reply_text = 12.0
 send_width = 52.0
 caret_width = 1.5
+
+[metrics.overview]
+margin = 56.0           # around the grid
+gap = 28.0              # between workspaces
+label_text = 13.0       # a workspace's name, above it
+label_gap = 8.0
+scrim = 0.72
+outline = 1.0
+outline_active = 2.0    # the workspace shown, and the one the keys select
+outline_hover = 2.0     # the window under the pointer
+icon = 40.0             # on each window, at most
+title_text = 12.0       # the title of the window under the pointer
+title_padding = 10.0
+title_radius = 12.0
+hint_text = 12.0
+drag_threshold = 6.0    # movement before a press becomes a drag
+drag_alpha = 0.85
+open_ms = 160
+
+[metrics.switcher]
+cell_width = 224.0
+thumb_height = 136.0
+title_height = 30.0
+title_text = 12.0
+icon = 18.0
+placeholder_icon = 48.0 # for a window without a picture
+padding = 12.0
+gap = 8.0
+cell_padding = 8.0
+radius = 16.0
+cell_radius = 10.0
+outline = 1.0
+outline_selected = 2.0
+margin = 48.0           # from the output's sides
+open_ms = 120
 
 [metrics.theme_switcher] # a band of slanted slices, one per theme
 band_height = 0.46      # fraction of the output's height

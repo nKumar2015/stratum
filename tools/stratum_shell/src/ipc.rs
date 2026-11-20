@@ -38,6 +38,10 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(3);
 pub fn functions(target: &str) -> Option<&'static [&'static str]> {
     match target {
         "dashboard" => Some(&["open", "close", "toggle"]),
+        // Every workspace of the focused output, with its windows.
+        "overview" => Some(&["open", "close", "toggle"]),
+        // Windows, most recently used first; chooses on the modifier's release.
+        "switcher" => Some(&["next", "prev", "close"]),
         // Stay awake: hold the idle stages off.
         "idle" => Some(&["inhibit", "uninhibit", "toggle"]),
         "launcher" => Some(&["open", "close", "toggle"]),

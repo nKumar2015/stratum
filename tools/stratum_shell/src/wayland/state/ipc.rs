@@ -91,6 +91,20 @@ impl App {
                     _ => {}
                 }
             }
+            ("overview", function) => {
+                let open = self.overview.is_open();
+                match function {
+                    "open" | "toggle" if !open => {
+                        let output = self.focused_output();
+                        self.open_overview(&output);
+                    }
+                    "close" | "toggle" => self.close_overview(),
+                    _ => {}
+                }
+            }
+            ("switcher", "next") => self.window_switcher_step(true),
+            ("switcher", "prev") => self.window_switcher_step(false),
+            ("switcher", "close") => self.close_window_switcher(),
             ("dashboard", function @ ("open" | "close" | "toggle")) => {
                 // The parser allows one argument; only the config knows the
                 // tabs.

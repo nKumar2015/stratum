@@ -85,6 +85,7 @@ mod overlays;
 mod render;
 mod screenshot;
 mod settings_window;
+mod windows;
 
 use settings_window::SettingsWindow;
 
@@ -129,6 +130,9 @@ pub struct App {
     layer_shell: LayerShell,
 
     gpu: Gpu,
+    /// For a roundtrip when the compositor must have seen a request before
+    /// the shell goes on (`settle`).
+    conn: Connection,
     display: NonNull<std::ffi::c_void>,
     surfaces: Vec<SurfaceEntry>,
     text: TextEngine,
@@ -191,6 +195,23 @@ pub struct App {
     /// The theme switcher overlay and its per-output surfaces.
     theme_switcher: crate::theme_switcher::ThemeSwitcher,
     theme_surfaces: Vec<SurfaceEntry>,
+    /// The overview, its per-output surfaces, the Hyprland state it last
+    /// read the desktop at, and which opening a wallpaper decode belongs to.
+    overview: crate::overview::Overview,
+    overview_surfaces: Vec<SurfaceEntry>,
+    overview_hypr: Option<crate::hyprland::HyprState>,
+    overview_session: u64,
+    overview_wallpaper: Option<crate::wallpapers::Preview>,
+    /// The window switcher and its row-sized surface per output.
+    window_switcher: crate::window_switcher::WindowSwitcher,
+    switcher_surfaces: Vec<SurfaceEntry>,
+    /// Pictures of windows for those two: the capture thread (`None`
+    /// without Hyprland's window export), the windows asked for, and the
+    /// pictures so far.
+    window_capture: Option<crate::window_capture::WindowCapture>,
+    watched: Vec<u64>,
+    thumbs: std::collections::HashMap<u64, crate::window_capture::Thumb>,
+    windows_events: Option<calloop::channel::Sender<windows::WindowsEvent>>,
     /// The dashboard overlay and its per-output surfaces. Its data comes
     /// from `SystemState::dashboard_feed`.
     dashboard: crate::dashboard::Dashboard,
@@ -362,6 +383,7 @@ impl App {
             compositor_state,
             layer_shell,
             gpu,
+            conn: conn.clone(),
             display,
             surfaces: Vec::new(),
             text: TextEngine::new(),
@@ -410,6 +432,17 @@ impl App {
             theme_surfaces: Vec::new(),
             dashboard: crate::dashboard::Dashboard::new(&config_for_cc.metrics.dashboard, &config_for_cc.dashboard),
             dashboard_surfaces: Vec::new(),
+            overview: crate::overview::Overview::new(&config_for_cc.metrics.overview),
+            overview_surfaces: Vec::new(),
+            overview_hypr: None,
+            overview_session: 0,
+            overview_wallpaper: None,
+            window_switcher: crate::window_switcher::WindowSwitcher::new(&config_for_cc.metrics.switcher),
+            switcher_surfaces: Vec::new(),
+            window_capture: None,
+            watched: Vec::new(),
+            thumbs: std::collections::HashMap::new(),
+            windows_events: None,
             screenshot: crate::screenshot::Screenshot::new(&config_for_cc.metrics.screenshot),
             screenshot_surfaces: Vec::new(),
             screenshot_events: None,
@@ -490,6 +523,7 @@ impl App {
         app.start_polkit_events(&loop_handle);
         app.start_logind(&loop_handle);
         app.start_launcher_events(&loop_handle);
+        app.start_window_capture(&conn, &globals, &loop_handle);
         // After the launcher's events, which it notifies of new copies.
         app.start_clipboard(&globals);
         app.bind_night_light(&globals);
@@ -526,6 +560,8 @@ impl App {
             || self.control_center.animating()
             || self.dashboard.animating()
             || self.theme_switcher.animating()
+            || self.overview.animating()
+            || self.window_switcher.animating()
             || self.dim_fading()
         {
             return std::time::Duration::from_millis(16);
@@ -580,6 +616,19 @@ impl App {
         named
             .or_else(|| self.surfaces.first().map(|e| e.output_name.clone()))
             .unwrap_or_default()
+    }
+
+    /// Wait until the compositor has handled every request sent so far.
+    ///
+    /// Needed before focusing a window just after closing an overlay that
+    /// held the keyboard: a Hyprland dispatch is answered at once, while
+    /// the unmap waits for the loop to flush, so Hyprland focused the window
+    /// first and then, unmapping the overlay, gave the keyboard back to the
+    /// window from before it opened.
+    fn settle(&self) {
+        if let Err(err) = self.conn.roundtrip() {
+            warn!("roundtrip failed: {err}");
+        }
     }
 
     /// Redraw every surface after a state change the UI thread caused.

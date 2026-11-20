@@ -64,7 +64,8 @@ module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 
 ## Current state
 
-Implemented and working: sidebar (workspaces, app title, tray, quick panel,
+Implemented and working: the overview and the window switcher (below),
+sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with ten
 pages (overview, audio with a per-app mixer, equalizer, bluetooth, network
 (Wi-Fi, wired, VPN, hotspot, traffic), battery, notifications, display
@@ -222,6 +223,58 @@ from the content. (cliphist was never installed: the session's `wl-paste
 --watch cliphist store` failed on every copy.) Live tests copy with the
 real `wl-copy` inside the sandbox and set `XDG_STATE_HOME`. Closing trims the heap (`memory::release_freed`); the first emoji
 use leaves ~4 MB of font caches, which do not grow after.
+
+The **overview** (`overview/`, `wayland/state/windows.rs`, `stratum-cli
+overview open|close|toggle`) is a fullscreen overlay of the workspaces of
+the output it opens on, in a grid (`overview/layout.rs`, pure and tested),
+each a copy of the output: the wallpaper (decoded on open at about a
+workspace's size) and pictures of its windows placed from `j/clients`
+(`hyprland::desktop`), floating over tiled, fullscreen on top. A click on a
+window focuses it, on a workspace shows it, outside them closes; dragging a
+window onto another workspace moves it (`hl.dsp.window.move({ workspace,
+follow = false, window })`) and stays open. Arrows choose a workspace,
+Return or a digit shows one. While open it reads the desktop again
+whenever `SystemState::hypr` changes. Hyprland does not lay out a hidden
+workspace until it is shown, so a window dropped on one keeps its old
+geometry there, overlapping, until then: that is the compositor's state,
+shown as it is.
+
+The **window switcher** (`window_switcher.rs`, `stratum-cli switcher
+next|prev|close`) is a row of every window, most recently focused first,
+on a surface only as big as the row, centred. `next` opens it on the
+previous window and steps once open. It chooses when the last modifier
+key that was down as its surface got the keyboard (`wl_keyboard.enter`'s
+keys) is let go (`release_key`), with the modifier state as a fallback;
+none down at enter (a quick tap) chooses at once. The user binds it in
+Hyprland (`hl.bind("SUPER + Tab", hl.dsp.exec_cmd("stratum-cli switcher
+next"))`, SHIFT for `prev`); Hyprland eats the bound Tab, so the overlay
+only sees the modifier.
+
+Both show pictures from `window_capture.rs`, over
+`hyprland-toplevel-export-v1` (its XML, trimmed to version 1, is in
+`protocols/`; `wayland-scanner` writes the code). A thread with its own
+event queue on the shell's connection takes the watched windows one at a
+time into one shared-memory buffer, scales each to `thumbnail_px` there
+and sends only the small picture to the loop, then takes each again every
+`refresh_ms`. Windows on hidden workspaces can be taken. The thread starts
+on first use and then waits on its channel; `stop` frees the buffer (as
+large as the largest window) and the loop drops the pictures. The worker
+reading the socket cannot strand the loop's events: calloop's Wayland
+source holds a prepared read while it sleeps, so libwayland makes the
+worker's read wait for it.
+
+**Focusing a window right after closing an overlay** that held the
+keyboard needs `App::settle` (a roundtrip) between the two. A Hyprland
+dispatch is answered at once, while the unmap waits for the loop's flush,
+so Hyprland focused the window first and then, unmapping the overlay,
+gave the keyboard back to the window from before it opened. The overview,
+the switcher and the launcher's window results do this.
+
+Testing the switcher in the nested Hyprland: binds do not fire from a
+virtual keyboard (`wtype`), and the modifier state it reports does not
+show a key it holds (which is why the switcher follows keys). Hold the
+key with `wtype -P Super_L -s 2000 -p Super_L` in the background and call
+`stratum-cli switcher next` meanwhile.
 
 **Key repeat** comes from SCTK's calloop timer at the compositor's rate
 (`get_keyboard_with_repeat`, and `repeat_key` for compositors that repeat

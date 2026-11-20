@@ -190,6 +190,8 @@ impl App {
             let themes = fullscreen("stratum-themes");
             let dashboard = fullscreen("stratum-dashboard");
             let screenshot = fullscreen("stratum-screenshot");
+            let overview = fullscreen("stratum-overview");
+            self.overview_surfaces.push(overview);
             self.power_surfaces.push(power);
             self.polkit_surfaces.push(polkit);
             self.theme_surfaces.push(themes);
@@ -215,6 +217,25 @@ impl App {
             launcher.commit();
             self.launcher_surfaces.push(
                 SurfaceEntry::new(launcher, scale, output_name.clone())
+                    .with_output(output.clone())
+                    .with_output_logical_size(output_logical_size),
+            );
+
+            // The window switcher: only as big as its row, centred on the
+            // output (no anchor). Sized again whenever it opens.
+            let switcher = self.layer_shell.create_layer_surface(
+                qh,
+                self.compositor_state.create_surface(qh),
+                Layer::Overlay,
+                Some("stratum-switcher"),
+                Some(output),
+            );
+            switcher.set_keyboard_interactivity(KeyboardInteractivity::None);
+            let (width, height) = crate::window_switcher::WindowSwitcher::size(&self.config.metrics.switcher, 1, 0.0);
+            switcher.set_size(width, height);
+            switcher.commit();
+            self.switcher_surfaces.push(
+                SurfaceEntry::new(switcher, scale, output_name.clone())
                     .with_output(output.clone())
                     .with_output_logical_size(output_logical_size),
             );
@@ -389,6 +410,8 @@ impl OutputHandler for App {
                 .chain(self.theme_surfaces.iter_mut())
                 .chain(self.dashboard_surfaces.iter_mut())
                 .chain(self.screenshot_surfaces.iter_mut())
+                .chain(self.overview_surfaces.iter_mut())
+                .chain(self.switcher_surfaces.iter_mut())
                 .chain(self.hover_surfaces.iter_mut())
                 .chain(self.tray_menu_surfaces.iter_mut())
             {
@@ -425,6 +448,8 @@ impl LayerShellHandler for App {
         self.theme_surfaces.retain(|entry| &entry.layer != layer);
         self.dashboard_surfaces.retain(|entry| &entry.layer != layer);
         self.screenshot_surfaces.retain(|entry| &entry.layer != layer);
+        self.overview_surfaces.retain(|entry| &entry.layer != layer);
+        self.switcher_surfaces.retain(|entry| &entry.layer != layer);
         self.hover_surfaces.retain(|entry| &entry.layer != layer);
         self.tray_menu_surfaces.retain(|entry| &entry.layer != layer);
         self.surfaces.retain(|entry| &entry.layer != layer);
@@ -452,6 +477,7 @@ impl LayerShellHandler for App {
             .chain(self.theme_surfaces.iter_mut())
             .chain(self.dashboard_surfaces.iter_mut())
             .chain(self.screenshot_surfaces.iter_mut())
+            .chain(self.overview_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // Fullscreen: the compositor's configure is authoritative.
@@ -470,6 +496,7 @@ impl LayerShellHandler for App {
             .iter_mut()
             .chain(self.hover_surfaces.iter_mut())
             .chain(self.launcher_surfaces.iter_mut())
+            .chain(self.switcher_surfaces.iter_mut())
             .find(|e| &e.layer == layer)
         {
             // The compositor may grant a different size than requested; keep

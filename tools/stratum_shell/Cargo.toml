@@ -23,6 +23,11 @@ calloop = "0.14"
 # protocol code the shell uses.
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# Hyprland's window export (`protocols/`), which no protocol crate carries.
+# The scanner runs at compile time; bitflags is for the code it writes.
+# Both are already built for wayland-client.
+wayland-scanner = "0.31"
+bitflags = "2"
 
 # Blocking on zbus futures, and the gamma ramps' bytes. The renderer, text
 # and icons are in stratum_ui.

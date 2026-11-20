@@ -326,7 +326,7 @@ fn decode(path: &Path, modified: Option<SystemTime>, size: (u32, u32)) -> Result
 }
 
 /// A key for `path` as it is now: a changed file gets a new one.
-fn preview_key(path: &Path) -> u64 {
+pub(crate) fn preview_key(path: &Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
@@ -335,7 +335,7 @@ fn preview_key(path: &Path) -> u64 {
 }
 
 /// `path` scaled to fit `long_edge` pixels on its longer side.
-fn decode_preview(path: &Path, key: u64, long_edge: u32) -> Result<Preview, String> {
+pub(crate) fn decode_preview(path: &Path, key: u64, long_edge: u32) -> Result<Preview, String> {
     let image = image::open(path).map_err(|err| err.to_string())?.into_rgba8();
     let (w, h) = image.dimensions();
     if w == 0 || h == 0 {

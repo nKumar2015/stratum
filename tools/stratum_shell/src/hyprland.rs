@@ -164,6 +164,137 @@ pub fn focus_window(address: &str) -> bool {
     dispatch(&format!("hl.dsp.focus({{ window = \"address:0x{hex}\" }})"))
 }
 
+/// The monitors, workspaces and windows, as the overview and the window
+/// switcher show them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Desktop {
+    pub monitors: Vec<Monitor>,
+    /// Ordinary workspaces (not special ones), by id.
+    pub workspaces: Vec<Workspace>,
+    /// Mapped windows on ordinary workspaces, most recently focused first.
+    pub windows: Vec<Window>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Monitor {
+    pub name: String,
+    /// The monitor's place and size in the layout, in logical pixels.
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub active_workspace: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Workspace {
+    pub id: i32,
+    pub name: String,
+    pub monitor: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Window {
+    pub address: u64,
+    pub class: String,
+    pub title: String,
+    pub workspace: i32,
+    /// In global layout coordinates, logical pixels.
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub floating: bool,
+    pub fullscreen: bool,
+}
+
+impl Desktop {
+    /// The workspaces on `monitor`, by id.
+    pub fn workspaces_on(&self, monitor: &str) -> Vec<&Workspace> {
+        self.workspaces.iter().filter(|w| w.monitor == monitor).collect()
+    }
+
+    pub fn monitor(&self, name: &str) -> Option<&Monitor> {
+        self.monitors.iter().find(|m| m.name == name)
+    }
+}
+
+/// Read the monitors, workspaces and windows. `None` without Hyprland.
+pub fn desktop() -> Option<Desktop> {
+    let monitors = query("j/monitors")?;
+    let workspaces = query("j/workspaces")?;
+    let clients = query("j/clients")?;
+    Some(parse_desktop(&monitors, &workspaces, &clients))
+}
+
+fn parse_desktop(monitors: &str, workspaces: &str, clients: &str) -> Desktop {
+    let list = |text: &str| match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Array(list)) => list,
+        _ => Vec::new(),
+    };
+    let int = |v: &serde_json::Value| v.as_i64().unwrap_or(0) as i32;
+    let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_string();
+    let monitors = list(monitors)
+        .iter()
+        .filter(|m| m["disabled"].as_bool() != Some(true))
+        .map(|m| {
+            let scale = m["scale"].as_f64().filter(|s| *s > 0.0).unwrap_or(1.0);
+            let (mut w, mut h) = (m["width"].as_f64().unwrap_or(0.0), m["height"].as_f64().unwrap_or(0.0));
+            // A rotated monitor's mode is its unrotated size.
+            if int(&m["transform"]) % 2 == 1 {
+                std::mem::swap(&mut w, &mut h);
+            }
+            Monitor {
+                name: text(&m["name"]),
+                x: int(&m["x"]),
+                y: int(&m["y"]),
+                width: (w / scale).round() as i32,
+                height: (h / scale).round() as i32,
+                active_workspace: int(&m["activeWorkspace"]["id"]),
+            }
+        })
+        .collect();
+    let mut workspaces: Vec<Workspace> = list(workspaces)
+        .iter()
+        .map(|w| Workspace { id: int(&w["id"]), name: text(&w["name"]), monitor: text(&w["monitor"]) })
+        .filter(|w| w.id > 0)
+        .collect();
+    workspaces.sort_by_key(|w| w.id);
+    let mut windows: Vec<(i64, Window)> = list(clients)
+        .iter()
+        .filter(|c| c["mapped"].as_bool() != Some(false) && c["hidden"].as_bool() != Some(true))
+        .filter_map(|c| {
+            let address = u64::from_str_radix(c["address"].as_str()?.trim_start_matches("0x"), 16).ok()?;
+            let workspace = int(&c["workspace"]["id"]);
+            if workspace <= 0 {
+                return None;
+            }
+            let class = Some(text(&c["class"])).filter(|c| !c.is_empty()).unwrap_or_else(|| text(&c["initialClass"]));
+            let window = Window {
+                address,
+                class,
+                title: text(&c["title"]),
+                workspace,
+                x: int(&c["at"][0]),
+                y: int(&c["at"][1]),
+                width: int(&c["size"][0]),
+                height: int(&c["size"][1]),
+                floating: c["floating"].as_bool() == Some(true),
+                // 0 none, 1 maximised, 2 fullscreen (older: a bool).
+                fullscreen: c["fullscreen"].as_i64().map_or(c["fullscreen"].as_bool() == Some(true), |f| f >= 2),
+            };
+            Some((c["focusHistoryID"].as_i64().filter(|f| *f >= 0).unwrap_or(i64::MAX), window))
+        })
+        .collect();
+    windows.sort_by_key(|(history, _)| *history);
+    Desktop { monitors, workspaces, windows: windows.into_iter().map(|(_, w)| w).collect() }
+}
+
+/// Move the window at `address` to workspace `id`, staying where we are.
+pub fn move_window(address: u64, id: i32) -> bool {
+    dispatch(&format!("hl.dsp.window.move({{ workspace = \"{id}\", follow = false, window = \"address:0x{address:x}\" }})"))
+}
+
 /// The mapped windows, most recently focused first, for the launcher.
 pub fn clients() -> Vec<crate::launcher::Window> {
     let Some(text) = query("j/clients") else {
@@ -371,6 +502,36 @@ mod tests {
         let windows = parse_clients(text);
         assert_eq!(windows.iter().map(|w| w.address.as_str()).collect::<Vec<_>>(), ["0xa", "0xb"]);
         assert_eq!(windows[1].workspace, "2");
+    }
+
+    #[test]
+    fn the_desktop_is_read_in_logical_pixels_and_focus_order() {
+        let monitors = r#"[
+            {"name":"eDP-1","x":0,"y":440,"width":2560,"height":1600,"scale":1.6,"transform":0,"activeWorkspace":{"id":1}},
+            {"name":"HDMI-A-1","x":-1440,"y":0,"width":2560,"height":1440,"scale":1,"transform":1,"activeWorkspace":{"id":11}},
+            {"name":"OFF","disabled":true}
+        ]"#;
+        let workspaces = r#"[
+            {"id":11,"name":"11","monitor":"HDMI-A-1"},
+            {"id":-98,"name":"special:magic","monitor":"eDP-1"},
+            {"id":1,"name":"1","monitor":"eDP-1"}
+        ]"#;
+        let clients = r#"[
+            {"address":"0xb","class":"","initialClass":"zen","title":"Docs","workspace":{"id":1},"at":[10,460],"size":[800,600],"floating":true,"fullscreen":0,"focusHistoryID":1,"mapped":true,"hidden":false},
+            {"address":"0xa","class":"kitty","title":"zsh","workspace":{"id":11},"at":[0,0],"size":[1440,2560],"floating":false,"fullscreen":2,"focusHistoryID":0,"mapped":true,"hidden":false},
+            {"address":"0xc","class":"scratch","title":"","workspace":{"id":-98},"at":[0,0],"size":[1,1],"focusHistoryID":2,"mapped":true,"hidden":false}
+        ]"#;
+        let desktop = parse_desktop(monitors, workspaces, clients);
+        assert_eq!(desktop.monitors.len(), 2);
+        let edp = desktop.monitor("eDP-1").unwrap();
+        assert_eq!((edp.width, edp.height, edp.active_workspace), (1600, 1000, 1));
+        let hdmi = desktop.monitor("HDMI-A-1").unwrap();
+        assert_eq!((hdmi.width, hdmi.height), (1440, 2560), "rotated");
+        assert_eq!(desktop.workspaces.iter().map(|w| w.id).collect::<Vec<_>>(), [1, 11]);
+        assert_eq!(desktop.windows.iter().map(|w| w.address).collect::<Vec<_>>(), [0xa, 0xb]);
+        assert!(desktop.windows[0].fullscreen && !desktop.windows[0].floating);
+        assert_eq!(desktop.windows[1].class, "zen");
+        assert!(desktop.windows[1].floating);
     }
 
     #[test]

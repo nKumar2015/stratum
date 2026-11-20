@@ -134,8 +134,11 @@ impl App {
         self.lock.request();
         self.lock_auth = Some(LockAuth { service, user });
         self.session_lock = Some(session_lock);
-        // Nothing else should hold the keyboard or a popup over the lock.
+        // Nothing else should hold the keyboard or a popup over the lock,
+        // or keep taking pictures of windows behind it.
         self.power_menu.close();
+        self.close_overview();
+        self.close_window_switcher();
         self.hover_menus.intent.close();
         if self.tray_menu.target().is_some() {
             self.actions.push(crate::actions::SystemAction::TrayMenuClose);
