@@ -30,10 +30,20 @@ pub(crate) struct LinkInfo {
     pub(crate) input_port: String,
 }
 
+/// A port: its node, name (`output_FL`, `playback_FR`) and whether it is
+/// an output.
+#[derive(Clone, Debug)]
+pub(crate) struct PortInfo {
+    pub(crate) node: u32,
+    pub(crate) name: String,
+    pub(crate) output: bool,
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct RegistryCache {
     pub(crate) nodes: HashMap<u32, NodeInfo>,
     pub(crate) links: HashMap<u32, LinkInfo>,
+    pub(crate) ports: HashMap<u32, PortInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -137,9 +147,14 @@ pub(crate) fn init() -> Result<(), String> {
 /// Load `libpipewire-module-filter-chain` with the given args string.
 /// Returns the module's global ID on success.
 pub(crate) fn load_filter_chain(module_args: &str) -> Result<u32, String> {
+    load_module("libpipewire-module-filter-chain", module_args)
+}
+
+/// Load the module `module_name` with the given args string.
+pub(crate) fn load_module(module_name: &str, module_args: &str) -> Result<u32, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     send_cmd(PwCommand::LoadModule {
-        module_name: "libpipewire-module-filter-chain".to_string(),
+        module_name: module_name.to_string(),
         module_args: module_args.to_string(),
         reply: tx,
     })?;
@@ -190,27 +205,37 @@ pub(crate) fn find_node_by_name(name: &str) -> Option<u32> {
         .map(|node| node.id)
 }
 
-/// List all current links involving `effect_output.stratum_eq` output ports.
-pub(crate) fn list_eq_output_links() -> Vec<LinkInfo> {
-    let lock = get_state_lock();
-    let guard = match lock.lock() {
-        Ok(g) => g,
-        Err(_) => return Vec::new(),
-    };
-    let state = match guard.as_ref() {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-    let cache = match state.cache.lock() {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    cache
-        .links
-        .values()
-        .filter(|link| link.output_node == "effect_output.stratum_eq")
-        .cloned()
-        .collect()
+/// Read the registry cache, or `None` without the native backend.
+fn with_cache<T>(f: impl FnOnce(&RegistryCache) -> T) -> Option<T> {
+    let guard = get_state_lock().lock().ok()?;
+    let state = guard.as_ref()?;
+    let cache = state.cache.lock().ok()?;
+    Some(f(&cache))
+}
+
+/// The names of node `node`'s output ports, in a stable order.
+pub(crate) fn output_ports(node: u32) -> Vec<String> {
+    ports(node, true)
+}
+
+/// The names of node `node`'s input ports, in a stable order.
+pub(crate) fn input_ports(node: u32) -> Vec<String> {
+    ports(node, false)
+}
+
+fn ports(node: u32, output: bool) -> Vec<String> {
+    let mut names: Vec<String> = with_cache(|c| {
+        c.ports.values().filter(|p| p.node == node && p.output == output).map(|p| p.name.clone()).collect()
+    })
+    .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// The links out of node `node` (by id).
+pub(crate) fn links_from_node(node: u32) -> Vec<LinkInfo> {
+    let id = node.to_string();
+    with_cache(|c| c.links.values().filter(|l| l.output_node == id).cloned().collect()).unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +316,7 @@ fn pw_thread_main(
             if let Ok(mut c) = cache_on_remove.lock() {
                 c.nodes.remove(&id);
                 c.links.remove(&id);
+                c.ports.remove(&id);
             }
         })
         .register();
@@ -366,6 +392,16 @@ fn update_cache_on_global(
                             name: name.to_string(),
                         },
                     );
+                }
+            }
+        }
+        ObjectType::Port => {
+            let node = props.get("node.id").and_then(|n| n.parse().ok());
+            let name = props.get("port.name");
+            if let (Some(node), Some(name)) = (node, name) {
+                let output = props.get("port.direction") == Some("out");
+                if let Ok(mut c) = cache.lock() {
+                    c.ports.insert(global.id, PortInfo { node, name: name.to_string(), output });
                 }
             }
         }

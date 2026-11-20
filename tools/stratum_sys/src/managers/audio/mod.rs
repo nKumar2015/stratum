@@ -10,6 +10,9 @@ pub(crate) mod monitor;
 pub(crate) mod native_eq;
 pub(crate) mod parser;
 pub(crate) mod pulse;
+pub(crate) mod routes;
+
+pub use routes::DEFAULT_OUTPUT;
 
 use crate::Publisher;
 
@@ -179,24 +182,34 @@ pub fn set_stream_mute(stream: Stream, muted: bool) -> Value {
     stream_result(result, "mute")
 }
 
-/// Move an app's stream to the device named `device`. Playback moved to
-/// the device the EQ feeds goes into the EQ instead, so it keeps the EQ.
+/// Move an app's stream to the device named `device`. Playback always goes
+/// through an EQ: [`DEFAULT_OUTPUT`] is the main one, which follows the
+/// output chosen on the Audio page; a device is an EQ of that device's own,
+/// where the app stays when the main output changes (`routes`).
 pub fn move_stream(stream: Stream, device: &str) -> Value {
     use pulsectl::controllers::AppControl;
     let result = match stream {
-        Stream::Playback(index) => {
-            let eq_target = engine::current_eq_target_sink().unwrap_or_default();
-            let eq_present = pulse::with_sink(|ctrl| ctrl.get_device_by_name(config::EQ_VIRTUAL_INPUT_SINK)).is_ok();
-            let target = if eq_present && !eq_target.is_empty() && eq_target == device {
-                config::EQ_VIRTUAL_INPUT_SINK
-            } else {
-                device
-            };
-            pulse::with_sink(|ctrl| ctrl.move_app_by_name(index, target))
-        }
+        Stream::Playback(index) => routes::move_playback(index, device),
         Stream::Recording(index) => pulse::with_source(|ctrl| ctrl.move_app_by_name(index, device)),
     };
     stream_result(result, "move")
+}
+
+/// The curve of `device`'s last preset (Flat when it has none).
+pub(crate) fn preset_curve(device: &str) -> (Vec<config::EqBand>, f64) {
+    let config = config::load_eq_config();
+    let name = config
+        .device_last_preset
+        .get(device)
+        .or_else(|| config.device_last_preset.get("@DEFAULT_SINK@"))
+        .map(String::as_str)
+        .unwrap_or("Flat");
+    config
+        .presets
+        .iter()
+        .find(|p| p.name == name && (p.device_id == device || p.device_id == "@DEFAULT_SINK@"))
+        .map(|p| (p.bands.clone(), p.preamp_db))
+        .unwrap_or_default()
 }
 
 fn stream_result(result: Result<bool, ControllerError>, verb: &str) -> Value {

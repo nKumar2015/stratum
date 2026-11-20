@@ -1,4 +1,4 @@
-use super::{config, engine, pulse};
+use super::{config, engine, pulse, routes};
 use pulsectl::controllers::types::DeviceInfo;
 use pulsectl::controllers::{AppControl, DeviceControl};
 use serde_json::{json, Value};
@@ -173,10 +173,7 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         .iter()
         .filter_map(|dev| {
             let name = dev.name.clone().unwrap_or_default();
-            if name.is_empty()
-                || name == config::EQ_VIRTUAL_INPUT_SINK
-                || name == config::EQ_VIRTUAL_OUTPUT_NODE
-            {
+            if name.is_empty() || engine::is_eq_virtual_sink_name(&name) {
                 return None;
             }
             let description = dev.description.clone().unwrap_or_else(|| name.clone());
@@ -221,29 +218,29 @@ pub(crate) fn fetch_current_audio_status() -> Value {
     let headphones = is_headphone_default_sink(&sink_devices, &default_sink);
 
     // The apps playing and recording, each with the device it uses by name.
-    // A stream into the EQ's sink is shown on the device the EQ feeds.
+    // A stream into an EQ is shown on the device the EQ feeds, and one into
+    // the main EQ (or, without it, the default device) follows the default.
     let eq_target = engine::current_eq_target_sink().unwrap_or_default();
     let sink_names: Vec<(u32, String)> =
         sink_devices.iter().map(|d| (d.index, d.name.clone().unwrap_or_default())).collect();
     let source_names: Vec<(u32, String)> =
         source_devices.iter().map(|d| (d.index, d.name.clone().unwrap_or_default())).collect();
-    let device_of = |names: &[(u32, String)], index: u32| -> String {
-        let name = names.iter().find(|(i, _)| *i == index).map(|(_, n)| n.clone()).unwrap_or_default();
-        if name == config::EQ_VIRTUAL_INPUT_SINK && !eq_target.is_empty() {
-            eq_target.clone()
-        } else {
-            name
-        }
+    let name_of = |names: &[(u32, String)], index: u32| -> String {
+        names.iter().find(|(i, _)| *i == index).map(|(_, n)| n.clone()).unwrap_or_default()
     };
     let playback: Vec<Value> = pulse::with_sink(|ctrl| ctrl.list_applications())
         .unwrap_or_default()
         .iter()
-        .filter_map(|app| stream_json(app, device_of(&sink_names, app.connection_id)))
+        .filter_map(|app| {
+            let sink = name_of(&sink_names, app.connection_id);
+            let (device, follows) = playback_device(&sink, &eq_target, &default_sink_raw, routes::device_of_sink(&sink));
+            stream_json(app, device, follows)
+        })
         .collect();
     let recording: Vec<Value> = pulse::with_source(|ctrl| ctrl.list_applications())
         .unwrap_or_default()
         .iter()
-        .filter_map(|app| stream_json(app, device_of(&source_names, app.connection_id)))
+        .filter_map(|app| stream_json(app, name_of(&source_names, app.connection_id), false))
         .collect();
 
     json!({
@@ -266,13 +263,27 @@ pub(crate) fn fetch_current_audio_status() -> Value {
     })
 }
 
+/// The device a stream into `sink` plays on, and whether it follows the
+/// default: one into the main EQ plays on the EQ's device and follows it,
+/// one into a device's EQ (`routed`) plays on that device, and without the
+/// main EQ one on the default device follows it.
+pub(crate) fn playback_device(sink: &str, eq_target: &str, default_sink: &str, routed: Option<String>) -> (String, bool) {
+    if sink == config::EQ_VIRTUAL_INPUT_SINK {
+        (eq_target.to_string(), true)
+    } else if let Some(device) = routed {
+        (device, false)
+    } else {
+        (sink.to_string(), sink == default_sink)
+    }
+}
+
 /// One app's stream as the snapshot lists it, or `None` for streams that
 /// are not an app's: the EQ's own output, and level meters (pavucontrol's
 /// "Peak detect").
-fn stream_json(app: &pulsectl::controllers::types::ApplicationInfo, device: String) -> Option<Value> {
+fn stream_json(app: &pulsectl::controllers::types::ApplicationInfo, device: String, follows_default: bool) -> Option<Value> {
     let prop = |key: &str| app.proplist.get_str(key).filter(|v| !v.is_empty());
     let node = prop("node.name").unwrap_or_default();
-    if node.starts_with("effect_output.") || node.starts_with("effect_input.") {
+    if node.starts_with("effect_") {
         return None;
     }
     if prop("stream.monitor").as_deref() == Some("true") || app.name.as_deref() == Some("Peak detect") {
@@ -297,7 +308,26 @@ fn stream_json(app: &pulsectl::controllers::types::ApplicationInfo, device: Stri
         "volume": volume,
         "mute": app.mute,
         "device": device,
+        "follows_default": follows_default,
         "corked": app.corked,
         "volume_writable": app.volume_writable,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stream_is_shown_on_the_device_its_eq_feeds() {
+        let main = config::EQ_VIRTUAL_INPUT_SINK;
+        assert_eq!(playback_device(main, "hdmi", main, None), ("hdmi".to_string(), true), "the main EQ follows the default");
+        assert_eq!(
+            playback_device("effect_input.stratum_eq.2", "hdmi", main, Some("bluez".into())),
+            ("bluez".to_string(), false),
+            "a device's EQ keeps its app there"
+        );
+        assert_eq!(playback_device("hdmi", "", "hdmi", None), ("hdmi".to_string(), true), "no EQ: on the default device");
+        assert_eq!(playback_device("bluez", "", "hdmi", None), ("bluez".to_string(), false));
+    }
 }

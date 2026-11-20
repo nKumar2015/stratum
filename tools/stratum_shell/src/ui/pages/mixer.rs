@@ -3,11 +3,15 @@
 //! plays, the device it uses (a dropdown when there is a choice), mute, and
 //! a 0-150 % slider, as the volume cards above it. The open dropdown is
 //! painted last, over the page, by [`Mixer::paint_menu`].
+//!
+//! An app's outputs are Default, which follows the output chosen above, then
+//! each device, which keeps the app there (through an EQ of that device's
+//! own) when the output changes, as Windows' per-app device preferences.
 
 use std::collections::HashMap;
 
 use serde_json::Value;
-use stratum_sys::managers::audio::Stream;
+use stratum_sys::managers::audio::{Stream, DEFAULT_OUTPUT};
 
 use crate::actions::SystemAction;
 use crate::render::display_list::{DisplayList, Rect};
@@ -31,6 +35,8 @@ pub struct AppStream {
     pub volume: f32,
     pub muted: bool,
     pub device: String,
+    /// On Default: it follows the output chosen on the page.
+    pub follows_default: bool,
     pub paused: bool,
     pub writable: bool,
 }
@@ -54,6 +60,7 @@ pub fn streams(audio: &Value, recording: bool) -> Vec<AppStream> {
                         volume: s["volume"].as_f64().unwrap_or(0.0) as f32,
                         muted: s["mute"].as_bool().unwrap_or(false),
                         device: text(&s["device"]),
+                        follows_default: s["follows_default"].as_bool().unwrap_or(false),
                         paused: s["corked"].as_bool().unwrap_or(false),
                         writable: s["volume_writable"].as_bool().unwrap_or(true),
                     })
@@ -156,6 +163,11 @@ impl Mixer {
             self.open = None;
         }
 
+        // Playback can also follow the default output.
+        let outputs: Vec<(String, String)> =
+            std::iter::once((DEFAULT_OUTPUT.to_string(), "Default".to_string())).chain(outputs.iter().cloned()).collect();
+        let outputs = outputs.as_slice();
+
         let mut y = layout::section(ctx, list, body, y, "Applications");
         if playback.is_empty() {
             let cell = rect(body.x, y, body.width, page.info_height);
@@ -239,7 +251,9 @@ impl Mixer {
         let mut text_end = mute_x - pad;
         if devices.len() > 1 {
             let labels: Vec<String> = devices.iter().map(|(_, label)| label.clone()).collect();
-            let selected = devices.iter().position(|(name, _)| *name == stream.device);
+            let selected = devices.iter().position(|(name, _)| {
+                if stream.follows_default { name == DEFAULT_OUTPUT } else { *name == stream.device }
+            });
             let face_h = page.badge;
             let face_w = layout::dropdown_width(ctx, &labels, face_h).min(card.width * 0.35);
             let face = rect(mute_x - pad * 0.5 - face_w, card.y + pad, face_w, face_h);
@@ -319,6 +333,17 @@ impl Mixer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stream_on_default_says_so() {
+        let audio = serde_json::json!({
+            "playback": [{ "id": 1, "app": "A", "device": "hdmi", "follows_default": true },
+                         { "id": 2, "app": "B", "device": "hdmi" }],
+        });
+        let playing = streams(&audio, false);
+        assert!(playing[0].follows_default);
+        assert!(!playing[1].follows_default, "pinned to the same device it is not on Default");
+    }
 
     #[test]
     fn streams_are_read_from_the_snapshot() {

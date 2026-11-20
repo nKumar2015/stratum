@@ -1,4 +1,4 @@
-use super::{config, native_eq, parser, pulse};
+use super::{config, native_eq, parser, pulse, routes};
 use tracing::{info, warn};
 
 use crate::managers::common::{command_available, run_command_capture};
@@ -61,30 +61,9 @@ fn apply_eq_bands_pipewire(
     };
 
     let _lifecycle_guard = GLOBAL_EQ_LOCK.lock().unwrap();
-    destroy_eq_module();
+    // Only the stage behind the sink is rebuilt: apps keep their sink.
+    destroy_node_named(config::EQ_STAGE_NODE);
     std::thread::sleep(std::time::Duration::from_millis(150));
-
-    let mut filter_specs = Vec::new();
-    if preamp_db.abs() > 0.01 {
-        filter_specs.push(format!(
-            "{{ type = bq_peaking freq = 1000.0 gain = {:.4} q = 0.707 }}",
-            preamp_db
-        ));
-    }
-    for band in bands.iter().filter(|b| b.enabled) {
-        filter_specs.push(format!(
-            "{{ type = {} freq = {:.4} gain = {:.4} q = {:.4} }}",
-            map_filter_type_for_pipewire(&band.filter_type),
-            band.frequency_hz,
-            band.gain_db,
-            band.q
-        ));
-    }
-    if filter_specs.is_empty() {
-        filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
-    }
-
-    let graph = builds_filter_graph_string(&filter_specs);
 
     if is_eq_virtual_sink_name(&resolved_device) || resolved_device.is_empty() {
         warn!(
@@ -99,21 +78,17 @@ fn apply_eq_bands_pipewire(
         resolved_device
     );
 
+    ensure_main_sink()?;
+    let quote = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
     let module_args = format!(
-        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" filter.graph = {} capture.props = {{ node.name = \"effect_input.stratum_eq\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} playback.props = {{ node.name = \"effect_output.stratum_eq\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] target.object = \"{}\" }} }}",
-        graph,
-        resolved_device.replace('\\', "\\\\").replace('"', "\\\""),
-        resolved_device.replace('\\', "\\\\").replace('"', "\\\"")
+        "{{ node.description = \"Stratum Parametric EQ stage\" media.name = \"Stratum Parametric EQ stage\" filter.graph = {graph} capture.props = {{ node.name = \"{stage}\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"{output}\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] target.object = \"{target}\" }} }}",
+        graph = filter_graph(bands, preamp_db),
+        stage = config::EQ_STAGE_NODE,
+        output = config::EQ_VIRTUAL_OUTPUT_NODE,
+        target = quote(&resolved_device),
     );
-
-    spawn_eq_module(&module_args)?;
-
-    for _ in 0..30 {
-        if find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK).is_some() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    load_eq_module(&module_args)?;
+    wait_for_node(config::EQ_STAGE_NODE);
 
     let current_default = pulse::default_sink_name().unwrap_or_default();
     if current_default.trim() != config::EQ_VIRTUAL_INPUT_SINK {
@@ -124,6 +99,7 @@ fn apply_eq_bands_pipewire(
     let target = resolved_device.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(400));
+        link_nodes(config::EQ_BRIDGE_NODE, config::EQ_STAGE_NODE);
         purge_eq_output_links();
         info!("ensuring manual link: EQ -> {}", target);
         ensure_eq_output_links(&target);
@@ -132,6 +108,9 @@ fn apply_eq_bands_pipewire(
     if let Ok(mut target) = EQ_TARGET_SINK.lock() {
         *target = Some(resolved_device.clone());
     }
+
+    // An EQ of the device's own, for apps sent to it, takes the new curve too.
+    routes::retune(&resolved_device, bands, preamp_db);
 
     Ok(EqApplyResult {
         applied: true,
@@ -145,9 +124,107 @@ fn apply_eq_bands_pipewire(
     })
 }
 
-fn spawn_eq_module(module_args: &str) -> Result<(), String> {
-    destroy_eq_module();
+/// The main EQ's sink, which apps play into: a loopback made once and kept,
+/// in front of the EQ stage that is rebuilt whenever the curve or the
+/// output changes. A stream that asked not to be moved (Electron apps that
+/// chose an output) is ended when the sink it asked for goes, which every
+/// output change used to do when the sink was the EQ itself.
+fn ensure_main_sink() -> Result<(), String> {
+    if find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK).is_some() {
+        return Ok(());
+    }
+    let args = format!(
+        "{{ node.description = \"Stratum Parametric EQ\" media.name = \"Stratum Parametric EQ\" capture.props = {{ node.name = \"{sink}\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] }} playback.props = {{ node.name = \"{bridge}\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] }} }}",
+        sink = config::EQ_VIRTUAL_INPUT_SINK,
+        bridge = config::EQ_BRIDGE_NODE,
+    );
+    if native_eq::is_available() {
+        native_eq::load_module("libpipewire-module-loopback", &args)?;
+    } else {
+        load_with_pw_cli("libpipewire-module-loopback", &args)?;
+    }
+    if !wait_for_node(config::EQ_VIRTUAL_INPUT_SINK) {
+        return Err("the EQ's sink did not appear".to_string());
+    }
+    info!("made the EQ's sink");
+    Ok(())
+}
 
+/// Wait up to 3 s for the node `name`. Returns whether it came.
+fn wait_for_node(name: &str) -> bool {
+    for _ in 0..30 {
+        if find_node_id_by_name(name).is_some() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
+}
+
+/// Link node `from`'s outputs to node `to`'s inputs, channel to channel.
+pub(crate) fn link_nodes(from: &str, to: &str) {
+    let (Some(out_node), Some(in_node)) = (find_node_id_by_name(from), find_node_id_by_name(to)) else {
+        warn!("cannot link {from} to {to}: one is missing");
+        return;
+    };
+    let inputs = native_eq::input_ports(in_node);
+    for port in native_eq::output_ports(out_node) {
+        let channel = port.rsplit('_').next().unwrap_or("");
+        if let Some(input) = inputs.iter().find(|i| i.rsplit('_').next() == Some(channel)) {
+            if let Err(err) = native_eq::create_link(&out_node.to_string(), &port, &in_node.to_string(), input) {
+                warn!("could not link {from} to {to}: {err}");
+            }
+        }
+    }
+}
+
+/// The filter graph for `bands` after `preamp_db`.
+pub(crate) fn filter_graph(bands: &[config::EqBand], preamp_db: f64) -> String {
+    let mut filter_specs = Vec::new();
+    if preamp_db.abs() > 0.01 {
+        filter_specs.push(format!("{{ type = bq_peaking freq = 1000.0 gain = {:.4} q = 0.707 }}", preamp_db));
+    }
+    for band in bands.iter().filter(|b| b.enabled) {
+        filter_specs.push(format!(
+            "{{ type = {} freq = {:.4} gain = {:.4} q = {:.4} }}",
+            map_filter_type_for_pipewire(&band.filter_type),
+            band.frequency_hz,
+            band.gain_db,
+            band.q
+        ));
+    }
+    if filter_specs.is_empty() {
+        filter_specs.push("{ type = bq_peaking freq = 1000.0 gain = 0.0 q = 0.707 }".to_string());
+    }
+    builds_filter_graph_string(&filter_specs)
+}
+
+/// The filter-chain module's arguments for an EQ with `bands` and
+/// `preamp_db`, taking audio in as the sink `input` and playing it as
+/// `output` into the device `target`. `extra` is added to the sink's
+/// properties.
+pub(crate) fn eq_module_args(
+    bands: &[config::EqBand],
+    preamp_db: f64,
+    input: &str,
+    output: &str,
+    description: &str,
+    target: &str,
+    extra: &str,
+) -> String {
+    let graph = filter_graph(bands, preamp_db);
+    let quote = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "{{ node.description = \"{description}\" media.name = \"{description}\" filter.graph = {graph} capture.props = {{ node.name = \"{input}\" media.class = Audio/Sink audio.channels = 2 audio.position = [ FL FR ] target.object = \"{target}\" {extra} }} playback.props = {{ node.name = \"{output}\" node.passive = true node.autoconnect = false audio.channels = 2 audio.position = [ FL FR ] target.object = \"{target}\" }} }}",
+        description = quote(description),
+        input = quote(input),
+        output = quote(output),
+        target = quote(target),
+    )
+}
+
+/// Load a filter-chain module, natively or through `pw-cli`.
+pub(crate) fn load_eq_module(module_args: &str) -> Result<(), String> {
     // Try native PipeWire API first.
     if native_eq::is_available() {
         match native_eq::load_filter_chain(module_args) {
@@ -167,7 +244,11 @@ fn spawn_eq_module(module_args: &str) -> Result<(), String> {
         }
     }
 
-    // Fallback: pw-cli subprocess.
+    load_with_pw_cli("libpipewire-module-filter-chain", module_args)
+}
+
+/// Load a module through `pw-cli`.
+fn load_with_pw_cli(module: &str, module_args: &str) -> Result<(), String> {
     if !pw_cli_available() {
         return Err("neither native PipeWire nor pw-cli available".to_string());
     }
@@ -180,7 +261,7 @@ fn spawn_eq_module(module_args: &str) -> Result<(), String> {
         .map_err(|err| format!("failed to spawn pw-cli: {}", err))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let cmd = format!("load-module libpipewire-module-filter-chain {}\n", module_args);
+        let cmd = format!("load-module {} {}\n", module, module_args);
         use std::io::Write;
         stdin.write_all(cmd.as_bytes())
             .map_err(|err| format!("failed to write to pw-cli stdin: {}", err))?;
@@ -198,8 +279,20 @@ fn spawn_eq_module(module_args: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove the EQ, its stage and its sink.
 pub(crate) fn destroy_eq_module() {
-    if let Some(id) = find_node_id_by_name(config::EQ_VIRTUAL_INPUT_SINK) {
+    destroy_node_named(config::EQ_STAGE_NODE);
+    destroy_node_named(config::EQ_VIRTUAL_INPUT_SINK);
+
+    if let Ok(mut target) = EQ_TARGET_SINK.lock() {
+        *target = None;
+    }
+}
+
+/// Destroy the node named `name`, which takes its filter-chain module down
+/// with it.
+pub(crate) fn destroy_node_named(name: &str) {
+    if let Some(id) = find_node_id_by_name(name) {
         // Try native destroy first.
         if native_eq::is_available() {
             if native_eq::destroy_global(id).is_ok() {
@@ -212,10 +305,6 @@ pub(crate) fn destroy_eq_module() {
             let _ = run_command_capture("pw-cli", &["destroy", &id.to_string()]);
         }
     }
-
-    if let Ok(mut target) = EQ_TARGET_SINK.lock() {
-        *target = None;
-    }
 }
 
 pub(crate) fn current_eq_target_sink() -> Option<String> {
@@ -223,7 +312,7 @@ pub(crate) fn current_eq_target_sink() -> Option<String> {
 }
 
 
-fn find_node_id_by_name(node_name: &str) -> Option<u32> {
+pub(crate) fn find_node_id_by_name(node_name: &str) -> Option<u32> {
     if native_eq::is_available() {
         if let Some(id) = native_eq::find_node_by_name(node_name) {
             return Some(id);
@@ -266,7 +355,9 @@ fn find_node_id_by_name(node_name: &str) -> Option<u32> {
 
 fn purge_eq_output_links() {
     if native_eq::is_available() {
-        let links = native_eq::list_eq_output_links();
+        let links = find_node_id_by_name(config::EQ_VIRTUAL_OUTPUT_NODE)
+            .map(native_eq::links_from_node)
+            .unwrap_or_default();
         for link in &links {
             info!(
                 "native: purging EQ link id={} ({}:{} -> {}:{})",
@@ -335,10 +426,21 @@ fn ensure_eq_output_links(target: &str) {
     );
 }
 
+/// Move every app into `target_sink`, except those sent to a device of their
+/// own (`routes`), which stay where they were put.
 fn move_active_streams_to_eq(target_sink: &str) {
+    let pinned = routes::input_sinks();
     let _ = pulse::with_sink(|ctrl| {
+        let pinned: Vec<u32> = ctrl
+            .list_devices()?
+            .into_iter()
+            .filter(|d| d.name.as_deref().is_some_and(|n| pinned.iter().any(|p| p == n)))
+            .map(|d| d.index)
+            .collect();
         for app in ctrl.list_applications()? {
-            let _ = ctrl.move_app_by_name(app.index, target_sink);
+            if !pinned.contains(&app.connection_id) {
+                let _ = ctrl.move_app_by_name(app.index, target_sink);
+            }
         }
         Ok(())
     });
@@ -388,7 +490,11 @@ pub(crate) fn auto_apply_preset_for_device(device_id: &str) -> Value {
     super::eq_apply_preset(device_id, preset_name)
 }
 
+/// Whether `name` is one of the EQs' own nodes, the main one's or a
+/// device's (`routes`), rather than a device.
 pub(crate) fn is_eq_virtual_sink_name(name: &str) -> bool {
     let trimmed = name.trim();
-    trimmed == config::EQ_VIRTUAL_INPUT_SINK || trimmed == config::EQ_VIRTUAL_OUTPUT_NODE
+    [config::EQ_VIRTUAL_INPUT_SINK, config::EQ_VIRTUAL_OUTPUT_NODE, config::EQ_BRIDGE_NODE, config::EQ_STAGE_NODE]
+        .contains(&trimmed)
+        || routes::is_route_node(trimmed)
 }

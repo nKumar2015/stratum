@@ -226,7 +226,8 @@ use leaves ~4 MB of font caches, which do not grow after.
 
 The **overview** (`overview/`, `wayland/state/windows.rs`, `stratum-cli
 overview open|close|toggle`) is a fullscreen overlay of the workspaces of
-the output it opens on, in a grid (`overview/layout.rs`, pure and tested),
+the output it opens on that hold a window (and the one shown, even
+empty; the user's workspaces are persistent, so most are), in a grid (`overview/layout.rs`, pure and tested),
 each a copy of the output: the wallpaper (decoded on open at about a
 workspace's size) and pictures of its windows placed from `j/clients`
 (`hyprland::desktop`), floating over tiled, fullscreen on top. A click on a
@@ -423,16 +424,42 @@ The **per-app mixer** (`ui/pages/mixer.rs`, after Volume on the Audio
 page) lists the audio snapshot's `playback` and `recording`: each app's
 Pulse stream (sink input or source output) with its volume, mute and
 device, from `parser::fetch_current_audio_status`. The EQ's own streams
-(`effect_*`) and level meters are left out. A stream playing into the EQ's
-sink is shown on the device the EQ feeds, and moving one to that device
-puts it back into the EQ (`audio::move_stream`), so the EQ is not
-bypassed. The monitor follows `Stream/*/Audio` nodes too, so an app that
-starts or a volume changed elsewhere shows at once. Test it in the sandbox
-with its own audio stack: `pipewire`, `wireplumber` (with every hardware
-monitor disabled in `$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/`, so
-it never opens the real sound card), `pipewire-pulse`, null sinks from
-`pactl load-module module-null-sink`, and `paplay --raw /dev/zero` as a
-silent app. Never change volumes or routes in the user's session.
+(`effect_*`) and level meters are left out. The monitor follows
+`Stream/*/Audio` nodes too, so an app that starts or a volume changed
+elsewhere shows at once.
+
+**Every app plays through an EQ**, and an app's output is chosen as in
+Windows' per-app device preferences (`audio/routes.rs`): **Default**
+plays into the main EQ, which follows the output picked on the Audio page;
+a device plays into an EQ of that device's own (`effect_input.stratum_eq.N`,
+made on first use with the device's preset, ~1.4 MB in the shell while
+used), where the app stays when the main output changes. A device's EQ is
+removed once unused for a few seconds, or when the device goes (its apps
+return to Default); a new curve for the device makes a new one and moves
+its apps before the old one goes. The main EQ is two parts: the sink apps
+play into, `effect_input.stratum_eq`, a loopback made once and never
+rebuilt, and the stage behind it (`effect_bridge` → `effect_stage` →
+`effect_output`), rebuilt on every curve or output change. That split
+matters: a stream that asked not to be moved (`node.dont-reconnect`;
+Electron apps that chose an output, such as Orchard) is refused by
+pipewire-pulse's move and by WirePlumber, and is *ended* by WirePlumber
+when the sink it asked for goes, which every output change used to do.
+Such a stream is moved by linking it to the new sink and only then
+unlinking it from the old one (`routes::relink`); never set its
+`target.object` metadata, which made WirePlumber drop its links.
+
+Test it in the sandbox with its own audio stack: `pipewire`, `wireplumber`
+(with every hardware monitor disabled in
+`$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/`, so it never opens the
+real sound card), `pipewire-pulse`, null sinks from `pactl load-module
+module-null-sink`, `paplay --raw /dev/zero` as a silent app and `pw-cat
+-P "{ node.dont-reconnect = true }"` as a locked one. `routes::live`
+(`STRATUM_AUDIO_SANDBOX=1 cargo test -p stratum_sys live_routing --
+--ignored --nocapture`, with a scratch `HOME`) checks the routing, the
+main sink's volume and mute and the pinned path with a recorded tone,
+and refuses to run in the user's runtime dir. Record with `parec
+--latency-msec=20`: without it a killed `parec` writes nothing. Never
+change volumes or routes in the user's session.
 
 The **Network page's extras** (`ui/pages/network_extras.rs`, over
 `stratum_sys::managers::connections`, which reuses `wifi.rs`'s D-Bus

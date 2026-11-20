@@ -17,6 +17,10 @@ pub(crate) const EQ_MAX_Q: f64 = 10.0;
 pub(crate) const EQ_MAX_BANDS: usize = 24;
 pub(crate) const EQ_VIRTUAL_INPUT_SINK: &str = "effect_input.stratum_eq";
 pub(crate) const EQ_VIRTUAL_OUTPUT_NODE: &str = "effect_output.stratum_eq";
+/// The main sink's output, a loopback, into the EQ stage.
+pub(crate) const EQ_BRIDGE_NODE: &str = "effect_bridge.stratum_eq";
+/// The EQ stage's input, behind the main sink.
+pub(crate) const EQ_STAGE_NODE: &str = "effect_stage.stratum_eq";
 pub(crate) const EQ_SUPPORTED_FILTER_TYPES: [&str; 6] = [
     "peaking",
     "low_shelf",

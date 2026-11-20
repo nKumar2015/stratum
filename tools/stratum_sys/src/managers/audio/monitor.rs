@@ -1,4 +1,4 @@
-use super::{engine, parser};
+use super::{engine, parser, routes};
 
 use crate::Publisher;
 use pipewire::keys;
@@ -253,6 +253,10 @@ fn prop_contains(
 }
 
 fn refresh_from_system(publisher: &Publisher) {
+    // An app that ended may leave a device's EQ unused, and a device that
+    // went takes its EQ's apps back to Default. Off this thread: it waits
+    // on PipeWire.
+    routes::prune_soon(Duration::ZERO);
     let _ = super::refresh_device_cache();
     if let Some(snapshot) = fetch_current_status() {
         if let Some(sink) = snapshot.get("default_sink").and_then(|s| s.as_str()) {
