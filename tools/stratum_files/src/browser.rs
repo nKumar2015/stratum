@@ -24,6 +24,7 @@ use crate::chooser::Chooser;
 use crate::entries::{self, Entry, SortKey};
 use crate::mime::MimeDb;
 use crate::places::{self, Place, Section};
+use crate::undo::{self, Step};
 use crate::{clipboard, open, ops, trash};
 
 const BACK: &str = "\u{f004d}";
@@ -58,6 +59,7 @@ enum Command {
     Delete,
     Restore,
     EmptyTrash,
+    Undo,
     NewFolder,
     CopyPath,
     TerminalHere,
@@ -86,6 +88,10 @@ enum Editing {
 /// A running copy or move.
 struct Job {
     label: &'static str,
+    /// Said when it ends without errors.
+    done: String,
+    /// What to record for undo when it ends; `None` for an undo's own job.
+    record: Option<ops::Kind>,
     cancel: Arc<AtomicBool>,
     progress: Arc<Mutex<ops::Progress>>,
 }
@@ -134,6 +140,7 @@ pub struct Browser {
     grid_columns: usize,
     pub chooser: Option<Chooser>,
     pub quit: bool,
+    history: undo::History,
 }
 
 /// A decoded thumbnail, or `None` for a picture that did not decode.
@@ -191,6 +198,7 @@ impl Browser {
             grid_columns: 1,
             chooser: None,
             quit: false,
+            history: undo::History::default(),
         };
         browser.load(dir);
         browser
@@ -470,6 +478,11 @@ impl Browser {
         };
         match result {
             Ok(()) => {
+                if new_folder {
+                    self.history.push(Step::NewFolder(target.clone()));
+                } else if target != path {
+                    self.history.push(Step::Rename { from: path, to: target.clone() });
+                }
                 self.reload();
                 if let Some(i) = self.visible().iter().position(|e| e.path == target) {
                     self.select_only(i);
@@ -494,11 +507,14 @@ impl Browser {
             return;
         }
         let mut failed = Vec::new();
+        let mut trashed = Vec::new();
         for path in &paths {
-            if let Err(err) = trash::trash(path) {
-                failed.push((path.clone(), err));
+            match trash::trash(path) {
+                Ok(item) => trashed.push((path.clone(), item)),
+                Err(err) => failed.push((path.clone(), err)),
             }
         }
+        self.history.push(Step::Trash(trashed));
         self.reload();
         match failed.as_slice() {
             [] => self.say(format!("Moved {} to the trash", count(paths.len(), "item")), false),
@@ -579,12 +595,18 @@ impl Browser {
     }
 
     fn start_job(&mut self, kind: ops::Kind, sources: Vec<PathBuf>, dest: PathBuf) {
+        let items = sources.into_iter().map(|s| (s, ops::Target::Into(dest.clone()))).collect();
+        let (label, done) = if kind == ops::Kind::Copy { ("Copying", "Copying done") } else { ("Moving", "Moving done") };
+        self.spawn_job(kind, items, label, done.into(), Some(kind));
+    }
+
+    fn spawn_job(&mut self, kind: ops::Kind, items: Vec<(PathBuf, ops::Target)>, label: &'static str, done: String, record: Option<ops::Kind>) {
         let progress = Arc::new(Mutex::new(ops::Progress::default()));
         let cancel = Arc::new(AtomicBool::new(false));
         let report = Arc::clone(&progress);
         let waker = self.waker.clone();
         let last = Mutex::new(Instant::now());
-        ops::start(kind, sources, dest, Arc::clone(&cancel), move |p| {
+        ops::start_to(kind, items, Arc::clone(&cancel), move |p| {
             if let Ok(mut slot) = report.lock() {
                 *slot = p.clone();
             }
@@ -597,7 +619,30 @@ impl Browser {
                 }
             }
         });
-        self.job = Some(Job { label: if kind == ops::Kind::Copy { "Copying" } else { "Moving" }, cancel, progress });
+        self.job = Some(Job { label, done, record, cancel, progress });
+    }
+
+    /// Reverse the last change.
+    fn undo(&mut self) {
+        if self.job.is_some() {
+            return self.say("Wait for the copy or move to finish, or cancel it".into(), true);
+        }
+        let Some(step) = self.history.pop() else {
+            return self.say("Nothing to undo".into(), false);
+        };
+        let what = step.describe();
+        let undone = undo::undo(step);
+        self.reload();
+        if !undone.move_back.is_empty() {
+            let items = undone.move_back.into_iter().map(|(from, to)| (from, ops::Target::Exactly(to))).collect();
+            self.spawn_job(ops::Kind::Move, items, "Moving back", format!("Undid: {what}"), None);
+        }
+        match undone.errors.as_slice() {
+            [] if self.job.is_none() => self.say(format!("Undid: {what}"), false),
+            [] => {}
+            [one] => self.say(format!("Could not undo all of it: {one}"), true),
+            many => self.say(format!("Could not undo {}: {}", count(many.len(), "item"), many[0]), true),
+        }
     }
 
     fn run(&mut self, command: Command, config: &stratum_ui::config::FilesConfig) {
@@ -647,6 +692,7 @@ impl Browser {
                 }
             }
             Command::Restore => self.restore_selected(),
+            Command::Undo => self.undo(),
             Command::EmptyTrash => {
                 let all: Vec<PathBuf> = self.entries.iter().map(|e| e.path.clone()).collect();
                 self.ask_delete(all);
@@ -693,9 +739,11 @@ impl Browser {
             items.extend([("Open a terminal here", Command::TerminalHere), ("Copy path", Command::CopyPath)]);
             items.push((if self.show_hidden { "Hide hidden files" } else { "Show hidden files" }, Command::ToggleHidden));
         }
+        // The last change, first, on the folder's own menu.
+        let undo = self.history.last().filter(|_| !on_entry && self.job.is_none()).map(|step| (format!("Undo: {}", step.describe()), Command::Undo));
         self.menu = Some(Menu {
             anchor: rect(at.0, at.1, width, 0.0),
-            items: items.into_iter().map(|(l, c)| (l.to_string(), c)).collect(),
+            items: undo.into_iter().chain(items.into_iter().map(|(l, c)| (l.to_string(), c))).collect(),
             scroll: None,
             fresh: true,
         });
@@ -1236,10 +1284,15 @@ impl Browser {
     fn take_job(&mut self) -> bool {
         let finished = self.job.as_ref().and_then(|j| j.progress.lock().ok().filter(|p| p.finished).map(|p| p.clone()));
         let Some(p) = finished else { return self.job.is_some() };
-        let label = self.job.take().map(|j| j.label).unwrap_or("");
+        let Some(job) = self.job.take() else { return false };
+        match job.record {
+            Some(ops::Kind::Move) => self.history.push(Step::Move(p.made.clone())),
+            Some(ops::Kind::Copy) => self.history.push(Step::Copy(p.made.clone())),
+            None => {}
+        }
         self.reload();
         match p.errors.as_slice() {
-            [] => self.say(format!("{} done", label), false),
+            [] => self.say(job.done, false),
             [one] => self.say(one.clone(), true),
             many => self.say(format!("{} problems: {}", many.len(), many[0]), true),
         }
@@ -1527,6 +1580,7 @@ impl App for Browser {
             }
             Keysym::l | Keysym::L if key.ctrl => self.editing = Editing::Path(TextField::with_text_capacity(&self.dir.display().to_string(), LONG_FIELD)),
             Keysym::f | Keysym::F if key.ctrl => self.editing = Editing::Search,
+            Keysym::z | Keysym::Z if key.ctrl => self.undo(),
             Keysym::h | Keysym::H if key.ctrl => self.show_hidden = !self.show_hidden,
             Keysym::a | Keysym::A if key.ctrl => self.run(Command::SelectAll, &config),
             Keysym::c | Keysym::C if key.ctrl && self.chooser.is_none() => self.copy_selected(false),

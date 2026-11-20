@@ -17,6 +17,7 @@ mod ops;
 mod places;
 mod portal;
 mod trash;
+mod undo;
 
 use std::io::Read;
 use std::path::PathBuf;

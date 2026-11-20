@@ -739,7 +739,11 @@ desktop portal's FileChooser, ahead of GTK's.
   drive's `.Trash/$uid` or `.Trash-$uid` with its path relative to the
   drive; the Trash view merges every mounted drive's, and live tests use a
   tmpfs mounted under `unshare -rm`, never a real drive), `ops` (copy and move on a thread with
-  progress and cancel; never overwrites, a taken name gets ` (copy)`),
+  progress and cancel; never overwrites, a taken name gets ` (copy)`; a
+  cancelled item is removed, never half kept, and each finished one is
+  reported in `Progress::made`), `undo` (a per-window history, Ctrl+Z:
+  renames, new folders, moves, copies (to the trash) and trashing are
+  reversed, never over a name taken since; deleting for good is not),
   `open` (`mimeapps.list` defaults and associations, then entries whose
   `MimeType` names the type or an ancestor; apps start with `setsid`).
 - Desktop entries (the launcher's list and "Open with") are

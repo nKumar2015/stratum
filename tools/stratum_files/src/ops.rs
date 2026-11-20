@@ -22,6 +22,19 @@ pub struct Progress {
     pub finished: bool,
     /// What went wrong, file by file.
     pub errors: Vec<String>,
+    /// Each source done in full and where it went, for undo. A failed or
+    /// cancelled item is not here.
+    pub made: Vec<(PathBuf, PathBuf)>,
+}
+
+/// Where an item goes.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Target {
+    /// Into this folder, under its own name or a free ` (copy)` one.
+    Into(PathBuf),
+    /// To exactly this path, refused if it is taken (undo putting a file
+    /// back where it was).
+    Exactly(PathBuf),
 }
 
 /// `name` with ` (copy)` or ` (copy N)` before its extension, the first not
@@ -61,34 +74,37 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Run a copy or move of `sources` into `dest` on a thread, reporting
+/// Run a copy or move on a thread, each item to its target, reporting
 /// through `report` (called often; it should be cheap). `cancel` stops it
-/// between files.
-pub fn start(
-    kind: Kind,
-    sources: Vec<PathBuf>,
-    dest: PathBuf,
-    cancel: Arc<AtomicBool>,
-    report: impl Fn(&Progress) + Send + 'static,
-) {
+/// between files, and part way through a file.
+pub fn start_to(kind: Kind, items: Vec<(PathBuf, Target)>, cancel: Arc<AtomicBool>, report: impl Fn(&Progress) + Send + 'static) {
     std::thread::spawn(move || {
-        let mut progress = Progress { total: sources.iter().map(|s| size_of(s)).sum(), ..Progress::default() };
+        let mut progress = Progress { total: items.iter().map(|(s, _)| size_of(s)).sum(), ..Progress::default() };
         report(&progress);
-        for source in &sources {
+        for (source, to) in &items {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
             let Some(name) = source.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            let dest = match to {
+                Target::Into(dir) => dir.as_path(),
+                Target::Exactly(path) => path.parent().unwrap_or(Path::new("/")),
+            };
             // A folder into itself would never end.
             if dest.starts_with(source) {
                 progress.errors.push(format!("{name}: cannot go into itself"));
                 continue;
             }
-            // Moving within the same folder changes nothing.
-            if kind == Kind::Move && source.parent() == Some(dest.as_path()) {
-                continue;
-            }
-            let target = dest.join(free_name(&dest, &name));
+            let target = match to {
+                // Moving within the same folder changes nothing.
+                Target::Into(_) if kind == Kind::Move && source.parent() == Some(dest) => continue,
+                Target::Into(_) => dest.join(free_name(dest, &name)),
+                Target::Exactly(path) if path.symlink_metadata().is_ok() => {
+                    progress.errors.push(format!("{name}: {} exists", path.display()));
+                    continue;
+                }
+                Target::Exactly(path) => path.clone(),
+            };
             progress.current = name.clone();
             let result = match kind {
                 Kind::Move => match std::fs::rename(source, &target) {
@@ -97,14 +113,29 @@ pub fn start(
                         Ok(())
                     }
                     Err(err) if err.raw_os_error() == Some(libc::EXDEV) => {
-                        copy_tree(source, &target, &mut progress, &cancel, &report).and_then(|()| remove(source))
+                        copy_tree(source, &target, &mut progress, &cancel, &report).and_then(|()| {
+                            // A cancelled copy is partial: the source must
+                            // stay, and the part copied goes.
+                            if cancel.load(Ordering::Relaxed) {
+                                let _ = remove(&target);
+                                Ok(())
+                            } else {
+                                remove(source)
+                            }
+                        })
                     }
                     Err(err) => Err(err),
                 },
                 Kind::Copy => copy_tree(source, &target, &mut progress, &cancel, &report),
             };
-            if let Err(err) = result {
-                progress.errors.push(format!("{name}: {err}"));
+            match result {
+                Err(err) => progress.errors.push(format!("{name}: {err}")),
+                Ok(()) if cancel.load(Ordering::Relaxed) && kind == Kind::Copy => {
+                    // Stopped part way: what was copied is incomplete.
+                    let _ = remove(&target);
+                }
+                Ok(()) if cancel.load(Ordering::Relaxed) && source.symlink_metadata().is_ok() => {}
+                Ok(()) => progress.made.push((source.clone(), target)),
             }
             report(&progress);
         }
@@ -163,6 +194,10 @@ fn copy_tree(
 mod tests {
     use super::*;
 
+    fn start(kind: Kind, sources: Vec<PathBuf>, dest: PathBuf, cancel: Arc<AtomicBool>, report: impl Fn(&Progress) + Send + 'static) {
+        start_to(kind, sources.into_iter().map(|s| (s, Target::Into(dest.clone()))).collect(), cancel, report);
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("stratum-files-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -180,6 +215,36 @@ mod tests {
         std::fs::write(dir.join(".bashrc"), "").unwrap();
         assert_eq!(free_name(&dir, ".bashrc"), ".bashrc (copy)");
         assert_eq!(free_name(&dir, "new"), "new");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn rx_made(kind: Kind, items: Vec<(PathBuf, Target)>) -> Vec<(PathBuf, PathBuf)> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        start_to(kind, items, Arc::default(), move |p| {
+            let _ = tx.send(p.clone());
+        });
+        rx.iter().find(|p| p.finished).unwrap().made
+    }
+
+    #[test]
+    fn a_cancelled_copy_leaves_nothing_behind_and_is_not_reported() {
+        let dir = scratch("cancel");
+        std::fs::write(dir.join("big"), vec![7u8; 3 << 20]).unwrap();
+        std::fs::create_dir(dir.join("dest")).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let stop = Arc::clone(&cancel);
+        start(Kind::Copy, vec![dir.join("big")], dir.join("dest"), Arc::clone(&cancel), move |p| {
+            // Cancel once the first chunk is written.
+            if p.done > 0 {
+                stop.store(true, Ordering::Relaxed);
+            }
+            let _ = tx.send(p.clone());
+        });
+        let last = rx.iter().find(|p| p.finished).unwrap();
+        assert!(last.made.is_empty());
+        assert!(!dir.join("dest/big").exists(), "a partial copy stays");
+        assert!(dir.join("big").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -210,6 +275,14 @@ mod tests {
         assert!(rx.iter().find(|p| p.finished).unwrap().errors.is_empty());
         assert!(!src.exists());
         assert!(dest.join("src (copy)/sub/f.txt").exists());
+
+        // What was made is reported, for undo.
+        assert_eq!(rx_made(Kind::Copy, vec![(dest.join("src (copy)/sub/f.txt"), Target::Into(dir.clone()))]), [(dest.join("src (copy)/sub/f.txt"), dir.join("f.txt"))]);
+        // An exact target is never overwritten.
+        let made = rx_made(Kind::Move, vec![(dir.join("f.txt"), Target::Exactly(dest.join("src (copy)/sub/f.txt")))]);
+        assert!(made.is_empty() && dir.join("f.txt").exists());
+        let made = rx_made(Kind::Move, vec![(dir.join("f.txt"), Target::Exactly(dir.join("g.txt")))]);
+        assert_eq!(made, [(dir.join("f.txt"), dir.join("g.txt"))]);
 
         // Into itself.
         let (tx, rx) = std::sync::mpsc::channel();

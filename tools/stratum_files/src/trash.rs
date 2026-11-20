@@ -27,6 +27,15 @@ pub struct Trash {
 
 impl Trash {
     pub fn home() -> Self {
+        // Tests never reach the user's trash, and never set the
+        // environment, which other test threads read.
+        #[cfg(test)]
+        {
+            static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+            let data = HOME.get_or_init(|| std::env::temp_dir().join(format!("stratum-trash-home-{}", std::process::id())));
+            return Self { root: data.join("Trash"), topdir: None };
+        }
+        #[allow(unreachable_code)]
         let data = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
