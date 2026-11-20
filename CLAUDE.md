@@ -729,7 +729,10 @@ desktop portal's FileChooser, ahead of GTK's.
   `org.freedesktop.impl.portal.FileChooser` as
   `org.freedesktop.impl.portal.desktop.stratum` (zbus only, no GPU),
   starting a chooser per call and exporting the call's `Request` so Close
-  kills it. The package ships the `.portal` file and a D-Bus service file
+  kills it. Hyprland's package installs `hyprland-portals.conf`, which
+  xdg-desktop-portal prefers to any `portals.conf`, so the module writes
+  its own `hyprland-portals.conf` in `~/.config`; check which file wins
+  by running the portal binary with `--verbose` under `dbus-run-session`. The package ships the `.portal` file and a D-Bus service file
   that starts `--portal` on demand.
 - The model is pure and tested: `mime` (shared-mime-info's `globs2`,
   `subclasses`, `generic-icons`; no content sniffing beyond "short and
@@ -779,7 +782,9 @@ desktop portal's FileChooser, ahead of GTK's.
   cached, so live tests set `TMPDIR` (and `XDG_CACHE_HOME`). Test
   thumbnailers with a stand-in script, or nixpkgs' `ffmpegthumbnailer`
   on a video made with `ffmpeg -f lavfi -i testsrc`.
-- The preview pane (`preview.rs`, F9, `[files] preview`) shows the
+- The preview pane (`preview.rs`, `[files] preview`): "auto" opens it
+  while one picture, thumbnailed file or text file is selected; F9 and
+  the toolbar button switch it off and back. It shows the
   selection, else the folder: a picture decoded at the pane's size, a text
   file's first 16 KB (`widgets::draw::paint_text_preview`, shared with the
   launcher's clipboard pane), a folder's size added up (capped, and

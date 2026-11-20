@@ -81,7 +81,7 @@ thumbnails = true       # pictures as themselves, decoded on a thread
 thumbnail_max_mb = 20   # larger pictures keep their icon
 thumbnail_external = true # videos, PDFs and more through installed thumbnailers
 confirm_delete = true   # ask before deleting for good; the trash never asks
-preview = true          # the selection's preview at the right; F9 toggles
+preview = "auto"        # the preview at the right: "auto" (a picture, video or text file selected), "always", "never"; F9 toggles
 terminal_here = ["kitty", "--directory"] # the folder is appended
 
 [launcher]

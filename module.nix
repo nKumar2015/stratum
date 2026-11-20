@@ -158,14 +158,23 @@ in {
           pkgs.xdg-desktop-portal-hyprland
         ]
         ++ lib.optional cfg.fileManager.enable cfg.fileManager.package;
-      config.common =
-        lib.optionalAttrs cfg.installPortal {default = ["gtk"];}
-        // {
-          # The first one found answers: ours, then GTK's.
+      config = let
+        # The first one found answers: ours, then GTK's.
+        fileChooser = {
           "org.freedesktop.impl.portal.FileChooser" =
             lib.optional cfg.fileManager.enable "stratum"
             ++ lib.optional cfg.installPortal "gtk";
         };
+      in {
+        common = lib.optionalAttrs cfg.installPortal {default = ["gtk"];} // fileChooser;
+        # Hyprland's package installs a hyprland-portals.conf
+        # (default=hyprland;gtk), and xdg-desktop-portal takes a file
+        # named for the desktop over portals.conf wherever each is found,
+        # so the common file never applied under Hyprland and every
+        # FileChooser call went to GTK. This one, in ~/.config, is found
+        # before the package's; it keeps Hyprland's defaults.
+        hyprland = lib.mkIf cfg.fileManager.enable ({default = ["hyprland" "gtk"];} // fileChooser);
+      };
     };
   };
 }

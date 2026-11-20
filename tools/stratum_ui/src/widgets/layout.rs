@@ -219,16 +219,37 @@ pub fn icon_button(
     input: &InputState,
     clicked: bool,
 ) -> bool {
-    let m = ctx.metrics().page.clone();
+    let size = ctx.metrics().page.badge;
+    round_button(ctx, list, rect(x, y, size, size), glyph, on, true, accent, input, clicked)
+}
+
+/// A round button filling `area` (a square). `on` tints it with `accent`;
+/// a disabled one is drawn faded, has no hover and ignores clicks. Returns
+/// whether it was clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn round_button(
+    ctx: &mut impl Ui,
+    list: &mut DisplayList,
+    area: Rect,
+    glyph: &str,
+    on: bool,
+    enabled: bool,
+    accent: Color,
+    input: &InputState,
+    clicked: bool,
+) -> bool {
+    let icon = ctx.metrics().page.badge_icon;
     let theme = ctx.theme().clone();
-    let area = rect(x, y, m.badge, m.badge);
-    let hot = hovered(input, area);
-    let (fg, bg) = match (on, hot) {
-        (true, _) => (accent, mix(theme.surface_high, accent, if hot { 0.3 } else { 0.2 })),
-        (false, true) => (theme.text_main, mix(theme.surface_highest, theme.text_main, 0.08)),
-        (false, false) => (theme.text_muted, theme.surface_highest),
+    let hot = enabled && hovered(input, area);
+    let (fg, bg) = match (enabled, on, hot) {
+        (false, _, _) => (theme.text_muted.with_alpha(theme.text_muted.a * 0.4), theme.surface_highest.with_alpha(theme.surface_highest.a * 0.5)),
+        (true, true, _) => (accent, mix(theme.surface_high, accent, if hot { 0.3 } else { 0.2 })),
+        (true, false, true) => (theme.text_main, mix(theme.surface_highest, theme.text_main, 0.08)),
+        (true, false, false) => (theme.text_muted, theme.surface_highest),
     };
-    badge(ctx, list, x, y, glyph, fg, bg);
+    let circle = Rect { radius: area.width.min(area.height) * 0.5, color: bg, ..area };
+    list.push_rect(circle);
+    ui::paint_icon_centered(ctx, list, glyph, circle, icon, fg);
     hot && clicked
 }
 

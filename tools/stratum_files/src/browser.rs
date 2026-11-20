@@ -87,6 +87,26 @@ enum Editing {
     Rename { path: PathBuf, field: TextField, new_folder: bool },
 }
 
+/// When the preview pane is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviewMode {
+    /// While one previewable item is selected.
+    Auto,
+    Always,
+    Never,
+}
+
+impl PreviewMode {
+    /// `[files] preview`: "auto", "always" or "never".
+    fn from_config(value: &str) -> Self {
+        match value {
+            "always" => PreviewMode::Always,
+            "never" => PreviewMode::Never,
+            _ => PreviewMode::Auto,
+        }
+    }
+}
+
 /// Items pressed and perhaps being dragged.
 struct Drag {
     /// Where the press was.
@@ -169,9 +189,19 @@ pub struct Browser {
     pub quit: bool,
     history: undo::History,
     /// The preview pane, its contents, and what is known of the item in it.
-    pub preview_shown: bool,
+    preview_mode: PreviewMode,
+    /// What the button turns the pane back on to.
+    preview_default: PreviewMode,
+    /// In "auto", whether the one selected item opens the pane, kept until
+    /// the selection changes.
+    auto_preview: Option<(PathBuf, bool)>,
     preview: Preview,
     facts: Option<preview::Facts>,
+    /// The sidebar's scroll, its area and its content's height, from the
+    /// last paint: a long list of bookmarks scrolls on its own.
+    sidebar_scroll: f32,
+    sidebar_rect: Rect,
+    sidebar_height: f32,
     drag: Option<Drag>,
     /// Items handed to the compositor as a drag to other apps, until it
     /// ends.
@@ -253,9 +283,17 @@ impl Browser {
             chooser: None,
             quit: false,
             history: undo::History::default(),
-            preview_shown: config.preview,
+            preview_mode: PreviewMode::from_config(&config.preview),
+            preview_default: match PreviewMode::from_config(&config.preview) {
+                PreviewMode::Never => PreviewMode::Auto,
+                mode => mode,
+            },
+            auto_preview: None,
             preview: Preview::default(),
             facts: None,
+            sidebar_scroll: 0.0,
+            sidebar_rect: rect(0.0, 0.0, 0.0, 0.0),
+            sidebar_height: 0.0,
             drag: None,
             handed_out: Vec::new(),
             hover_in: None,
@@ -286,6 +324,7 @@ impl Browser {
     fn reload(&mut self) {
         self.dir_stamp = self.stamp();
         self.origins.clear();
+        self.auto_preview = None;
         let listed = if trash::is_trash(&self.dir) { Ok(self.list_trash()) } else { entries::list(&self.dir, &self.db) };
         match listed {
             Ok(mut list) => {
@@ -894,12 +933,7 @@ impl Browser {
         let y = bar.y + (bar.height - m.button) * 0.5;
         let mut x = bar.x + m.padding;
         for (glyph, enabled, action) in [(BACK, !self.back.is_empty(), 0), (FORWARD, !self.forward.is_empty(), 1), (UP, self.dir.parent().is_some(), 2)] {
-            let hit = layout::icon_button(ui, list, x, y, glyph, false, theme.primary, input, clicked && enabled);
-            if !enabled {
-                // Dim the disabled ones.
-                list.push_rect(Rect { color: theme.bg_main.with_alpha(0.5), ..rect(x, y, m.button, m.button) });
-            }
-            if hit {
+            if layout::round_button(ui, list, rect(x, y, m.button, m.button), glyph, false, enabled, theme.primary, input, clicked) {
                 match action {
                     0 => self.go_back(),
                     1 => self.go_forward(),
@@ -911,15 +945,15 @@ impl Browser {
 
         // At the right: view, hidden files, search.
         let mut right = bar.x + bar.width - m.padding;
-        let buttons = [(PREVIEW, self.preview_shown, 3), (GRID, self.view == View::Grid, 0), (LIST, self.view == View::List, 1), (HIDDEN, self.show_hidden, 2)];
+        let buttons = [(PREVIEW, self.preview_mode != PreviewMode::Never, 3), (GRID, self.view == View::Grid, 0), (LIST, self.view == View::List, 1), (HIDDEN, self.show_hidden, 2)];
         for (glyph, on, action) in buttons {
             right -= m.button;
-            if layout::icon_button(ui, list, right, y, glyph, on, theme.primary, input, clicked) {
+            if layout::round_button(ui, list, rect(right, y, m.button, m.button), glyph, on, true, theme.primary, input, clicked) {
                 match action {
                     0 => self.view = View::Grid,
                     1 => self.view = View::List,
                     2 => self.show_hidden = !self.show_hidden,
-                    _ => self.preview_shown = !self.preview_shown,
+                    _ => self.toggle_preview(),
                 }
             }
             right -= m.gap * 0.5;
@@ -1019,7 +1053,12 @@ impl Browser {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
         list.push_rect(Rect { color: theme.bg_widget, ..area });
-        let mut y = area.y + m.padding;
+        // Clipped to its area, and scrolled when the places do not fit.
+        self.sidebar_rect = area;
+        self.sidebar_scroll = self.sidebar_scroll.clamp(0.0, (self.sidebar_height - area.height).max(0.0));
+        list.push_clip(area);
+        let top = area.y + m.padding - self.sidebar_scroll;
+        let mut y = top;
         let mut section = None;
         let mut go = None;
         for (s, place) in self.places.clone() {
@@ -1051,12 +1090,20 @@ impl Browser {
             let text_x = icon_box.x + icon_box.width + m.gap;
             let name = ui::elide(ui, &place.name, m.text, 400, row.x + row.width - text_x - m.gap);
             ui::paint_text_vcentered(ui, list, &name, text_x, row, m.text, 400, if current { theme.primary } else { theme.text_main });
-            if clicked && layout::hovered(input, row) {
+            let visible = row.y + row.height > area.y && row.y < area.y + area.height;
+            if clicked && visible && layout::hovered(input, row) && layout::hovered(input, area) {
                 go = Some(place.path.clone());
             }
-            self.drop_zones.push((row, place.path.clone()));
+            if visible {
+                // Only what shows, and only its shown part, takes a drop.
+                let y0 = row.y.max(area.y);
+                let y1 = (row.y + row.height).min(area.y + area.height);
+                self.drop_zones.push((Rect { y: y0, height: y1 - y0, ..row }, place.path.clone()));
+            }
             y += m.sidebar_row;
         }
+        list.pop_clip();
+        self.sidebar_height = y - top + m.padding;
         if let Some(dir) = go {
             if trash::is_trash(&dir) {
                 let _ = std::fs::create_dir_all(&dir);
@@ -1419,6 +1466,16 @@ impl Browser {
         ui::paint_text_vcentered(ui, list, &label, icon_box.x + icon_box.width + m.gap, card, m.detail_text, 400, theme.text_main);
     }
 
+    /// The toolbar's button and F9: the pane off, or back on as the
+    /// config has it ("auto" when that is "never", so the button always
+    /// does something).
+    fn toggle_preview(&mut self) {
+        self.preview_mode = match self.preview_mode {
+            PreviewMode::Never => self.preview_default,
+            _ => PreviewMode::Never,
+        };
+    }
+
     /// What the pane shows: the selection, else the folder itself (but
     /// not the Trash, which is many folders).
     fn preview_targets(&self) -> Vec<PathBuf> {
@@ -1431,25 +1488,23 @@ impl Browser {
     }
 
     /// Start showing `targets`: what is known now, and the rest loading.
-    fn show_preview(&mut self, targets: Vec<PathBuf>, px: u32, config: &stratum_ui::config::FilesConfig) {
-        self.facts = None;
-        let mut kind = preview::Kind::Icon;
-        if let [one] = targets.as_slice() {
-            let entry = self.entries.iter().find(|e| &e.path == one).cloned();
-            let entry = entry.as_ref();
-            let is_dir = entry.map_or_else(|| one.is_dir(), |e| e.is_dir);
-            let mime = entry.map_or_else(|| self.db.of(one, is_dir), |e| e.mime.clone());
-            let size = entry.map_or(0, |e| e.size);
-            let max_bytes = config.thumbnail_max_mb * 1024 * 1024;
-            let thumbnailers = self.thumbnailers();
-            let thumbnail = config.thumbnails && thumbs::can(&mime, size, max_bytes, config.thumbnail_external, &thumbnailers);
-            kind = if is_dir {
+    /// How one item would be previewed, and its type.
+    fn preview_kind(&mut self, one: &Path, config: &stratum_ui::config::FilesConfig) -> (preview::Kind, String) {
+        let entry = self.entries.iter().find(|e| e.path == one).cloned();
+        let entry = entry.as_ref();
+        let is_dir = entry.map_or_else(|| one.is_dir(), |e| e.is_dir);
+        let mime = entry.map_or_else(|| self.db.of(one, is_dir), |e| e.mime.clone());
+        let size = entry.map_or(0, |e| e.size);
+        let max_bytes = config.thumbnail_max_mb * 1024 * 1024;
+        let thumbnailers = self.thumbnailers();
+        let thumbnail = config.thumbnails && thumbs::can(&mime, size, max_bytes, config.thumbnail_external, &thumbnailers);
+        let kind = if is_dir {
                 preview::Kind::Folder
             } else if thumbnail && thumbs::in_process(&mime) && mime != "image/svg+xml" {
                 preview::Kind::Picture
             } else if thumbnail {
                 preview::Kind::Thumbnail(preview::Thumb {
-                    path: one.clone(),
+                    path: one.to_path_buf(),
                     mime: mime.clone(),
                     modified: entry.and_then(|e| e.modified),
                     bytes: size,
@@ -1462,6 +1517,37 @@ impl Browser {
             } else {
                 preview::Kind::Icon
             };
+        (kind, mime)
+    }
+
+    /// Whether the pane is open: in "auto", while one picture, thumbnail
+    /// or text file is selected.
+    fn preview_open(&mut self, config: &stratum_ui::config::FilesConfig) -> bool {
+        match self.preview_mode {
+            PreviewMode::Never => false,
+            PreviewMode::Always => true,
+            PreviewMode::Auto => {
+                let selected = self.selected_paths();
+                let [one] = selected.as_slice() else { return false };
+                if let Some((path, open)) = &self.auto_preview {
+                    if path == one {
+                        return *open;
+                    }
+                }
+                let (kind, _) = self.preview_kind(one, config);
+                let open = matches!(kind, preview::Kind::Picture | preview::Kind::Thumbnail(_) | preview::Kind::Text);
+                self.auto_preview = Some((one.clone(), open));
+                open
+            }
+        }
+    }
+
+    fn show_preview(&mut self, targets: Vec<PathBuf>, px: u32, config: &stratum_ui::config::FilesConfig) {
+        self.facts = None;
+        let mut kind = preview::Kind::Icon;
+        if let [one] = targets.as_slice() {
+            let (k, mime) = self.preview_kind(one, config);
+            kind = k;
             self.facts = Some(preview::Facts::read(one, &mime));
         }
         self.preview.show(targets, kind, px, self.waker.as_ref());
@@ -1822,7 +1908,7 @@ impl App for Browser {
         // The preview pane takes the right while the folder keeps room for
         // its names and columns; a narrower window hides it.
         let room = main.width - m.preview_width >= m.preview_width + m.size_column + m.modified_column;
-        let pane_w = if self.preview_shown && room { m.preview_width } else { 0.0 };
+        let pane_w = if room && self.preview_open(&config) { m.preview_width } else { 0.0 };
         let main = Rect { width: main.width - pane_w, ..main };
 
         self.drop_zones.clear();
@@ -1989,7 +2075,7 @@ impl App for Browser {
             }
             Keysym::Delete => self.trash_selected(),
             Keysym::F2 => self.start_rename(),
-            Keysym::F9 => self.preview_shown = !self.preview_shown,
+            Keysym::F9 => self.toggle_preview(),
             Keysym::F5 => self.reload(),
             Keysym::Escape => {
                 if self.chooser.is_some() {
@@ -2040,6 +2126,11 @@ impl App for Browser {
                 layout::scroll_list(&mut menu.scroll, delta);
                 return;
             }
+        }
+        let r = self.sidebar_rect;
+        if point.0 >= r.x && point.0 < r.x + r.width && point.1 >= r.y && point.1 < r.y + r.height {
+            self.sidebar_scroll = (self.sidebar_scroll + delta).clamp(0.0, (self.sidebar_height - r.height).max(0.0));
+            return;
         }
         self.scroll = (self.scroll + delta).max(0.0);
     }

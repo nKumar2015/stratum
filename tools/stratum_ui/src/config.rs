@@ -870,8 +870,10 @@ pub struct FilesConfig {
     pub thumbnail_external: bool,
     /// Ask before deleting for good (the trash never asks).
     pub confirm_delete: bool,
-    /// The preview pane at the right, for a new window (F9 toggles).
-    pub preview: bool,
+    /// The preview pane at the right: "auto" opens it while one picture,
+    /// video or text file is selected, "always" keeps it open, "never"
+    /// closes it. The toolbar's button and F9 turn it off and on again.
+    pub preview: String,
     /// A terminal opened in the current folder: the folder is appended.
     pub terminal_here: Vec<String>,
 }
