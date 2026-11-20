@@ -454,6 +454,7 @@ preview_text = 11.0     # a text file's lines in it
 preview_icon = 96.0     # the type's icon, for what has no picture
 preview_row = 20.0      # an information row under it
 preview_label = 84.0    # their labels' column
+drag_threshold = 6.0    # how far a pressed item moves before it is dragged
 
 [metrics.launcher]
 width = 640.0

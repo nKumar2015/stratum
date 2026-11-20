@@ -751,6 +751,15 @@ desktop portal's FileChooser, ahead of GTK's.
 - The clipboard is `wl-copy`/`wl-paste` with `text/uri-list`, so copying in
   one window pastes in another; a cut is remembered in
   `$XDG_RUNTIME_DIR/stratum-files-cut`.
+- Drag and drop inside the window (`dnd.rs` decides, the browser's
+  `paint_drag` paints and drops): items onto a folder, a sidebar place
+  (the Trash trashes them) or a breadcrumb; Ctrl copies, Shift moves,
+  otherwise a move within a file system and a copy across. A press on
+  the selection keeps it for the drag and selects one item only if it
+  ends as a click. Drop targets are collected while painting, so the
+  drag is resolved at the end of the frame and sets `repaint` for the
+  frame that shows its effect. Drive it in headless sway with the
+  virtual pointer's `down`, `glide` and `up`.
 - Thumbnails (`thumbs.rs`): PNG, JPEG, WebP, GIF and BMP through `image`
   (WebP is 261 KB of the binary on its own), SVG through resvg, anything
   else through the system's `.thumbnailer` files (the Home Manager

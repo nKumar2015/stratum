@@ -245,6 +245,8 @@ pub struct FilesMetrics {
     pub preview_icon: f32,
     pub preview_row: f32,
     pub preview_label: f32,
+    /// How far a pressed item must move before it is dragged.
+    pub drag_threshold: f32,
 }
 
 /// The launcher: a search field over a list of results.

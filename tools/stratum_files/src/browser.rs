@@ -26,7 +26,7 @@ use crate::mime::MimeDb;
 use crate::places::{self, Place, Section};
 use crate::preview::{self, Preview};
 use crate::undo::{self, Step};
-use crate::{clipboard, open, ops, thumbs, trash};
+use crate::{clipboard, dnd, open, ops, thumbs, trash};
 
 const BACK: &str = "\u{f004d}";
 const FORWARD: &str = "\u{f0054}";
@@ -85,6 +85,27 @@ enum Editing {
     Search,
     /// A new name for an entry (or for a folder being made).
     Rename { path: PathBuf, field: TextField, new_folder: bool },
+}
+
+/// Items pressed and perhaps being dragged.
+struct Drag {
+    /// Where the press was.
+    start: (f32, f32),
+    paths: Vec<PathBuf>,
+    /// Past the threshold: a drag, not a click.
+    active: bool,
+    /// What the press does if it ends as a click rather than a drag.
+    on_click: Option<Click>,
+}
+
+/// A click's effect on the selection, put off until the press ends: a
+/// press on a selected item keeps the selection for dragging.
+#[derive(Clone, Copy)]
+enum Click {
+    /// Pressed on one of several selected: just this one.
+    SelectOnly(usize),
+    /// Ctrl+pressed on a selected one: it leaves the selection.
+    Deselect(usize),
 }
 
 /// A running copy or move.
@@ -149,6 +170,11 @@ pub struct Browser {
     pub preview_shown: bool,
     preview: Preview,
     facts: Option<preview::Facts>,
+    drag: Option<Drag>,
+    /// Paint again: something changed after this frame was painted.
+    repaint: bool,
+    /// Where dragged items can be dropped, from the last paint.
+    drop_zones: Vec<(Rect, PathBuf)>,
 }
 
 /// A decoded thumbnail, or `None` for a picture that did not decode.
@@ -222,6 +248,9 @@ impl Browser {
             preview_shown: config.preview,
             preview: Preview::default(),
             facts: None,
+            drag: None,
+            repaint: false,
+            drop_zones: Vec::new(),
         };
         browser.load(dir);
         browser
@@ -529,6 +558,11 @@ impl Browser {
             self.ask_delete(paths);
             return;
         }
+        self.trash_paths(paths);
+    }
+
+    /// Move `paths` to the trash, recording it for undo.
+    fn trash_paths(&mut self, paths: Vec<PathBuf>) {
         let mut failed = Vec::new();
         let mut trashed = Vec::new();
         for path in &paths {
@@ -913,7 +947,7 @@ impl Browser {
 
     /// The path as buttons, the last ones when it does not fit. Returns a
     /// folder clicked.
-    fn paint_breadcrumbs(&self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) -> Option<PathBuf> {
+    fn paint_breadcrumbs(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) -> Option<PathBuf> {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
         let mut parts: Vec<(String, PathBuf)> = Vec::new();
@@ -955,6 +989,9 @@ impl Browser {
             }
             let cell = rect(x, area.y, *w, area.height);
             let last = i + 1 == parts.len();
+            if !last {
+                self.drop_zones.push((cell, path.clone()));
+            }
             if layout::hovered(input, cell) && !last {
                 list.push_rect(Rect { radius: m.radius, color: theme.bg_hover, ..cell });
                 if clicked {
@@ -1007,6 +1044,7 @@ impl Browser {
             if clicked && layout::hovered(input, row) {
                 go = Some(place.path.clone());
             }
+            self.drop_zones.push((row, place.path.clone()));
             y += m.sidebar_row;
         }
         if let Some(dir) = go {
@@ -1079,6 +1117,9 @@ impl Browser {
                 View::Grid => rect(viewport.x + m.padding * 0.5 + col as f32 * cell_w, viewport.y + m.padding * 0.5 + row as f32 * cell_h - self.scroll, cell_w, cell_h),
             };
             self.hits.push((cell, i));
+            if entry.is_dir {
+                self.drop_zones.push((Rect { x: cell.x + 2.0, y: cell.y + 1.0, width: cell.width - 4.0, height: cell.height - 2.0, ..cell }, entry.path.clone()));
+            }
             let selected = self.selected.contains(&entry.path);
             let hot = layout::hovered(input, cell) && layout::hovered(input, viewport);
             let inset = Rect { x: cell.x + 2.0, y: cell.y + 1.0, width: cell.width - 4.0, height: cell.height - 2.0, radius: m.radius, color: Color::TRANSPARENT };
@@ -1169,14 +1210,26 @@ impl Browser {
                     self.context_menu(p, true, m.menu_width);
                 }
             } else if pointer.ctrl {
-                self.toggle(i);
+                // Added now, so it can be dragged with the rest; taken out
+                // only if this ends as a click.
+                let selected = self.selected.contains(&visible[i].path);
+                if !selected {
+                    self.toggle(i);
+                }
+                self.begin_drag(input, selected.then_some(Click::Deselect(i)));
             } else if pointer.shift {
                 self.select_range(i);
             } else if pointer.double {
                 self.select_only(i);
                 self.open_selected();
             } else {
-                self.select_only(i);
+                // A press on one of several selected keeps them all, in
+                // case it is a drag; a click then selects just this one.
+                let keep = self.selected.len() > 1 && self.selected.contains(&visible[i].path);
+                if !keep {
+                    self.select_only(i);
+                }
+                self.begin_drag(input, keep.then_some(Click::SelectOnly(i)));
             }
             if matches!(self.editing, Editing::Rename { .. } | Editing::Path(_)) {
                 self.editing = Editing::None;
@@ -1236,6 +1289,106 @@ impl Browser {
         ui::paint_frame(list, Rect { radius: m.radius * 0.6, ..area }, 1.5, theme.primary, theme.surface_high);
         let style = FieldStyle { text: m.text, padding: m.gap * 0.5, caret_width: 1.5, masked: false, placeholder: None };
         field.paint(ui, list, area, style, false);
+    }
+
+    /// A press on the selection, which may become a drag of it. Items in
+    /// the Trash, or in a chooser, are not dragged.
+    fn begin_drag(&mut self, input: &InputState, on_click: Option<Click>) {
+        if self.chooser.is_some() || trash::is_trash(&self.dir) {
+            return;
+        }
+        if let Some(at) = input.pointer {
+            self.drag = Some(Drag { start: at, paths: self.selected_paths(), active: false, on_click });
+        }
+    }
+
+    /// A press becoming a drag, the target under it, and the drop.
+    fn paint_drag(&mut self, ui: &mut AppUi, list: &mut DisplayList, pointer: &Pointer) {
+        let Some(drag) = &mut self.drag else { return };
+        let m = ui.config.metrics.files.clone();
+        let theme = ui.theme.clone();
+        let at = pointer.input.pointer;
+        if let Some(at) = at.filter(|_| pointer.input.pressed && !drag.active) {
+            drag.active = dnd::started(drag.start, at, m.drag_threshold);
+        }
+        let (active, paths) = (drag.active, drag.paths.clone());
+        let target = at.filter(|_| active).and_then(|(x, y)| {
+            let inside = |r: &Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+            // The last painted is on top.
+            self.drop_zones.iter().rev().find(|(r, p)| inside(r) && dnd::valid_target(&paths, p)).cloned()
+        });
+        let dev = |p: &Path| std::fs::metadata(p).ok().map(|m| std::os::unix::fs::MetadataExt::dev(&m));
+        // What a drop here would do, as "{verb} {what}{after}".
+        let action = target.as_ref().map(|(_, dest)| {
+            if trash::is_trash(dest) {
+                ("Move", " to the trash")
+            } else {
+                match dnd::action(&paths, dest, pointer.ctrl, pointer.shift, dev) {
+                    dnd::DropAction::Move => ("Move", ""),
+                    dnd::DropAction::Copy => ("Copy", ""),
+                }
+            }
+        });
+
+        if !pointer.input.pressed || pointer.released {
+            let drag = self.drag.take().expect("checked above");
+            // This runs after the rest of the window painted: what it
+            // changes shows in another frame.
+            self.repaint = true;
+            match (drag.active, target) {
+                (true, Some((_, dest))) if trash::is_trash(&dest) => self.trash_paths(drag.paths),
+                (true, Some((_, dest))) => {
+                    let kind = match dnd::action(&drag.paths, &dest, pointer.ctrl, pointer.shift, dev) {
+                        dnd::DropAction::Move => ops::Kind::Move,
+                        dnd::DropAction::Copy => ops::Kind::Copy,
+                    };
+                    if self.job.is_some() {
+                        self.say("Wait for the copy or move to finish, or cancel it".into(), true);
+                    } else {
+                        self.start_job(kind, drag.paths, dest);
+                    }
+                }
+                (true, None) => {}
+                (false, _) => match drag.on_click {
+                    Some(Click::SelectOnly(i)) => self.select_only(i),
+                    Some(Click::Deselect(i)) => self.toggle(i),
+                    None => {}
+                },
+            }
+            return;
+        }
+        if !active {
+            return;
+        }
+        let Some((x, y)) = at else { return };
+        list.push_layer();
+        if let Some((zone, _)) = &target {
+            list.push_outline(Rect { radius: m.radius, color: theme.primary, ..*zone }, 2.0);
+        }
+        // A card under the pointer: the first item's icon, what is dragged,
+        // and what a drop here would do.
+        let first = self.entries.iter().find(|e| Some(&e.path) == paths.first()).cloned();
+        let what = match (paths.as_slice(), &first) {
+            ([_], Some(entry)) => entry.name.clone(),
+            _ => count(paths.len(), "item"),
+        };
+        let label = match action {
+            Some((verb, after)) => format!("{verb} {what}{after}"),
+            None => what,
+        };
+        let text_w = ui.measure(&label, m.detail_text);
+        let card = rect(x + m.gap * 1.5, y + m.gap * 1.5, m.padding * 2.0 + m.row_icon + m.gap + text_w, m.row_height);
+        list.push_rect(Rect { radius: m.radius, color: theme.surface_highest, ..card });
+        list.push_outline(Rect { radius: m.radius, color: theme.border_inactive, ..card }, 1.0);
+        let icon_box = rect(card.x + m.padding, card.y + (card.height - m.row_icon) * 0.5, m.row_icon, m.row_icon);
+        match first.and_then(|entry| self.icon(ui, &entry, m.row_icon, &ui.config.files.clone())) {
+            Some(image) => {
+                let (image, at) = fit(image, icon_box);
+                push_image(list, image, at);
+            }
+            None => ui::paint_icon_centered(ui, list, FILE, icon_box, m.row_icon, theme.text_muted),
+        }
+        ui::paint_text_vcentered(ui, list, &label, icon_box.x + icon_box.width + m.gap, card, m.detail_text, 400, theme.text_main);
     }
 
     /// What the pane shows: the selection, else the folder itself (but
@@ -1642,6 +1795,7 @@ impl App for Browser {
         let pane_w = if self.preview_shown { m.preview_width.min(main.width * 0.5) } else { 0.0 };
         let main = Rect { width: main.width - pane_w, ..main };
 
+        self.drop_zones.clear();
         self.paint_sidebar(ui, list, sidebar, input, clicked);
         self.paint_entries(ui, list, main, input, &inner, clicked, &config);
         if pane_w > 0.0 {
@@ -1660,6 +1814,7 @@ impl App for Browser {
         }
         list.push_rect(Rect { y: toolbar.y + toolbar.height - 1.0, height: 1.0, color: ui.theme.border_inactive, ..toolbar });
         self.paint_toolbar(ui, list, toolbar, input, clicked);
+        self.paint_drag(ui, list, pointer);
         self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked && confirming);
 
         // The menu, over everything.
@@ -1693,6 +1848,10 @@ impl App for Browser {
     }
 
     fn key(&mut self, ui: &mut AppUi, key: &Key) -> Flow {
+        if key.keysym == Keysym::Escape && self.drag.as_ref().is_some_and(|d| d.active) {
+            self.drag = None;
+            return Flow::Continue;
+        }
         let config = ui.config.files.clone();
         if self.confirm.is_some() {
             match key.keysym {
@@ -1854,7 +2013,7 @@ impl App for Browser {
     fn tick(&mut self, _dt: f32) -> bool {
         // A running job's bar moves; the folder is looked at once a second.
         self.check_dir();
-        self.job.is_some()
+        self.job.is_some() || std::mem::take(&mut self.repaint)
     }
 
     fn poll(&mut self) -> bool {
