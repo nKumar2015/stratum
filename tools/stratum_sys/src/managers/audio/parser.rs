@@ -1,6 +1,6 @@
 use super::{config, engine, pulse};
 use pulsectl::controllers::types::DeviceInfo;
-use pulsectl::controllers::DeviceControl;
+use pulsectl::controllers::{AppControl, DeviceControl};
 use serde_json::{json, Value};
 
 pub(crate) fn extract_first_percent(text: &str) -> Option<String> {
@@ -220,6 +220,32 @@ pub(crate) fn fetch_current_audio_status() -> Value {
 
     let headphones = is_headphone_default_sink(&sink_devices, &default_sink);
 
+    // The apps playing and recording, each with the device it uses by name.
+    // A stream into the EQ's sink is shown on the device the EQ feeds.
+    let eq_target = engine::current_eq_target_sink().unwrap_or_default();
+    let sink_names: Vec<(u32, String)> =
+        sink_devices.iter().map(|d| (d.index, d.name.clone().unwrap_or_default())).collect();
+    let source_names: Vec<(u32, String)> =
+        source_devices.iter().map(|d| (d.index, d.name.clone().unwrap_or_default())).collect();
+    let device_of = |names: &[(u32, String)], index: u32| -> String {
+        let name = names.iter().find(|(i, _)| *i == index).map(|(_, n)| n.clone()).unwrap_or_default();
+        if name == config::EQ_VIRTUAL_INPUT_SINK && !eq_target.is_empty() {
+            eq_target.clone()
+        } else {
+            name
+        }
+    };
+    let playback: Vec<Value> = pulse::with_sink(|ctrl| ctrl.list_applications())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|app| stream_json(app, device_of(&sink_names, app.connection_id)))
+        .collect();
+    let recording: Vec<Value> = pulse::with_source(|ctrl| ctrl.list_applications())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|app| stream_json(app, device_of(&source_names, app.connection_id)))
+        .collect();
+
     json!({
         "ok": true,
         "headphones": headphones,
@@ -235,5 +261,43 @@ pub(crate) fn fetch_current_audio_status() -> Value {
         },
         "sinks": sinks,
         "sources": sources,
+        "playback": playback,
+        "recording": recording,
     })
+}
+
+/// One app's stream as the snapshot lists it, or `None` for streams that
+/// are not an app's: the EQ's own output, and level meters (pavucontrol's
+/// "Peak detect").
+fn stream_json(app: &pulsectl::controllers::types::ApplicationInfo, device: String) -> Option<Value> {
+    let prop = |key: &str| app.proplist.get_str(key).filter(|v| !v.is_empty());
+    let node = prop("node.name").unwrap_or_default();
+    if node.starts_with("effect_output.") || node.starts_with("effect_input.") {
+        return None;
+    }
+    if prop("stream.monitor").as_deref() == Some("true") || app.name.as_deref() == Some("Peak detect") {
+        return None;
+    }
+    let binary = prop("application.process.binary").unwrap_or_default();
+    let name = prop("application.name")
+        .or_else(|| (!binary.is_empty()).then(|| binary.clone()))
+        .or_else(|| app.name.clone())
+        .unwrap_or_else(|| "Unknown".to_string());
+    let title = prop("media.name").or_else(|| app.name.clone()).unwrap_or_default();
+    let volume = extract_first_percent(&app.volume.print())
+        .and_then(|v| v.trim_end_matches('%').parse::<i64>().ok())
+        .unwrap_or(0);
+    Some(json!({
+        "id": app.index,
+        "app": name,
+        // Shown under the name only when it says something more.
+        "title": if title == name { String::new() } else { title },
+        "icon": prop("application.icon_name").unwrap_or_default(),
+        "binary": binary,
+        "volume": volume,
+        "mute": app.mute,
+        "device": device,
+        "corked": app.corked,
+        "volume_writable": app.volume_writable,
+    }))
 }

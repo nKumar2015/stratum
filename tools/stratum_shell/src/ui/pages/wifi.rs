@@ -12,6 +12,9 @@
 //!   Connect (Forget too, for a saved one). Return in the field connects. A
 //!   second click folds it. (QML showed these in a side panel.)
 //!
+//! - Traffic, wired devices, VPNs and the hotspot (`network_extras.rs`),
+//!   between the active connection and the other networks.
+//!
 //! One action at a time, as in QML. The active connection and the saved
 //! networks come from `SystemState::wifi_details`, which actions refresh.
 
@@ -140,6 +143,7 @@ pub struct WifiPage {
     /// Return was pressed in the field, with this password; the next paint
     /// connects.
     submit: Option<crate::pam::Secret>,
+    pub extras: crate::ui::pages::network_extras::NetworkExtras,
 }
 
 impl WifiPage {
@@ -155,12 +159,14 @@ impl WifiPage {
             typing: false,
             retry_password: false,
             submit: None,
+            extras: Default::default(),
         }
     }
 
     pub fn tick(&mut self, dt: f32) {
         self.enabled.tick(dt);
         self.status.tick(dt);
+        self.extras.tick(dt);
         if let Some((_, elapsed)) = &mut self.refresh {
             *elapsed += dt;
         }
@@ -333,6 +339,9 @@ impl WifiPage {
             }
             y = row.y + row.height + page.section_spacing;
         }
+
+        // Traffic, wired, VPN and the hotspot.
+        y = self.extras.paint(ctx, list, body, y, input, clicked, pending) + page.section_spacing;
 
         // Every other network.
         if self.selected.as_ref().is_some_and(|s| !others.iter().any(|n| &n.ssid == s)) {

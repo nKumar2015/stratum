@@ -410,7 +410,9 @@ pub fn dropdown(
 pub fn dropdown_width(ctx: &mut PaintCtx<'_>, options: &[String], height: f32) -> f32 {
     let size = ctx.metrics.typography.body;
     let widest = options.iter().map(|o| ctx.measure(o, size)).fold(0.0, f32::max);
-    widest + ctx.metrics.page.card_padding * 0.75 + height
+    // A pixel of slack: the face takes the padding off again, and rounding
+    // could leave the widest option a hair short, which elides it.
+    (widest + ctx.metrics.page.card_padding * 0.75 + height).ceil() + 1.0
 }
 
 /// An open dropdown's options, in a card below `anchor`. Paint it after
@@ -442,7 +444,8 @@ pub fn dropdown_list(
     // At least as wide as its face, and wide enough for every option and
     // the check beside the chosen one.
     let widest = options.iter().map(|o| ctx.measure(o, typo.body)).fold(0.0, f32::max);
-    let width = anchor.width.max(widest + pad + row_h + inset * 2.0);
+    // A pixel of slack, as `dropdown_width`.
+    let width = anchor.width.max((widest + pad + row_h + inset * 2.0).ceil() + 1.0);
     let top = anchor.y + anchor.height + inset;
     let content = row_h * options.len() as f32;
     let room = list.clip().map_or(f32::INFINITY, |c| c.y + c.height - inset - top - inset * 2.0);

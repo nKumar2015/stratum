@@ -20,6 +20,7 @@ mod notification_store;
 mod notifications;
 mod lock;
 mod memory;
+mod net_rates;
 mod night_light;
 mod osd;
 mod pam;

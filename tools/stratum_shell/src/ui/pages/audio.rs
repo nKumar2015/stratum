@@ -13,6 +13,8 @@
 //!   the system agrees sooner (QML's optimistic guard), with "Switching
 //!   output..." until it is done.
 //!
+//! - Applications: the per-app mixer (`mixer.rs`), after the volume cards.
+//!
 //! The Equalizer tab is the Equalizer page.
 
 use serde_json::Value;
@@ -129,6 +131,7 @@ pub struct AudioPage {
     switching: Option<u64>,
     marquee: Marquee,
     status: Status,
+    pub mixer: crate::ui::pages::mixer::Mixer,
 }
 
 impl AudioPage {
@@ -143,6 +146,7 @@ impl AudioPage {
             switching: None,
             marquee: Marquee::default(),
             status: Status::default(),
+            mixer: Default::default(),
         }
     }
 
@@ -153,6 +157,7 @@ impl AudioPage {
         self.input.tick(dt);
         self.sought.tick(dt);
         self.status.tick(dt);
+        self.mixer.tick(dt);
     }
 
     /// A scrolling title needs frames.
@@ -166,10 +171,16 @@ impl AudioPage {
         ctx: &mut PaintCtx<'_>,
         list: &mut DisplayList,
         area: Rect,
-        input: &InputState,
-        clicked: bool,
+        input_all: &InputState,
+        clicked_all: bool,
         pending: &mut Vec<SystemAction>,
     ) -> f32 {
+        // An open device list lies over the page: the pointer over it is not
+        // over what it covers.
+        let over_list = self.mixer.covers(input_all);
+        let masked = InputState { pointer: if over_list { None } else { input_all.pointer }, pressed: input_all.pressed };
+        let input = &masked;
+        let clicked = clicked_all && !over_list;
         let m = ctx.metrics.audio_page.clone();
         let page = ctx.metrics.page.clone();
         let status_ms = ctx.metrics.device_page.status_ms;
@@ -245,6 +256,13 @@ impl AudioPage {
         }
         y += layout::grid_height(2, cols, m.volume_height, page.grid_gap);
 
+        // Each app's volume and device.
+        y += page.section_spacing;
+        let pairs = |devices: &[Device]| -> Vec<(String, String)> {
+            devices.iter().map(|d| (d.name.clone(), d.label.clone())).collect()
+        };
+        y = self.mixer.paint(ctx, list, body, y, &pairs(&sinks), &pairs(&sources), input, clicked, pending);
+
         // Now playing.
         y += page.section_spacing;
         y = layout::section(ctx, list, body, y, "Now playing");
@@ -298,6 +316,7 @@ impl AudioPage {
         // does not jump when a message appears.
         let footer_h = ctx.metrics.device_page.footer_height;
         self.status.paint(ctx, list, rect(body.x, y + page.label_gap, body.width, footer_h));
+        self.mixer.paint_menu(ctx, list, input_all, clicked_all, pending);
         y + page.label_gap + footer_h
     }
 

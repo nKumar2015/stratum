@@ -643,6 +643,11 @@ pub struct DevicePageMetrics {
     /// The loading dot's size and its pulse period.
     pub loading_dot: f32,
     pub loading_ms: u64,
+    /// The Network page's traffic graph: its height, line width, and the
+    /// opacity of the area under the line.
+    pub traffic_height: f32,
+    pub traffic_line: f32,
+    pub traffic_fill: f32,
 }
 
 /// The Audio page: volume, now playing, and the output and input lists.

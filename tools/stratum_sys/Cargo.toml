@@ -18,6 +18,7 @@ tracing = { workspace = true }
 # System integration backends
 pipewire = { workspace = true }
 pulsectl-rs = { workspace = true }
+libpulse-binding = { workspace = true }
 libc = { workspace = true }
 # Calendar events carry IANA zone names (TZID). Only the system's zoneinfo
 # is read: no bundled database, no serde.

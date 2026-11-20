@@ -8,6 +8,7 @@ pub mod audio;
 pub mod battery;
 pub mod bluetooth;
 pub mod calendar;
+pub mod connections;
 pub(crate) mod common;
 pub mod gpu;
 pub mod music;

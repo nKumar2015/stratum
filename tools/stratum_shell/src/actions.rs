@@ -32,6 +32,10 @@ pub enum SystemAction {
     SetInputMuted(bool),
     /// Switch the default sink.
     SetOutput(String),
+    /// An app's stream: its volume (0-150), mute, or device by name.
+    SetStreamVolume(managers::audio::Stream, i64),
+    SetStreamMuted(managers::audio::Stream, bool),
+    MoveStream(managers::audio::Stream, String),
     /// Switch the default source.
     SetInput(String),
     /// Power the Bluetooth adapter on or off.
@@ -49,6 +53,16 @@ pub enum SystemAction {
     WifiToggle(bool),
     /// Connect to a network by SSID.
     WifiConnect { ssid: String, password: Option<String> },
+    /// Bring a VPN profile (by UUID) up or down.
+    VpnSet { uuid: String, on: bool },
+    /// The Wi-Fi hotspot on or off.
+    Hotspot(bool),
+    /// Read the hotspot's password (by profile UUID) to show it, or forget
+    /// it (`None`).
+    HotspotPassword(Option<String>),
+    /// Sample the network rates while the Network page shows them. Handled
+    /// by the shell, which starts the sampler.
+    WatchNetRates,
     /// Disconnect the active connection on a device.
     WifiDisconnect(String),
     /// Delete a saved connection by name.
@@ -213,7 +227,10 @@ impl ActionQueue {
                     // A Wi-Fi connect waits for the whole activation, DHCP
                     // included, which can take tens of seconds; the actions
                     // queued behind it (a volume change) must not wait too.
-                    if matches!(action, SystemAction::WifiConnect { .. }) {
+                    if matches!(
+                        action,
+                        SystemAction::WifiConnect { .. } | SystemAction::VpnSet { .. } | SystemAction::Hotspot(_)
+                    ) {
                         let state = Arc::clone(&state);
                         let spawned = thread::Builder::new()
                             .name("stratum-wifi-connect".into())
@@ -256,6 +273,9 @@ fn supersedes(later: &SystemAction, earlier: &SystemAction) -> bool {
         (later, earlier),
         (SystemAction::SetVolume(_), SystemAction::SetVolume(_))
             | (SystemAction::SetInputVolume(_), SystemAction::SetInputVolume(_))
+    ) || matches!(
+        (later, earlier),
+        (SystemAction::SetStreamVolume(a, _), SystemAction::SetStreamVolume(b, _)) if a == b
     )
 }
 
@@ -364,6 +384,9 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         SystemAction::SetInputVolume(percent) => managers::audio::set_input_volume(*percent),
         SystemAction::SetInputMuted(muted) => managers::audio::set_input_mute(*muted),
         SystemAction::SetOutput(target) => managers::audio::set_output(target),
+        SystemAction::SetStreamVolume(stream, percent) => managers::audio::set_stream_volume(*stream, *percent),
+        SystemAction::SetStreamMuted(stream, muted) => managers::audio::set_stream_mute(*stream, *muted),
+        SystemAction::MoveStream(stream, device) => managers::audio::move_stream(*stream, device),
         SystemAction::SetInput(target) => managers::audio::set_input(target),
         SystemAction::BluetoothPower(on) => {
             let result = managers::bluetooth::power(if *on { "on" } else { "off" });
@@ -412,6 +435,29 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             refresh_network(state, false);
             result
         }
+        SystemAction::VpnSet { uuid, on } => {
+            let result = managers::connections::set_active(uuid, *on);
+            state.connections.set(managers::connections::status());
+            refresh_network(state, false);
+            result
+        }
+        SystemAction::Hotspot(on) => {
+            let result = managers::connections::set_hotspot(*on);
+            state.connections.set(managers::connections::status());
+            refresh_network(state, false);
+            result
+        }
+        SystemAction::HotspotPassword(uuid) => match uuid {
+            Some(uuid) => {
+                let result = managers::connections::hotspot_password(uuid);
+                state.hotspot_password.set(result["password"].as_str().map(str::to_string));
+                result
+            }
+            None => {
+                state.hotspot_password.set(None);
+                serde_json::json!({ "ok": true })
+            }
+        },
         SystemAction::WifiConnect { ssid, password } => {
             let result = managers::wifi::connect(ssid, password.as_deref());
             refresh_network(state, false);
@@ -438,7 +484,8 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             state.battery.set(managers::battery::status());
             serde_json::json!({ "ok": true })
         }
-        SystemAction::Dismiss(_)
+        SystemAction::WatchNetRates
+        | SystemAction::Dismiss(_)
         | SystemAction::DismissAll
         | SystemAction::InvokeNotification(..)
         | SystemAction::SetTheme(_)
@@ -596,6 +643,9 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             | SystemAction::SetInputMuted(_)
             | SystemAction::SetOutput(_)
             | SystemAction::SetInput(_)
+            | SystemAction::SetStreamVolume(..)
+            | SystemAction::SetStreamMuted(..)
+            | SystemAction::MoveStream(..)
     ) {
         refresh_audio(state);
     }

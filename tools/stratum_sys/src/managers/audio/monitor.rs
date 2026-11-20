@@ -150,9 +150,11 @@ fn watch(
     schedule: &Rc<dyn Fn()>,
 ) -> Option<Watched> {
     match global.type_ {
+        // Apps' streams too, for the mixer: their volume and mute are Props.
         ObjectType::Node
             if prop_starts_with(global, &keys::MEDIA_CLASS, "Audio/Sink")
-                || prop_starts_with(global, &keys::MEDIA_CLASS, "Audio/Source") =>
+                || prop_starts_with(global, &keys::MEDIA_CLASS, "Audio/Source")
+                || is_audio_stream(global) =>
         {
             let node: pipewire::node::Node = registry.bind(global).ok()?;
             let schedule = Rc::clone(schedule);
@@ -205,12 +207,18 @@ fn should_refresh_on_global(global: &GlobalObject<&pipewire::spa::utils::dict::D
         }
         ObjectType::Node | ObjectType::Port | ObjectType::ClientNode => {
             has_audio_media_class(global)
+                || is_audio_stream(global)
                 || prop_starts_with(global, &keys::NODE_NAME, "alsa_")
                 || prop_starts_with(global, &keys::NODE_NAME, "bluez_")
                 || prop_starts_with(global, &keys::NODE_NAME, "effect_")
         }
         _ => false,
     }
+}
+
+/// An app playing or recording: `Stream/Output/Audio`, `Stream/Input/Audio`.
+fn is_audio_stream(global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>) -> bool {
+    prop_value(global, &keys::MEDIA_CLASS).is_some_and(|class| class.starts_with("Stream/") && class.ends_with("/Audio"))
 }
 
 fn has_audio_media_class(global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>) -> bool {
@@ -304,6 +312,8 @@ fn fetch_current_status() -> Option<Value> {
     let input_mute = status("input_mute", "yes");
     let sinks = fresh.get("sinks").cloned().unwrap_or_else(|| json!([]));
     let sources = fresh.get("sources").cloned().unwrap_or_else(|| json!([]));
+    let playback = fresh.get("playback").cloned().unwrap_or_else(|| json!([]));
+    let recording = fresh.get("recording").cloned().unwrap_or_else(|| json!([]));
 
     let headphones = fresh
         .get("headphones")
@@ -321,6 +331,8 @@ fn fetch_current_status() -> Option<Value> {
         "headphones": headphones,
         "sinks": sinks,
         "sources": sources,
+        "playback": playback,
+        "recording": recording,
     }))
 }
 

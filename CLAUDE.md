@@ -57,8 +57,9 @@ module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 
 Implemented and working: sidebar (workspaces, app title, tray, quick panel,
 status icons, battery, clock), control centre as an xdg-shell window with ten
-pages (overview, audio, equalizer, bluetooth, wifi, battery, notifications,
-display (monitor layout), theme, power),
+pages (overview, audio with a per-app mixer, equalizer, bluetooth, network
+(Wi-Fi, wired, VPN, hotspot, traffic), battery, notifications, display
+(monitor layout, night light), theme, power),
 volume/brightness OSD, idle (dim, lock, screens off, suspend, and a lock
 before every sleep), notification toasts, notification server, tray watcher,
 live theme switching, config hot reload, keyboard input, the power menu overlay,
@@ -355,6 +356,38 @@ the pure, tested state (QML's editing rules and curve model); the blocking
 publishes the presets and the outcome into `SystemState::eq`. Note that every
 shell start already rewrites `~/.config/stratum/audio-eq-presets.json`: the
 audio manager re-applies each output's last preset, which saves it again.
+
+The **per-app mixer** (`ui/pages/mixer.rs`, after Volume on the Audio
+page) lists the audio snapshot's `playback` and `recording`: each app's
+Pulse stream (sink input or source output) with its volume, mute and
+device, from `parser::fetch_current_audio_status`. The EQ's own streams
+(`effect_*`) and level meters are left out. A stream playing into the EQ's
+sink is shown on the device the EQ feeds, and moving one to that device
+puts it back into the EQ (`audio::move_stream`), so the EQ is not
+bypassed. The monitor follows `Stream/*/Audio` nodes too, so an app that
+starts or a volume changed elsewhere shows at once. Test it in the sandbox
+with its own audio stack: `pipewire`, `wireplumber` (with every hardware
+monitor disabled in `$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/`, so
+it never opens the real sound card), `pipewire-pulse`, null sinks from
+`pactl load-module module-null-sink`, and `paplay --raw /dev/zero` as a
+silent app. Never change volumes or routes in the user's session.
+
+The **Network page's extras** (`ui/pages/network_extras.rs`, over
+`stratum_sys::managers::connections`, which reuses `wifi.rs`'s D-Bus
+helpers) are a traffic graph, wired devices (speed, addresses, DNS), VPN
+and WireGuard profiles with a switch each, and the Wi-Fi hotspot. The
+hotspot's profile is made over D-Bus the first time (named after the host,
+a fresh 12-character password, WPA2, IPv4 shared), so the password never
+reaches a command line; its password is read with `GetSecrets` only when
+Show is pressed and dropped from `SystemState` once hidden. VPN and hotspot
+changes run on threads of their own, like a Wi-Fi connect. While the page
+paints, `net_rates.rs` samples the physical interfaces' byte counters
+once a second and the connections snapshot every five; it stops three
+seconds after the last paint. Test VPNs and the hotspot only against a
+stand-in NetworkManager on a private bus (`DBUS_SYSTEM_BUS_ADDRESS`):
+turning the real hotspot on drops the machine's Wi-Fi. Reading the real
+one (`cargo test -p stratum_sys print_status -- --ignored --nocapture`)
+changes nothing.
 
 Settings pages find clicks as a pressed edge between paints, so the window
 latches a press (`settings_press`) until it has painted once with it; a press

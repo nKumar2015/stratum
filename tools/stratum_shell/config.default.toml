@@ -627,6 +627,9 @@ footer_height = 22.0    # the Audio page's status line
 status_ms = 3500        # how long a result stays
 loading_dot = 8.0
 loading_ms = 840        # pulse period
+traffic_height = 88.0   # the Network page's download/upload graph
+traffic_line = 1.5
+traffic_fill = 0.15     # opacity of the area under each line
 
 [metrics.audio_page]    # volume, now playing, outputs and inputs
 gap = 10.0              # between controls in a row

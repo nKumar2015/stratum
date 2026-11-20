@@ -127,6 +127,16 @@ pub struct SystemState {
     pub idle_inhibit: Cell<bool>,
     /// What night light is doing, published by the shell.
     pub night_light: Cell<crate::night_light::Status>,
+    /// VPN profiles, wired devices and the hotspot
+    /// (`managers::connections::status`), read while the Network page is
+    /// shown and after its actions.
+    pub connections: Cell<serde_json::Value>,
+    /// The hotspot's password, read when the Network page asks to show it.
+    pub hotspot_password: Cell<Option<String>>,
+    /// Download and upload rates, sampled only while the Network page shows
+    /// them (`net_rates`).
+    pub net_rates: Cell<crate::net_rates::NetRates>,
+    pub net_rates_watch: crate::net_rates::Watch,
     /// How the last tracked action ended (`SystemAction::Tracked`), so the
     /// page that issued it can report the outcome.
     pub action_result: Cell<ActionResult>,
@@ -169,6 +179,10 @@ impl SystemState {
             dnd: Cell::new(false),
             idle_inhibit: Cell::new(false),
             night_light: Cell::default(),
+            connections: Cell::new(serde_json::Value::Null),
+            hotspot_password: Cell::new(None),
+            net_rates: Cell::default(),
+            net_rates_watch: Default::default(),
             action_result: Cell::new(ActionResult::default()),
             waker: Mutex::new(None),
             tray_handle: Mutex::new(None),

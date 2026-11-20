@@ -77,6 +77,12 @@ impl DefaultDevice for SourceController {
     }
 }
 
+/// `percent` of normal volume, as Pulse counts it.
+pub(crate) fn volume_of_percent(percent: i64) -> libpulse_binding::volume::Volume {
+    let normal = f64::from(libpulse_binding::volume::Volume::NORMAL.0);
+    libpulse_binding::volume::Volume((normal * percent as f64 / 100.0).round() as u32)
+}
+
 /// The server's default sink name, as it reports it (possibly the EQ sink).
 pub(crate) fn default_sink_name() -> Option<String> {
     with_sink(|ctrl| ctrl.get_server_info())

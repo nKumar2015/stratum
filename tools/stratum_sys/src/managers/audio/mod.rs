@@ -139,6 +139,75 @@ fn set_default_mute<C: pulse::DefaultDevice>(ctrl: &mut C, muted: bool) -> Resul
     Ok(())
 }
 
+/// An app's stream: one playing (a sink input) or recording (a source
+/// output).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stream {
+    Playback(u32),
+    Recording(u32),
+}
+
+/// Set an app's stream to an absolute percentage, every channel alike.
+pub fn set_stream_volume(stream: Stream, percent: i64) -> Value {
+    use pulsectl::controllers::AppControl;
+    let target = pulse::volume_of_percent(percent.clamp(0, 150));
+    let result = match stream {
+        Stream::Playback(index) => pulse::with_sink(|ctrl| {
+            let mut volumes = ctrl.get_app_by_index(index)?.volume;
+            let channels = volumes.len();
+            volumes.set(channels, target);
+            let op = ctrl.handler.introspect.set_sink_input_volume(index, &volumes, None);
+            ctrl.handler.wait_for_operation(op).map_err(ControllerError::from)
+        }),
+        Stream::Recording(index) => pulse::with_source(|ctrl| {
+            let mut volumes = ctrl.get_app_by_index(index)?.volume;
+            let channels = volumes.len();
+            volumes.set(channels, target);
+            let op = ctrl.handler.introspect.set_source_output_volume(index, &volumes, None);
+            ctrl.handler.wait_for_operation(op).map_err(ControllerError::from)
+        }),
+    };
+    stream_result(result.map(|_| true), "set the volume of")
+}
+
+pub fn set_stream_mute(stream: Stream, muted: bool) -> Value {
+    use pulsectl::controllers::AppControl;
+    let result = match stream {
+        Stream::Playback(index) => pulse::with_sink(|ctrl| ctrl.set_app_mute(index, muted)),
+        Stream::Recording(index) => pulse::with_source(|ctrl| ctrl.set_app_mute(index, muted)),
+    };
+    stream_result(result, "mute")
+}
+
+/// Move an app's stream to the device named `device`. Playback moved to
+/// the device the EQ feeds goes into the EQ instead, so it keeps the EQ.
+pub fn move_stream(stream: Stream, device: &str) -> Value {
+    use pulsectl::controllers::AppControl;
+    let result = match stream {
+        Stream::Playback(index) => {
+            let eq_target = engine::current_eq_target_sink().unwrap_or_default();
+            let eq_present = pulse::with_sink(|ctrl| ctrl.get_device_by_name(config::EQ_VIRTUAL_INPUT_SINK)).is_ok();
+            let target = if eq_present && !eq_target.is_empty() && eq_target == device {
+                config::EQ_VIRTUAL_INPUT_SINK
+            } else {
+                device
+            };
+            pulse::with_sink(|ctrl| ctrl.move_app_by_name(index, target))
+        }
+        Stream::Recording(index) => pulse::with_source(|ctrl| ctrl.move_app_by_name(index, device)),
+    };
+    stream_result(result, "move")
+}
+
+fn stream_result(result: Result<bool, ControllerError>, verb: &str) -> Value {
+    refresh_device_cache();
+    match result {
+        Ok(true) => json!({"ok": true}),
+        Ok(false) => json!({"ok": false, "error": format!("could not {verb} the stream")}),
+        Err(err) => json!({"ok": false, "error": format!("could not {verb} the stream: {err}")}),
+    }
+}
+
 pub fn set_input(target: &str) -> Value {
     match pulse::with_source(|ctrl| ctrl.set_default_device(target)) {
         Ok(true) => {}

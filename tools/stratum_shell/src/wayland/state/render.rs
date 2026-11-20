@@ -231,6 +231,7 @@ impl App {
                     crate::actions::SystemAction::SetSetting { path, value } => self.apply_setting(path, value),
                     crate::actions::SystemAction::NightLight(command) => self.night_light_command(command),
                     crate::actions::SystemAction::IdleInhibit(on) => self.set_idle_inhibited(on),
+                    crate::actions::SystemAction::WatchNetRates => crate::net_rates::start(&self.state),
                     crate::actions::SystemAction::PreviewTheme(preview) => {
                         let (name, theme) = *preview;
                         self.preview_theme(name, theme);

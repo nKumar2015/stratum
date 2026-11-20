@@ -21,6 +21,8 @@ pub mod display;
 pub mod equalizer;
 pub mod idle_settings;
 pub mod layout;
+pub mod mixer;
+pub mod network_extras;
 pub mod night_light;
 pub mod notifications;
 pub mod overview;
@@ -240,6 +242,8 @@ impl Pages {
             Page::Power => self.power.disarm(),
             Page::Theme => self.theme.on_hidden(),
             Page::Display => self.display.on_hidden(),
+            Page::Audio => self.audio.mixer.on_hidden(),
+            Page::Wifi => self.wifi.extras.on_hidden(),
             _ => {}
         }
     }
@@ -290,6 +294,7 @@ impl Pages {
     pub fn scroll(&mut self, page: Page, point: (f32, f32), delta: f32) -> bool {
         match page {
             Page::Display => self.display.on_scroll(point, delta),
+            Page::Audio => self.audio.mixer.on_scroll(point, delta),
             _ => false,
         }
     }

@@ -244,17 +244,17 @@ pub fn connect(ssid: &str, password: Option<&str>) -> Value {
     }
 }
 
-const NM: &str = "org.freedesktop.NetworkManager";
-const NM_PATH: &str = "/org/freedesktop/NetworkManager";
-const SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
-const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
-const NM_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
+pub(crate) const NM: &str = "org.freedesktop.NetworkManager";
+pub(crate) const NM_PATH: &str = "/org/freedesktop/NetworkManager";
+pub(crate) const SETTINGS_PATH: &str = "/org/freedesktop/NetworkManager/Settings";
+pub(crate) const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+pub(crate) const NM_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const NM_ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
-const NM_ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+pub(crate) const NM_ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 const NM_SETTINGS: &str = "org.freedesktop.NetworkManager.Settings";
-const NM_CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
+pub(crate) const NM_CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 
-const DEVICE_TYPE_WIFI: u32 = 2;
+pub(crate) const DEVICE_TYPE_WIFI: u32 = 2;
 const ACTIVATED: u32 = 2;
 const DEACTIVATED: u32 = 4;
 /// `NM_802_11_AP_FLAGS_PRIVACY`, and the key-management bits of the WPA and
@@ -269,7 +269,7 @@ const WIRELESS_SECURITY: &str = "802-11-wireless-security";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A connection's settings, as `GetSettings` returns them.
-type Settings = HashMap<String, HashMap<String, OwnedValue>>;
+pub(crate) type Settings = HashMap<String, HashMap<String, OwnedValue>>;
 
 /// An access point, with what choosing one and its security needs.
 #[derive(Clone, Debug)]
@@ -283,11 +283,11 @@ struct AccessPoint {
     rsn_flags: u32,
 }
 
-fn owned(value: Variant<'_>) -> OwnedValue {
+pub(crate) fn owned(value: Variant<'_>) -> OwnedValue {
     OwnedValue::try_from(value).expect("plain values have no file descriptors")
 }
 
-fn bytes(value: &OwnedValue) -> Vec<u8> {
+pub(crate) fn bytes(value: &OwnedValue) -> Vec<u8> {
     match &**value {
         Variant::Array(array) => array.iter().filter_map(|b| u8::try_from(b).ok()).collect(),
         _ => Vec::new(),
@@ -365,7 +365,7 @@ fn failure(reason: u32) -> String {
     format!("Connection activation failed: {why}")
 }
 
-fn nm_proxy<'a>(conn: &Connection, path: impl Into<String>, interface: &'static str) -> Result<Proxy<'a>, String> {
+pub(crate) fn nm_proxy<'a>(conn: &Connection, path: impl Into<String>, interface: &'static str) -> Result<Proxy<'a>, String> {
     // Read on demand: caching would fetch and watch every property of every
     // access point for a single lookup.
     zbus::blocking::proxy::Builder::<Proxy<'a>>::new(conn)
@@ -405,7 +405,7 @@ fn access_points(conn: &Connection) -> Result<Vec<AccessPoint>, String> {
     Ok(aps)
 }
 
-fn saved_profiles(conn: &Connection) -> Result<Vec<(OwnedObjectPath, Settings)>, String> {
+pub(crate) fn saved_profiles(conn: &Connection) -> Result<Vec<(OwnedObjectPath, Settings)>, String> {
     let settings = nm_proxy(conn, SETTINGS_PATH, NM_SETTINGS)?;
     let paths: Vec<OwnedObjectPath> = settings.call("ListConnections", &()).map_err(|err| err.to_string())?;
     Ok(paths
@@ -419,7 +419,7 @@ fn saved_profiles(conn: &Connection) -> Result<Vec<(OwnedObjectPath, Settings)>,
 }
 
 /// Wait for an activation to finish.
-fn wait_active(conn: &Connection, active: OwnedObjectPath) -> Result<(), String> {
+pub(crate) fn wait_active(conn: &Connection, active: OwnedObjectPath) -> Result<(), String> {
     let proxy = nm_proxy(conn, active.as_str(), NM_ACTIVE)?;
     // Subscribe before reading the state, so no change falls between them.
     let changes = proxy.receive_signal("StateChanged").map_err(|err| err.to_string())?;

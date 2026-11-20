@@ -244,6 +244,11 @@ impl Status {
         self.remaining = Some(status_ms as f32 / 1000.0);
     }
 
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.remaining = None;
+    }
+
     pub fn tick(&mut self, dt: f32) {
         if let Some(remaining) = &mut self.remaining {
             *remaining -= dt;
