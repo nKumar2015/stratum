@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use smithay_client_toolkit::seat::keyboard::Keysym;
 
-use crate::hyprland::{Desktop, Window};
+use crate::hyprland::{Desktop, Window, Workspace};
 use crate::render::display_list::{Color, DisplayList, Image, Point, Rect, TexturedQuad};
 use crate::ui::animation::Easing;
 use crate::ui::style::OverviewMetrics;
@@ -139,10 +139,20 @@ impl Overview {
     }
 
     fn workspace_ids(&self) -> Vec<i32> {
-        match &self.target {
-            Some(output) => self.desktop.workspaces_on(output).iter().map(|w| w.id).collect(),
-            None => Vec::new(),
-        }
+        self.shown_workspaces().iter().map(|w| w.id).collect()
+    }
+
+    /// The workspaces it shows: those on its output holding a window, and
+    /// the one the output shows even when empty, so there is always a
+    /// card for where you are.
+    fn shown_workspaces(&self) -> Vec<&Workspace> {
+        let Some(output) = &self.target else { return Vec::new() };
+        let active = self.desktop.monitor(output).map(|m| m.active_workspace);
+        self.desktop
+            .workspaces_on(output)
+            .into_iter()
+            .filter(|w| Some(w.id) == active || self.desktop.windows.iter().any(|window| window.workspace == w.id))
+            .collect()
     }
 
     pub fn tick(&mut self, dt: f32) {
@@ -276,8 +286,7 @@ impl Overview {
             ui::paint_text_centered(ctx, list, "No workspaces to show", surface, m.label_text, fade(theme.text_muted));
             return;
         };
-        let workspaces: Vec<(i32, String)> =
-            self.desktop.workspaces_on(&output).iter().map(|w| (w.id, w.name.clone())).collect();
+        let workspaces: Vec<(i32, String)> = self.shown_workspaces().iter().map(|w| (w.id, w.name.clone())).collect();
         let label = typo.line(m.label_text) + m.label_gap;
         let area = Rect {
             x: surface.x + m.margin,
@@ -479,7 +488,7 @@ fn inset(rect: Rect, by: f32) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hyprland::{Monitor, Workspace};
+    use crate::hyprland::Monitor;
 
     fn desktop() -> Desktop {
         let window = |address, workspace, x| Window {
@@ -503,9 +512,10 @@ mod tests {
                 Workspace { id: 1, name: "1".into(), monitor: "A".into() },
                 Workspace { id: 2, name: "2".into(), monitor: "A".into() },
                 Workspace { id: 3, name: "3".into(), monitor: "A".into() },
+                Workspace { id: 4, name: "4".into(), monitor: "A".into() },
                 Workspace { id: 11, name: "11".into(), monitor: "B".into() },
             ],
-            windows: vec![window(0xa, 1, 0), window(0xb, 2, 800), window(0xc, 11, 1600), window(0xd, 2, 0)],
+            windows: vec![window(0xa, 1, 0), window(0xb, 2, 800), window(0xc, 11, 1600), window(0xd, 2, 0), window(0xe, 3, 0)],
         }
     }
 
@@ -535,7 +545,19 @@ mod tests {
     fn opens_on_the_shown_workspace_and_watches_its_windows_first() {
         let overview = open();
         assert_eq!(overview.selected, 1);
-        assert_eq!(overview.windows(), [0xb, 0xd, 0xa], "workspace 2 first; B's window left out");
+        assert_eq!(overview.windows(), [0xb, 0xd, 0xa, 0xe], "workspace 2 first; B's window left out");
+    }
+
+    #[test]
+    fn empty_workspaces_are_left_out_but_the_shown_one_stays() {
+        let mut overview = Overview::new(&metrics());
+        overview.open_on("A", desktop());
+        assert_eq!(overview.workspace_ids(), [1, 2, 3], "4 is empty");
+        let mut on_empty = desktop();
+        on_empty.monitors[0].active_workspace = 4;
+        overview.open_on("A", on_empty);
+        assert_eq!(overview.workspace_ids(), [1, 2, 3, 4], "4 is empty but shown");
+        assert_eq!(overview.selected, 3);
     }
 
     #[test]

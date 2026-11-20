@@ -27,11 +27,11 @@ Rules from the user that apply to every item:
 | Per-app mixer; wired, VPN, hotspot, traffic on the Network page | `36d2b00` | pavucontrol, blueman |
 | `stratum_ui` crate; file manager and FileChooser portal | `5d18075` `79ac476` | thunar |
 | File manager's next round: long paths, other-drive trash, undo, preview, thumbnails, drag and drop, Hyprland portal fix, loaf-fm look, bookmarks | `81ab92c` … `b9e29a0` (pushed 2026-11-20) | — |
-| Workspace overview (5) and window switcher (6), over `hyprland-toplevel-export-v1` | built 2026-11-20 (6d14f17) | — |
+| Workspace overview (5) and window switcher (6), over `hyprland-toplevel-export-v1` | `6d14f17` (pushed 2026-11-20); empty workspaces hidden from the overview afterwards | — |
 
 On the user's side: the file manager is enabled in `~/nixos-config`;
-`nix flake update stratum` and a rebuild bring in everything up to
-`b9e29a0`, after which the FileChooser check (PLAN.md, item 9) can be done.
+`nix flake update stratum` and a rebuild bring in everything pushed,
+after which the FileChooser check (PLAN.md, item 9) can be done.
 Removing vicinae, pavucontrol, blueman or thunar is the user's call, after
 comparing.
 
@@ -42,10 +42,14 @@ first use ~0 (+1 MB RSS, within noise; no VRAM); overview open +22 MB RSS
 +77 MB VRAM (the full-screen swapchain), 6 % of a core in the shell and
 3.5 % in Hyprland while it retakes each window every second; after closing
 +2 MB RSS and +4 MB VRAM, constant over repeated opens (wgpu keeps the
-wallpaper's upload buffer; without `[overview] wallpaper` it is 0). The keys
-are the user's to bind in `~/nixos-config`: `SUPER + Tab` → `stratum-cli
-switcher next`, `SUPER + SHIFT + Tab` → `prev`, and one for `overview
-toggle`.
+wallpaper's upload buffer; without `[overview] wallpaper` it is 0). The
+overview shows only workspaces holding a window, and the one on screen
+even when empty (the user's 1–20 are persistent, so most were empty
+cards). The keys are bound Windows-style in `~/nixos-config`'s
+`modules/core/hyprland.nix`: `ALT + Tab` / `ALT + SHIFT + Tab` →
+`stratum-cli switcher next|prev`, `SUPER + Tab` and a four-finger swipe up
+→ `overview toggle` (passes Hyprland's `--verify-config`; not yet tried on
+the real keyboard and touchpad).
 
 ## Left, Tier 2: shell features
 
