@@ -247,6 +247,18 @@ pub struct FilesMetrics {
     pub preview_label: f32,
     /// How far a pressed item must move before it is dragged.
     pub drag_threshold: f32,
+    /// The floating cards (sidebar, folder, preview): the margin around
+    /// them, the gap between them and their corners.
+    pub window_margin: f32,
+    pub pane_gap: f32,
+    pub card_radius: f32,
+    /// The folder's name over its list, the row it sits in, and the pills
+    /// beside it (counts, a toast, a running copy).
+    pub title_text: f32,
+    pub title_height: f32,
+    pub pill_height: f32,
+    /// A row's or cell's corners in the list and grid.
+    pub row_radius: f32,
 }
 
 /// The launcher: a search field over a list of results.

@@ -427,7 +427,7 @@ min_width = 560
 min_height = 360
 padding = 10.0
 gap = 8.0
-toolbar_height = 48.0   # back, forward, up, the path and search
+toolbar_height = 40.0   # the pills along the top: back, forward, up, the path, search, views
 button = 32.0
 search_width = 220.0
 sidebar_width = 190.0
@@ -455,6 +455,13 @@ preview_icon = 96.0     # the type's icon, for what has no picture
 preview_row = 20.0      # an information row under it
 preview_label = 84.0    # their labels' column
 drag_threshold = 6.0    # how far a pressed item moves before it is dragged
+window_margin = 12.0    # around the floating cards (sidebar, folder, preview)
+pane_gap = 10.0         # between them, and below the toolbar
+card_radius = 18.0
+title_text = 20.0       # the folder's name over its list
+title_height = 44.0
+pill_height = 24.0      # the counts beside it, a toast, a running copy
+row_radius = 10.0       # a row's or cell's corners
 
 [metrics.launcher]
 width = 640.0

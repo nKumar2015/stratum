@@ -34,6 +34,12 @@ pub trait Ui {
         self.text().measure(value, &style).0
     }
 
+    /// A string's width in the theme font at `size` and `weight`.
+    fn measure_weighted(&mut self, value: &str, size: f32, weight: u16) -> f32 {
+        let style = TextStyle { family: std::sync::Arc::from(self.theme().font.as_str()), size, weight, color: Color::WHITE };
+        self.text().measure(value, &style).0
+    }
+
     /// Shape `value` with its baseline at `(x, y)` and add it to `list`.
     fn text_text(&mut self, list: &mut DisplayList, value: &str, x: f32, y: f32, style: TextStyle) {
         if value.is_empty() {

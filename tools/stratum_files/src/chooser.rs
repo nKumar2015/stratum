@@ -165,7 +165,8 @@ impl Chooser {
         let m = ui.config.metrics.files.clone();
         let page = ui.config.metrics.page.clone();
         let theme = ui.theme.clone();
-        list.push_rect(Rect { color: theme.bg_widget, ..bar });
+        list.push_rect(Rect { radius: m.card_radius, color: theme.surface, ..bar });
+        list.push_outline(Rect { radius: m.card_radius, color: theme.outline, ..bar }, 1.0);
         // Picking a file while saving takes its name.
         if self.save && selected != self.last_selected.as_slice() {
             if let [one] = selected {
@@ -193,7 +194,7 @@ impl Chooser {
             x += ui.measure("Name", m.text) + m.gap;
             let field_w = (left - m.gap * 2.0 - x).min(m.search_width * 1.6).max(0.0);
             let field = rect(x, y, field_w, page.badge);
-            ui::paint_frame(list, Rect { radius: m.radius, ..field }, 1.5, theme.primary, theme.surface_high);
+            ui::paint_frame(list, Rect { radius: field.height * 0.5, ..field }, 1.5, theme.primary, theme.surface_high);
             let style = FieldStyle { text: m.text, padding: m.gap, caret_width: 1.5, masked: false, placeholder: Some("File name") };
             self.name.paint(ui, list, field, style, false);
             x += field_w + m.gap * 2.0;
@@ -205,11 +206,13 @@ impl Chooser {
                 self.filter = Some(i);
             }
         }
-        if let Some(path) = &self.replace {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let text = format!("{name} exists: replace it?");
-            ui::paint_text_vcentered(ui, list, &text, bar.x + m.padding, rect(bar.x, bar.y - m.status_height, bar.width, m.status_height), m.detail_text, 400, theme.warning);
-        }
+    }
+
+    /// Asked before replacing a file: shown over the folder.
+    pub fn warning(&self) -> Option<String> {
+        let path = self.replace.as_ref()?;
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Some(format!("{name} exists: replace it?"))
     }
 
     /// Whether the filter changed since `before`, so the folder is listed again.

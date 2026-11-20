@@ -749,6 +749,15 @@ desktop portal's FileChooser, ahead of GTK's.
   reversed, never over a name taken since; deleting for good is not),
   `open` (`mimeapps.list` defaults and associations, then entries whose
   `MimeType` names the type or an ancestor; apps start with `setsid`).
+- The look (after loaf-fm, at the user's request, 2026-11-20): floating
+  rounded cards on `surface_lowest` (the places, the folder, the preview,
+  the chooser's bar) under a row of pills (back/forward/up together, the
+  path as chip crumbs, search, the views together); the folder's name
+  over its list with count pills; the current place an accent pill;
+  selection a tinted fill with an accent edge; messages and a running
+  copy float as pills at the bottom of the folder card instead of a
+  status line. Sizes are `[metrics.files]` (`window_margin`, `pane_gap`,
+  `card_radius`, `title_*`, `pill_height`, `row_radius`).
 - Desktop entries (the launcher's list and "Open with") are
   `stratum_ui::apps`; `App::command(files)` fills `%f %F %u %U`.
 - The clipboard is `wl-copy`/`wl-paste` with `text/uri-list`, so copying in

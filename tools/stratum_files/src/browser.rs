@@ -930,8 +930,18 @@ impl Browser {
     fn paint_toolbar(&mut self, ui: &mut AppUi, list: &mut DisplayList, bar: Rect, input: &InputState, clicked: bool) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
-        let y = bar.y + (bar.height - m.button) * 0.5;
-        let mut x = bar.x + m.padding;
+        // Pills on the ground: back, forward and up together; the path; the
+        // search; the views together.
+        let inset = (bar.height - m.button) * 0.5;
+        let pill = |list: &mut DisplayList, r: Rect, focused: bool| {
+            let r = Rect { radius: r.height * 0.5, ..r };
+            list.push_rect(Rect { color: theme.surface, ..r });
+            list.push_outline(Rect { color: if focused { theme.primary } else { theme.outline }, ..r }, if focused { 1.5 } else { 1.0 });
+        };
+        let y = bar.y + inset;
+        let nav_w = m.button * 3.0 + m.gap * 0.5 * 2.0 + inset * 2.0;
+        pill(list, rect(bar.x, bar.y, nav_w, bar.height), false);
+        let mut x = bar.x + inset;
         for (glyph, enabled, action) in [(BACK, !self.back.is_empty(), 0), (FORWARD, !self.forward.is_empty(), 1), (UP, self.dir.parent().is_some(), 2)] {
             if layout::round_button(ui, list, rect(x, y, m.button, m.button), glyph, false, enabled, theme.primary, input, clicked) {
                 match action {
@@ -942,10 +952,14 @@ impl Browser {
             }
             x += m.button + m.gap * 0.5;
         }
+        let x = bar.x + nav_w + m.gap;
 
-        // At the right: view, hidden files, search.
-        let mut right = bar.x + bar.width - m.padding;
+        // At the right: the views, then search.
         let buttons = [(PREVIEW, self.preview_mode != PreviewMode::Never, 3), (GRID, self.view == View::Grid, 0), (LIST, self.view == View::List, 1), (HIDDEN, self.show_hidden, 2)];
+        let views_w = m.button * buttons.len() as f32 + m.gap * 0.5 * (buttons.len() - 1) as f32 + inset * 2.0;
+        let views = rect(bar.x + bar.width - views_w, bar.y, views_w, bar.height);
+        pill(list, views, false);
+        let mut right = views.x + views.width - inset;
         for (glyph, on, action) in buttons {
             right -= m.button;
             if layout::round_button(ui, list, rect(right, y, m.button, m.button), glyph, on, true, theme.primary, input, clicked) {
@@ -958,24 +972,25 @@ impl Browser {
             }
             right -= m.gap * 0.5;
         }
-        right -= m.gap;
-        let search = rect(right - m.search_width, y, m.search_width, m.button);
+        let search = rect(views.x - m.gap - m.search_width, bar.y, m.search_width, bar.height);
         let searching = matches!(self.editing, Editing::Search);
-        ui::paint_frame(list, Rect { radius: m.radius, ..search }, if searching { 1.5 } else { 0.0 }, theme.primary, theme.surface_high);
-        let glyph = rect(search.x, search.y, m.button, m.button);
+        pill(list, search, searching);
+        let glyph = rect(search.x + inset, search.y, m.button, search.height);
         ui::paint_icon_centered(ui, list, SEARCH, glyph, m.text, theme.text_muted);
-        let field = rect(search.x + m.button, search.y, search.width - m.button, search.height);
+        let field = rect(glyph.x + m.button, search.y, search.width - m.button - inset * 2.0, search.height);
         let style = FieldStyle { text: m.text, padding: 0.0, caret_width: 1.5, masked: false, placeholder: Some("Search this folder") };
         self.search.paint(ui, list, field, style, !searching);
         if clicked && layout::hovered(input, search) {
             self.editing = Editing::Search;
         }
 
+        let editing_path = matches!(self.editing, Editing::Path(_));
+        let path_pill = rect(x, bar.y, (search.x - m.gap - x).max(0.0), bar.height);
+        pill(list, path_pill, editing_path);
+        let path_area = rect(path_pill.x + inset, y, (path_pill.width - inset * 2.0).max(0.0), m.button);
         // The path between them: breadcrumbs, or a field while editing.
-        let path_area = rect(x + m.gap, y, (search.x - m.gap * 2.0 - x).max(0.0), m.button);
         match &mut self.editing {
             Editing::Path(field) => {
-                ui::paint_frame(list, Rect { radius: m.radius, ..path_area }, 1.5, theme.primary, theme.surface_high);
                 let style = FieldStyle { text: m.text, padding: m.gap, caret_width: 1.5, masked: false, placeholder: None };
                 field.paint(ui, list, path_area, style, false);
             }
@@ -1036,8 +1051,13 @@ impl Browser {
             if !last {
                 self.drop_zones.push((cell, path.clone()));
             }
-            if layout::hovered(input, cell) && !last {
-                list.push_rect(Rect { radius: m.radius, color: theme.bg_hover, ..cell });
+            // Each crumb a chip: the folder shown tinted, the others lit
+            // under the pointer.
+            let chip = Rect { radius: cell.height * 0.5, ..cell };
+            if last {
+                list.push_rect(Rect { color: layout::mix(theme.surface_high, theme.primary, 0.25), ..chip });
+            } else if layout::hovered(input, cell) {
+                list.push_rect(Rect { color: theme.surface_high, ..chip });
                 if clicked {
                     hit = Some(path.clone());
                 }
@@ -1052,8 +1072,10 @@ impl Browser {
     fn paint_sidebar(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
-        list.push_rect(Rect { color: theme.bg_widget, ..area });
-        // Clipped to its area, and scrolled when the places do not fit.
+        // Clipped to its card, and scrolled when the places do not fit.
+        // Inside the card's rounded ends, so a row cut short never sits on
+        // its corners.
+        let area = rect(area.x, area.y + m.padding * 0.5, area.width, area.height - m.padding);
         self.sidebar_rect = area;
         self.sidebar_scroll = self.sidebar_scroll.clamp(0.0, (self.sidebar_height - area.height).max(0.0));
         list.push_clip(area);
@@ -1078,9 +1100,10 @@ impl Browser {
             }
             let row = rect(area.x + m.padding, y, area.width - m.padding * 2.0, m.sidebar_row);
             let current = place.path == self.dir;
+            // The current place an accent pill; others lit under the pointer.
             if current || layout::hovered(input, row) {
-                let color = if current { layout::mix(theme.bg_widget, theme.primary, 0.25) } else { theme.bg_hover };
-                list.push_rect(Rect { radius: m.radius, color, ..row });
+                let color = if current { layout::mix(theme.surface, theme.primary, 0.25) } else { theme.surface_high };
+                list.push_rect(Rect { radius: row.height * 0.5, color, ..row });
             }
             let icon_box = rect(row.x + m.gap, row.y + (row.height - m.sidebar_icon) * 0.5, m.sidebar_icon, m.sidebar_icon);
             match ui.icons.load_icon(place.icon, m.sidebar_icon as u32, 2).or_else(|| ui.icons.load_icon("folder", m.sidebar_icon as u32, 2)) {
@@ -1089,7 +1112,8 @@ impl Browser {
             }
             let text_x = icon_box.x + icon_box.width + m.gap;
             let name = ui::elide(ui, &place.name, m.text, 400, row.x + row.width - text_x - m.gap);
-            ui::paint_text_vcentered(ui, list, &name, text_x, row, m.text, 400, if current { theme.primary } else { theme.text_main });
+            let weight = if current { ui.config.metrics.typography.weight_bold } else { 400 };
+            ui::paint_text_vcentered(ui, list, &name, text_x, row, m.text, weight, if current { theme.primary } else { theme.text_main });
             let visible = row.y + row.height > area.y && row.y < area.y + area.height;
             if clicked && visible && layout::hovered(input, row) && layout::hovered(input, area) {
                 go = Some(place.path.clone());
@@ -1179,11 +1203,13 @@ impl Browser {
             }
             let selected = self.selected.contains(&entry.path);
             let hot = layout::hovered(input, cell) && layout::hovered(input, viewport);
-            let inset = Rect { x: cell.x + 2.0, y: cell.y + 1.0, width: cell.width - 4.0, height: cell.height - 2.0, radius: m.radius, color: Color::TRANSPARENT };
+            let inset = Rect { x: cell.x + 2.0, y: cell.y + 1.0, width: cell.width - 4.0, height: cell.height - 2.0, radius: m.row_radius, color: Color::TRANSPARENT };
             if selected {
-                list.push_rect(Rect { color: layout::mix(theme.bg_main, theme.primary, 0.3), ..inset });
+                // A tinted fill with an accent edge.
+                list.push_rect(Rect { color: layout::mix(theme.surface, theme.primary, 0.2), ..inset });
+                list.push_outline(Rect { color: theme.primary.with_alpha(theme.primary.a * 0.6), ..inset }, 1.5);
             } else if hot {
-                list.push_rect(Rect { color: theme.bg_hover, ..inset });
+                list.push_rect(Rect { color: theme.surface_high, ..inset });
             }
             let dim = if entry.hidden() { 0.6 } else { 1.0 };
             let text_color = theme.text_main.with_alpha(theme.text_main.a * dim);
@@ -1211,8 +1237,10 @@ impl Browser {
                         let from = ui::elide(ui, &tilde(folder), m.detail_text, 400, name_x + name_w - from_x);
                         ui::paint_text_vcentered(ui, list, &from, from_x, cell, m.detail_text, 400, theme.text_muted);
                     } else {
-                        let name = ui::elide(ui, &entry.name, m.text, 400, name_w);
-                        ui::paint_text_vcentered(ui, list, &name, name_x, cell, m.text, 400, text_color);
+                        // Folders a little heavier, as in the sidebar.
+                        let weight = if entry.is_dir { ui.config.metrics.typography.weight_medium } else { 400 };
+                        let name = ui::elide(ui, &entry.name, m.text, weight, name_w);
+                        ui::paint_text_vcentered(ui, list, &name, name_x, cell, m.text, weight, text_color);
                     }
                     let size = if entry.is_dir { String::new() } else { entries::format_size(entry.size) };
                     let size_w = ui.measure(&size, m.detail_text);
@@ -1318,7 +1346,7 @@ impl Browser {
         ];
         for (label, key, cell, text_x) in columns {
             if layout::hovered(input, cell) {
-                list.push_rect(Rect { color: theme.bg_hover, ..cell });
+                list.push_rect(Rect { radius: m.row_radius, color: theme.surface_high, ..cell });
                 if clicked {
                     if self.sort == key {
                         self.descending = !self.descending;
@@ -1336,7 +1364,7 @@ impl Browser {
                 ui::paint_icon_centered(ui, list, glyph, rect(text_x + w + 2.0, cell.y, m.detail_text * 1.4, cell.height), m.detail_text, theme.text_muted);
             }
         }
-        list.push_rect(Rect { y: area.y + area.height - 1.0, height: 1.0, color: theme.border_inactive, ..area });
+        list.push_rect(Rect { y: area.y + area.height - 1.0, height: 1.0, color: theme.outline, ..area });
     }
 
     fn paint_rename(&self, ui: &mut AppUi, list: &mut DisplayList, area: Rect) {
@@ -1434,7 +1462,7 @@ impl Browser {
         let Some((x, y)) = at else { return };
         list.push_layer();
         if let Some((zone, _)) = &target {
-            list.push_outline(Rect { radius: m.radius, color: theme.primary, ..*zone }, 2.0);
+            list.push_outline(Rect { radius: m.row_radius, color: theme.primary, ..*zone }, 2.0);
         }
         // A card under the pointer: the first item's icon, what is dragged,
         // and what a drop here would do.
@@ -1449,8 +1477,8 @@ impl Browser {
         };
         let text_w = ui.measure(&label, m.detail_text);
         let card = rect(x + m.gap * 1.5, y + m.gap * 1.5, m.padding * 2.0 + m.row_icon + m.gap + text_w, m.row_height);
-        list.push_rect(Rect { radius: m.radius, color: theme.surface_highest, ..card });
-        list.push_outline(Rect { radius: m.radius, color: theme.border_inactive, ..card }, 1.0);
+        list.push_rect(Rect { radius: card.height * 0.5, color: theme.surface_highest, ..card });
+        list.push_outline(Rect { radius: card.height * 0.5, color: theme.outline, ..card }, 1.0);
         let icon_box = rect(card.x + m.padding, card.y + (card.height - m.row_icon) * 0.5, m.row_icon, m.row_icon);
         let icon = first.and_then(|entry| self.icon(ui, &entry, m.row_icon, &ui.config.files.clone()));
         if let Some(drag) = &mut self.drag {
@@ -1556,7 +1584,6 @@ impl Browser {
     fn paint_preview(&mut self, ui: &mut AppUi, list: &mut DisplayList, pane: Rect, config: &stratum_ui::config::FilesConfig) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
-        list.push_rect(Rect { width: 1.0, color: theme.border_inactive, ..pane });
         let inner = rect(pane.x + m.padding, pane.y + m.padding, pane.width - m.padding * 2.0, pane.height - m.padding * 2.0);
         let side = inner.width.min(inner.height * 0.5);
         let visual = rect(inner.x, inner.y, inner.width, side);
@@ -1673,55 +1700,91 @@ impl Browser {
         list.pop_clip();
     }
 
-    fn paint_status(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
+    /// The folder's name, as its title shows it.
+    fn folder_name(&self) -> String {
+        if trash::is_trash(&self.dir) {
+            return "Trash".into();
+        }
+        self.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "/".into())
+    }
+
+    /// Over the list: the folder's name, pills with its counts, and the
+    /// Trash's Empty button.
+    fn paint_title(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
-        list.push_rect(Rect { height: 1.0, color: theme.border_inactive, ..area });
-        let shown = self.visible().len();
-        let mut text = count(shown, "item");
+        let bold = ui.config.metrics.typography.weight_bold;
+        let mut right = area.x + area.width;
+        if trash::is_trash(&self.dir) && !self.entries.is_empty() {
+            let label = "Empty the trash";
+            let w = layout::text_button_width(ui, label);
+            let h = ui.config.metrics.page.badge;
+            right -= w;
+            if layout::text_button(ui, list, right, area.y + (area.height - h) * 0.5, label, true, input, clicked) {
+                self.run(Command::EmptyTrash, &ui.config.files.clone());
+            }
+            right -= m.gap;
+        }
+        let title = self.folder_name();
+        let mut pills = vec![count(self.visible().len(), "item")];
         let selected = self.selected_paths();
         if !selected.is_empty() {
             let bytes: u64 = self.entries.iter().filter(|e| self.selected.contains(&e.path) && !e.is_dir).map(|e| e.size).sum();
-            text.push_str(&format!(" \u{b7} {} selected", selected.len()));
-            if bytes > 0 {
-                text.push_str(&format!(" ({})", entries::format_size(bytes)));
-            }
+            pills.push(if bytes > 0 { format!("{} selected \u{b7} {}", selected.len(), entries::format_size(bytes)) } else { format!("{} selected", selected.len()) });
         }
-        let mut color = theme.text_muted;
+        let pill_w: f32 = pills.iter().map(|p| ui.measure(p, m.detail_text) + m.padding * 2.0 + m.gap).sum();
+        let title = ui::elide(ui, &title, m.title_text, bold, (right - area.x - pill_w - m.gap).max(0.0));
+        ui::paint_text_vcentered(ui, list, &title, area.x + m.gap * 0.5, area, m.title_text, bold, theme.text_main);
+        let mut x = area.x + m.gap * 0.5 + ui.measure_weighted(&title, m.title_text, bold) + m.gap * 1.5;
+        for (i, pill) in pills.iter().enumerate() {
+            let w = ui.measure(pill, m.detail_text) + m.padding * 2.0;
+            let r = rect(x, area.y + (area.height - m.pill_height) * 0.5, w, m.pill_height);
+            let fill = if i == 0 { theme.surface_high } else { layout::mix(theme.surface_high, theme.primary, 0.25) };
+            list.push_rect(Rect { radius: m.pill_height * 0.5, color: fill, ..r });
+            ui::paint_text_centered(ui, list, pill, r, m.detail_text, if i == 0 { theme.text_muted } else { theme.text_main });
+            x += w + m.gap;
+        }
+    }
+
+    /// Pills floating over the bottom of the folder: a running copy or move
+    /// at the right, with its progress and Cancel; a message in the middle.
+    fn paint_floating(&mut self, ui: &mut AppUi, list: &mut DisplayList, card: Rect, input: &InputState, clicked: bool) {
+        let m = ui.config.metrics.files.clone();
+        let theme = ui.theme.clone();
+        let bottom = card.y + card.height - m.padding - m.status_height;
+        list.push_layer();
         if let Some(job) = &self.job {
             let p = job.progress.lock().map(|p| p.clone()).unwrap_or_default();
-            let pct = if p.total > 0 { p.done * 100 / p.total } else { 0 };
-            text = format!("{} {} \u{b7} {pct}% of {}", job.label, p.current, entries::format_size(p.total));
-            // A thin bar along the top of the status line.
-            let bar = rect(area.x, area.y, area.width * (pct as f32 / 100.0), 2.0);
-            list.push_rect(Rect { color: theme.primary, ..bar });
-        } else if let Some((message, error, at)) = &self.message {
-            if at.elapsed().as_secs_f32() < MESSAGE_SECONDS {
-                text = message.clone();
-                if *error {
-                    color = theme.error;
-                }
+            let fraction = if p.total > 0 { p.done as f32 / p.total as f32 } else { 0.0 };
+            let text = format!("{} {} \u{b7} {}% of {}", job.label, p.current, (fraction * 100.0) as u32, entries::format_size(p.total));
+            let text = ui::elide(ui, &text, m.detail_text, 400, card.width * 0.5);
+            let label = "Cancel";
+            let button_w = layout::text_button_width(ui, label);
+            let h = ui.config.metrics.page.badge;
+            let w = ui.measure(&text, m.detail_text) + m.padding * 3.0 + button_w;
+            let pill = rect(card.x + card.width - m.padding - w, bottom + m.status_height - h - m.gap * 0.5, w, h + m.gap);
+            list.push_rect(Rect { radius: pill.height * 0.5, color: theme.surface_highest, ..pill });
+            // The progress fills the pill from the left.
+            list.push_rect(Rect { radius: pill.height * 0.5, color: layout::mix(theme.surface_highest, theme.primary, 0.3), width: pill.width * fraction, ..pill });
+            list.push_outline(Rect { radius: pill.height * 0.5, color: theme.outline, ..pill }, 1.0);
+            ui::paint_text_vcentered(ui, list, &text, pill.x + m.padding, pill, m.detail_text, 400, theme.text_main);
+            if layout::text_button(ui, list, pill.x + pill.width - button_w - m.gap * 0.5, pill.y + (pill.height - h) * 0.5, label, true, input, clicked) {
+                job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
-        let text = ui::elide(ui, &text, m.detail_text, 400, area.width - m.padding * 2.0 - m.menu_width);
-        ui::paint_text_vcentered(ui, list, &text, area.x + m.padding, area, m.detail_text, 400, color);
-        // Cancel a job, or empty the trash, at the right.
-        let label = if self.job.is_some() {
-            Some("Cancel")
-        } else if trash::is_trash(&self.dir) && !self.entries.is_empty() {
-            Some("Empty the trash")
-        } else {
-            None
+        let warning = self.chooser.as_ref().and_then(Chooser::warning);
+        let message = match (&warning, &self.message) {
+            (Some(text), _) => Some((text.clone(), theme.warning)),
+            (None, Some((text, error, at))) if at.elapsed().as_secs_f32() < MESSAGE_SECONDS => Some((text.clone(), if *error { theme.error } else { theme.text_main })),
+            _ => None,
         };
-        if let Some(label) = label {
-            let w = layout::text_button_width(ui, label);
-            let h = ui.config.metrics.page.badge;
-            if layout::text_button(ui, list, area.x + area.width - m.padding - w, area.y + (area.height - h) * 0.5, label, true, input, clicked) {
-                match &self.job {
-                    Some(job) => job.cancel.store(true, std::sync::atomic::Ordering::Relaxed),
-                    None => self.run(Command::EmptyTrash, &ui.config.files.clone()),
-                }
-            }
+        if let Some((text, color)) = message {
+            let text = ui::elide(ui, &text, m.detail_text, 400, card.width * 0.6);
+            let w = ui.measure(&text, m.detail_text) + m.padding * 2.0;
+            let pill = rect(card.x + (card.width - w) * 0.5, bottom, w, m.status_height);
+            list.push_rect(Rect { radius: pill.height * 0.5, color: theme.surface_highest, ..pill });
+            list.push_outline(Rect { radius: pill.height * 0.5, color: theme.outline, ..pill }, 1.0);
+            ui::paint_text_centered(ui, list, &text, pill, m.detail_text, color);
         }
     }
 
@@ -1844,6 +1907,13 @@ fn pointer_double(input: &InputState, area: Rect, clicked: bool) -> bool {
     clicked && layout::hovered(input, area)
 }
 
+/// A floating card: the theme's surface, rounded, with a hairline edge.
+fn paint_card(ui: &mut AppUi, list: &mut DisplayList, area: Rect) {
+    let radius = ui.config.metrics.files.card_radius;
+    list.push_rect(Rect { radius, color: ui.theme.surface, ..area });
+    list.push_outline(Rect { radius, color: ui.theme.outline, ..area }, 1.0);
+}
+
 /// An entry for a folder that is not in the list (the one shown).
 fn folder_entry(path: &Path) -> Entry {
     Entry {
@@ -1880,8 +1950,7 @@ impl App for Browser {
         if let Some(chooser) = &self.chooser {
             return chooser.title.clone();
         }
-        let name = self.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "/".into());
-        if trash::is_trash(&self.dir) { "Trash".into() } else { name }
+        self.folder_name()
     }
 
     fn paint(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, pointer: &Pointer) {
@@ -1896,44 +1965,55 @@ impl App for Browser {
         let masked = InputState { pointer: if covered { None } else { pointer.input.pointer }, pressed: pointer.input.pressed };
         let input = &masked;
         let clicked = pointer.clicked && !covered;
-        let inner = Pointer { input: masked.clone(), clicked, secondary: pointer.secondary && !covered, ..pointer.clone() };
+        let pointer_in = Pointer { input: masked.clone(), clicked, secondary: pointer.secondary && !covered, ..pointer.clone() };
 
-        let chooser_h = if self.chooser.is_some() { m.chooser_height } else { 0.0 };
-        let toolbar = rect(area.x, area.y, area.width, m.toolbar_height);
-        let status = rect(area.x, area.y + area.height - m.status_height - chooser_h, area.width, m.status_height);
-        let body_y = toolbar.y + toolbar.height;
-        let body_h = status.y - body_y;
-        let sidebar = rect(area.x, body_y, m.sidebar_width.min(area.width * 0.4), body_h);
-        let main = rect(sidebar.x + sidebar.width, body_y, area.width - sidebar.width, body_h);
-        // The preview pane takes the right while the folder keeps room for
-        // its names and columns; a narrower window hides it.
-        let room = main.width - m.preview_width >= m.preview_width + m.size_column + m.modified_column;
+        // Floating cards on the ground: the places, the folder and its
+        // preview, under a row of pills, with the chooser's bar below.
+        list.push_rect(Rect { color: ui.theme.surface_lowest, ..area });
+        let (margin, gap) = (m.window_margin, m.pane_gap);
+        let chooser_h = if self.chooser.is_some() { m.chooser_height + gap } else { 0.0 };
+        let toolbar = rect(area.x + margin, area.y + margin, area.width - margin * 2.0, m.toolbar_height);
+        let body_y = toolbar.y + toolbar.height + gap;
+        let body_h = (area.y + area.height - margin - chooser_h - body_y).max(0.0);
+        let sidebar = rect(area.x + margin, body_y, m.sidebar_width.min(area.width * 0.4), body_h);
+        let main_x = sidebar.x + sidebar.width + gap;
+        let main_w = area.x + area.width - margin - main_x;
+        // The preview takes the right while the folder keeps room for its
+        // names and columns; a narrower window hides it.
+        let room = main_w - m.preview_width - gap >= m.preview_width + m.size_column + m.modified_column;
         let pane_w = if room && self.preview_open(&config) { m.preview_width } else { 0.0 };
-        let main = Rect { width: main.width - pane_w, ..main };
+        let main = rect(main_x, body_y, main_w - if pane_w > 0.0 { pane_w + gap } else { 0.0 }, body_h);
 
         self.drop_zones.clear();
+        paint_card(ui, list, sidebar);
         self.paint_sidebar(ui, list, sidebar, input, clicked);
-        self.paint_entries(ui, list, main, input, &inner, clicked, &config);
+        paint_card(ui, list, main);
+        let inner = rect(main.x + m.padding, main.y + m.padding * 0.5, main.width - m.padding * 2.0, main.height - m.padding);
+        let title = rect(inner.x, inner.y, inner.width, m.title_height);
+        self.paint_title(ui, list, title, input, clicked);
+        let listing = rect(inner.x, title.y + title.height, inner.width, inner.y + inner.height - title.y - title.height);
+        self.paint_entries(ui, list, listing, input, &pointer_in, clicked, &config);
         if pane_w > 0.0 {
-            self.paint_preview(ui, list, rect(main.x + main.width, body_y, pane_w, body_h), &config);
+            let pane = rect(main.x + main.width + gap, body_y, pane_w, body_h);
+            paint_card(ui, list, pane);
+            self.paint_preview(ui, list, pane, &config);
         } else if !self.preview.showing.is_empty() {
             // Hidden: its picture is not kept.
             self.preview.clear();
             self.facts = None;
         }
-        self.paint_status(ui, list, status, input, clicked);
+        self.paint_floating(ui, list, main, input, clicked);
         if let Some(mut chooser) = self.chooser.take() {
-            let bar = rect(area.x, status.y + status.height, area.width, chooser_h);
+            let bar = rect(area.x + margin, body_y + body_h + gap, area.width - margin * 2.0, m.chooser_height);
             let selected = self.selected_paths();
             chooser.paint(ui, list, bar, input, clicked, &self.dir, &selected);
             self.chooser = Some(chooser);
         }
-        list.push_rect(Rect { y: toolbar.y + toolbar.height - 1.0, height: 1.0, color: ui.theme.border_inactive, ..toolbar });
         self.paint_toolbar(ui, list, toolbar, input, clicked);
         self.paint_drag(ui, list, pointer);
         if let Some((zone, _)) = &self.hover_in {
             list.push_layer();
-            list.push_outline(Rect { radius: m.radius, color: ui.theme.primary, ..*zone }, 2.0);
+            list.push_outline(Rect { radius: m.row_radius, color: ui.theme.primary, ..*zone }, 2.0);
         }
         self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked && confirming);
 
@@ -2138,7 +2218,13 @@ impl App for Browser {
     fn tick(&mut self, _dt: f32) -> bool {
         // A running job's bar moves; the folder is looked at once a second.
         self.check_dir();
-        self.job.is_some() || std::mem::take(&mut self.repaint)
+        // A message that ran out is taken down (the loop looks at least
+        // once a second).
+        let expired = self.message.as_ref().is_some_and(|(_, _, at)| at.elapsed().as_secs_f32() >= MESSAGE_SECONDS);
+        if expired {
+            self.message = None;
+        }
+        self.job.is_some() || expired || std::mem::take(&mut self.repaint)
     }
 
     fn poll(&mut self) -> bool {
