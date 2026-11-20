@@ -760,6 +760,15 @@ desktop portal's FileChooser, ahead of GTK's.
   drag is resolved at the end of the frame and sets `repaint` for the
   frame that shows its effect. Drive it in headless sway with the
   virtual pointer's `down`, `glide` and `up`.
+- Between apps it goes through `wl_data_device` in `stratum_ui::app`
+  (`App::drag_out`, `drop_hover`, `drop_files`): a drag that reaches the
+  window's edge (the compositor keeps sending motion while the button is
+  held) is handed to the compositor with the press's serial, offering
+  `text/uri-list` and plain paths, under an SHM icon. Drops are read on
+  a thread; our own drag coming back is short-cut to its paths, since
+  reading our own pipe on the loop's thread would wait for itself.
+  Another app's files are copied, never moved. Test it with two
+  `stratum-files` windows tiled in headless sway.
 - Thumbnails (`thumbs.rs`): PNG, JPEG, WebP, GIF and BMP through `image`
   (WebP is 261 KB of the binary on its own), SVG through resvg, anything
   else through the system's `.thumbnailer` files (the Home Manager

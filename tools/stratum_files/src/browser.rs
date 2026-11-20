@@ -96,6 +96,8 @@ struct Drag {
     active: bool,
     /// What the press does if it ends as a click rather than a drag.
     on_click: Option<Click>,
+    /// The card's icon, for the drag icon if it leaves the window.
+    icon: Option<IconImage>,
 }
 
 /// A click's effect on the selection, put off until the press ends: a
@@ -171,6 +173,12 @@ pub struct Browser {
     preview: Preview,
     facts: Option<preview::Facts>,
     drag: Option<Drag>,
+    /// Items handed to the compositor as a drag to other apps, until it
+    /// ends.
+    handed_out: Vec<PathBuf>,
+    /// Files from outside dragged over the window: where, and the folder a
+    /// drop would go to.
+    hover_in: Option<(Rect, PathBuf)>,
     /// Paint again: something changed after this frame was painted.
     repaint: bool,
     /// Where dragged items can be dropped, from the last paint.
@@ -249,6 +257,8 @@ impl Browser {
             preview: Preview::default(),
             facts: None,
             drag: None,
+            handed_out: Vec::new(),
+            hover_in: None,
             repaint: false,
             drop_zones: Vec::new(),
         };
@@ -1291,6 +1301,20 @@ impl Browser {
         field.paint(ui, list, area, style, false);
     }
 
+    /// Where files dragged in from outside would go at `point`: a folder
+    /// under it, else the folder shown (not the Trash, nor in a chooser).
+    /// Our own items, handed out and come back, keep the in-window rules.
+    fn drop_target(&self, point: (f32, f32)) -> Option<(Rect, PathBuf)> {
+        let (x, y) = point;
+        let inside = |r: &Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        let ok = |dest: &Path| self.handed_out.is_empty() || dnd::valid_target(&self.handed_out, dest);
+        if let Some(zone) = self.drop_zones.iter().rev().find(|(r, p)| inside(r) && ok(p)) {
+            return Some(zone.clone());
+        }
+        let here = self.chooser.is_none() && !trash::is_trash(&self.dir) && inside(&self.viewport) && ok(&self.dir);
+        here.then(|| (self.viewport, self.dir.clone()))
+    }
+
     /// A press on the selection, which may become a drag of it. Items in
     /// the Trash, or in a chooser, are not dragged.
     fn begin_drag(&mut self, input: &InputState, on_click: Option<Click>) {
@@ -1298,7 +1322,7 @@ impl Browser {
             return;
         }
         if let Some(at) = input.pointer {
-            self.drag = Some(Drag { start: at, paths: self.selected_paths(), active: false, on_click });
+            self.drag = Some(Drag { start: at, paths: self.selected_paths(), active: false, on_click, icon: None });
         }
     }
 
@@ -1381,7 +1405,11 @@ impl Browser {
         list.push_rect(Rect { radius: m.radius, color: theme.surface_highest, ..card });
         list.push_outline(Rect { radius: m.radius, color: theme.border_inactive, ..card }, 1.0);
         let icon_box = rect(card.x + m.padding, card.y + (card.height - m.row_icon) * 0.5, m.row_icon, m.row_icon);
-        match first.and_then(|entry| self.icon(ui, &entry, m.row_icon, &ui.config.files.clone())) {
+        let icon = first.and_then(|entry| self.icon(ui, &entry, m.row_icon, &ui.config.files.clone()));
+        if let Some(drag) = &mut self.drag {
+            drag.icon = icon.clone();
+        }
+        match icon {
             Some(image) => {
                 let (image, at) = fit(image, icon_box);
                 push_image(list, image, at);
@@ -1791,8 +1819,10 @@ impl App for Browser {
         let body_h = status.y - body_y;
         let sidebar = rect(area.x, body_y, m.sidebar_width.min(area.width * 0.4), body_h);
         let main = rect(sidebar.x + sidebar.width, body_y, area.width - sidebar.width, body_h);
-        // The preview pane takes the right, if the folder keeps half.
-        let pane_w = if self.preview_shown { m.preview_width.min(main.width * 0.5) } else { 0.0 };
+        // The preview pane takes the right while the folder keeps room for
+        // its names and columns; a narrower window hides it.
+        let room = main.width - m.preview_width >= m.preview_width + m.size_column + m.modified_column;
+        let pane_w = if self.preview_shown && room { m.preview_width } else { 0.0 };
         let main = Rect { width: main.width - pane_w, ..main };
 
         self.drop_zones.clear();
@@ -1815,6 +1845,10 @@ impl App for Browser {
         list.push_rect(Rect { y: toolbar.y + toolbar.height - 1.0, height: 1.0, color: ui.theme.border_inactive, ..toolbar });
         self.paint_toolbar(ui, list, toolbar, input, clicked);
         self.paint_drag(ui, list, pointer);
+        if let Some((zone, _)) = &self.hover_in {
+            list.push_layer();
+            list.push_outline(Rect { radius: m.radius, color: ui.theme.primary, ..*zone }, 2.0);
+        }
         self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked && confirming);
 
         // The menu, over everything.
@@ -2032,6 +2066,61 @@ impl App for Browser {
             chooser.cancel();
         }
         true
+    }
+
+    fn drag_out(&mut self) -> Option<stratum_ui::app::DragOut> {
+        let drag = self.drag.take().filter(|d| d.active)?;
+        self.handed_out = drag.paths.clone();
+        self.repaint = true;
+        Some(stratum_ui::app::DragOut { paths: drag.paths, icon: drag.icon })
+    }
+
+    fn drag_out_ended(&mut self, _taken: bool) {
+        // Another app may have moved them: the folder is read again.
+        self.handed_out.clear();
+        self.hover_in = None;
+        self.reload();
+        self.repaint = true;
+    }
+
+    fn drop_hover(&mut self, point: Option<(f32, f32)>) -> Option<stratum_ui::app::DropAction> {
+        self.hover_in = point.and_then(|p| self.drop_target(p));
+        let (_, dest) = self.hover_in.as_ref()?;
+        if trash::is_trash(dest) {
+            return Some(stratum_ui::app::DropAction::Move);
+        }
+        // Another app's files are copied: what they are is known only at
+        // the drop, and a copy never loses them. Our own follow the
+        // in-window rule.
+        if self.handed_out.is_empty() {
+            return Some(stratum_ui::app::DropAction::Copy);
+        }
+        let dev = |p: &Path| std::fs::metadata(p).ok().map(|m| std::os::unix::fs::MetadataExt::dev(&m));
+        Some(match dnd::action(&self.handed_out, dest, false, false, dev) {
+            dnd::DropAction::Move => stratum_ui::app::DropAction::Move,
+            dnd::DropAction::Copy => stratum_ui::app::DropAction::Copy,
+        })
+    }
+
+    fn drop_files(&mut self, point: (f32, f32), paths: Vec<PathBuf>, action: stratum_ui::app::DropAction) {
+        self.hover_in = None;
+        self.repaint = true;
+        let Some((_, dest)) = self.drop_target(point) else { return };
+        let paths: Vec<PathBuf> = paths.into_iter().filter(|p| dnd::valid_target(std::slice::from_ref(p), &dest)).collect();
+        if paths.is_empty() {
+            return;
+        }
+        if trash::is_trash(&dest) {
+            return self.trash_paths(paths);
+        }
+        if self.job.is_some() {
+            return self.say("Wait for the copy or move to finish, or cancel it".into(), true);
+        }
+        let kind = match action {
+            stratum_ui::app::DropAction::Move => ops::Kind::Move,
+            stratum_ui::app::DropAction::Copy => ops::Kind::Copy,
+        };
+        self.start_job(kind, paths, dest);
     }
 }
 

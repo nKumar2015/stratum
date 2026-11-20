@@ -11,6 +11,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
+use smithay_client_toolkit::data_device_manager::data_device::{DataDevice, DataDeviceHandler};
+use smithay_client_toolkit::data_device_manager::data_offer::{DataOfferHandler, DragOffer};
+use smithay_client_toolkit::data_device_manager::data_source::{DataSourceHandler, DragSource};
+use smithay_client_toolkit::data_device_manager::{DataDeviceManagerState, WritePipe};
+use smithay_client_toolkit::reexports::client::protocol::wl_data_device::WlDataDevice;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_source::WlDataSource;
+use smithay_client_toolkit::reexports::client::protocol::wl_shm;
+use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
+use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::calloop::{self, EventLoop};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
@@ -30,7 +40,7 @@ use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
 use wayland_client::{Connection, QueueHandle};
 
 use crate::config::{AppearanceConfig, Config, ConfigSource, Theme};
-use crate::icons::IconTheme;
+use crate::icons::{IconImage, IconTheme};
 use crate::render::display_list::{Color, DisplayList, Rect};
 use crate::render::{Gpu, SurfaceRenderer};
 use crate::style::Metrics;
@@ -110,6 +120,33 @@ impl Waker {
     }
 }
 
+/// Files dragged out of the window, for other apps to take.
+pub struct DragOut {
+    pub paths: Vec<std::path::PathBuf>,
+    /// Shown under the pointer while dragging, in physical pixels at the
+    /// window's scale.
+    pub icon: Option<IconImage>,
+}
+
+/// What a drop does with the files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropAction {
+    Copy,
+    Move,
+}
+
+/// The URI list a drag carries as `text/uri-list`: one URI a line, CRLF
+/// ended.
+pub fn uri_list(paths: &[std::path::PathBuf]) -> String {
+    paths.iter().map(|p| format!("{}\r\n", crate::uri::from_path(p))).collect()
+}
+
+/// The local files in a `text/uri-list`; comments and other schemes are
+/// left out.
+pub fn parse_uri_list(text: &str) -> Vec<std::path::PathBuf> {
+    text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).filter_map(crate::uri::to_path).collect()
+}
+
 /// What an app asks after a key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -145,6 +182,22 @@ pub trait App {
     fn close_requested(&mut self) -> bool {
         true
     }
+    /// The pointer left the window while pressed: the files being dragged,
+    /// if a drag is under way, to hand to other apps. The app's own drag
+    /// ends here; the compositor carries it on.
+    fn drag_out(&mut self) -> Option<DragOut> {
+        None
+    }
+    /// The drag handed out is over: `true` if an app (this one included)
+    /// took the files.
+    fn drag_out_ended(&mut self, _taken: bool) {}
+    /// Files are dragged over the window at `point` (`None`: they left):
+    /// what a drop there would do, or `None` to refuse it there.
+    fn drop_hover(&mut self, _point: Option<(f32, f32)>) -> Option<DropAction> {
+        None
+    }
+    /// Files dropped at `point`.
+    fn drop_files(&mut self, _point: (f32, f32), _paths: Vec<std::path::PathBuf>, _action: DropAction) {}
 }
 
 /// The window to open.
@@ -217,9 +270,31 @@ struct Runner<A: App + 'static> {
 
     pointer: Pointer,
     last_press: Option<(Instant, (f32, f32))>,
+    /// The serial of the primary press, which a drag out must name.
+    press_serial: Option<u32>,
+    /// This press already asked the app for a drag out.
+    asked_out: bool,
+    shm: Option<Shm>,
+    data_devices: Option<DataDeviceManagerState>,
+    data_device: Option<DataDevice>,
+    outgoing: Option<Outgoing>,
+    /// A drop being read from its source, finished when the reader thread
+    /// hands over the paths.
+    pending_drop: Option<(DragOffer, (f32, f32), DropAction)>,
+    received: Arc<std::sync::Mutex<Option<Vec<std::path::PathBuf>>>>,
+    ping: calloop::ping::Ping,
     modifiers: Modifiers,
     quit: bool,
     last_frame: Instant,
+}
+
+/// A drag handed to the compositor: its source and its icon.
+struct Outgoing {
+    paths: Vec<std::path::PathBuf>,
+    /// Dropping it destroys the source.
+    _source: DragSource,
+    /// The surface, its pool and buffer stay while the drag lasts.
+    _icon: Option<(wl_surface::WlSurface, SlotPool, Buffer)>,
 }
 
 /// Open the window and run `app` until it quits or the window closes.
@@ -237,6 +312,7 @@ pub fn run<A: App + 'static>(app: A, options: Options) -> Result<(), String> {
     let display = NonNull::new(conn.backend().display_ptr().cast::<std::ffi::c_void>()).ok_or("wl_display pointer was null")?;
 
     let compositor = CompositorState::bind(&globals, &qh).map_err(|e| format!("no wl_compositor: {e}"))?;
+    let (ping, ping_source) = calloop::ping::make_ping().map_err(|e| e.to_string())?;
     let xdg_shell = XdgShell::bind(&globals, &qh).map_err(|e| format!("no xdg-shell: {e}"))?;
     let surface = compositor.create_surface(&qh);
     let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
@@ -270,12 +346,20 @@ pub fn run<A: App + 'static>(app: A, options: Options) -> Result<(), String> {
         title: options.title,
         pointer: Pointer::default(),
         last_press: None,
+        press_serial: None,
+        asked_out: false,
+        shm: Shm::bind(&globals, &qh).ok(),
+        data_devices: DataDeviceManagerState::bind(&globals, &qh).ok(),
+        data_device: None,
+        outgoing: None,
+        pending_drop: None,
+        received: Arc::default(),
+        ping: ping.clone(),
         modifiers: Modifiers::default(),
         quit: false,
         last_frame: Instant::now(),
     };
 
-    let (ping, ping_source) = calloop::ping::make_ping().map_err(|e| e.to_string())?;
     loop_handle
         .insert_source(ping_source, |(), _, runner: &mut Runner<A>| {
             if runner.app.poll() {
@@ -302,6 +386,7 @@ pub fn run<A: App + 'static>(app: A, options: Options) -> Result<(), String> {
         if runner.app.poll() {
             runner.dirty = true;
         }
+        runner.finish_drop();
         runner.reload_look();
         if let Err(err) = runner.paint() {
             tracing::error!("render failed: {err}");
@@ -396,6 +481,66 @@ impl<A: App + 'static> Runner<A> {
         }
     }
 
+    /// Hand the app's drag to the compositor, so other apps can take it.
+    fn start_drag_out(&mut self, qh: &QueueHandle<Self>, out: DragOut) {
+        let (Some(manager), Some(device), Some(serial)) = (&self.data_devices, &self.data_device, self.press_serial) else {
+            self.app.drag_out_ended(false);
+            return;
+        };
+        let source = manager.create_drag_and_drop_source(qh, ["text/uri-list", "text/plain;charset=utf-8"], DndAction::Copy | DndAction::Move);
+        let icon = out.icon.as_ref().and_then(|image| self.icon_surface(qh, image));
+        source.start_drag(device, self.window.wl_surface(), icon.as_ref().map(|(surface, ..)| surface), serial);
+        if let Some((surface, ..)) = &icon {
+            surface.commit();
+        }
+        // The compositor has the pointer now; its release ends the drag
+        // there, not here.
+        self.pointer.input.pressed = false;
+        self.outgoing = Some(Outgoing { paths: out.paths, _source: source, _icon: icon });
+    }
+
+    /// A surface showing `image`, for a drag's icon.
+    fn icon_surface(&self, qh: &QueueHandle<Self>, image: &IconImage) -> Option<(wl_surface::WlSurface, SlotPool, Buffer)> {
+        let shm = self.shm.as_ref()?;
+        let (w, h) = (image.width as i32, image.height as i32);
+        let mut pool = SlotPool::new((w * h * 4) as usize, shm).ok()?;
+        let (buffer, canvas) = pool.create_buffer(w, h, w * 4, wl_shm::Format::Argb8888).ok()?;
+        // Premultiplied RGBA to ARGB8888, which is BGRA in memory.
+        for (dst, src) in canvas.chunks_exact_mut(4).zip(image.pixels.chunks_exact(4)) {
+            dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+        }
+        let surface = self._compositor.create_surface(qh);
+        surface.set_buffer_scale(self.scale.max(1));
+        buffer.attach_to(&surface).ok()?;
+        surface.damage_buffer(0, 0, w, h);
+        Some((surface, pool, buffer))
+    }
+
+    /// Files dragged over the window: ask the app, and tell the source
+    /// whether a drop here is wanted and how.
+    fn drop_hover(&mut self) {
+        let Some(offer) = self.data_device.as_ref().and_then(|d| d.data().drag_offer()) else { return };
+        let files = offer.with_mime_types(|types| types.iter().any(|t| t == "text/uri-list"));
+        let action = if files { self.app.drop_hover(Some((offer.x as f32, offer.y as f32))) } else { None };
+        offer.accept_mime_type(offer.serial, action.map(|_| "text/uri-list".to_string()));
+        match action {
+            Some(DropAction::Move) => offer.set_actions(DndAction::Copy | DndAction::Move, DndAction::Move),
+            Some(DropAction::Copy) => offer.set_actions(DndAction::Copy | DndAction::Move, DndAction::Copy),
+            None => offer.set_actions(DndAction::empty(), DndAction::empty()),
+        }
+        self.dirty = true;
+    }
+
+    /// The files of a drop that was read on a thread.
+    fn finish_drop(&mut self) {
+        let Some(paths) = self.received.lock().ok().and_then(|mut r| r.take()) else { return };
+        let Some((offer, point, action)) = self.pending_drop.take() else { return };
+        offer.finish();
+        offer.destroy();
+        self.app.drop_files(point, paths, action);
+        self.dirty = true;
+    }
+
     fn key_event(&mut self, event: KeyEvent, repeat: bool) {
         let key = Key {
             keysym: event.keysym,
@@ -470,6 +615,9 @@ impl<A: App + 'static> SeatHandler for Runner<A> {
     }
     fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
     fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
+        if self.data_device.is_none() {
+            self.data_device = self.data_devices.as_ref().map(|m| m.get_data_device(qh, &seat));
+        }
         if capability == Capability::Pointer {
             if let Ok(pointer) = self.seat_state.get_pointer(qh, &seat) {
                 self.cursor_device = self.cursor_shapes.as_ref().map(|m| m.get_shape_device(&pointer, qh));
@@ -523,7 +671,7 @@ impl<A: App + 'static> KeyboardHandler for Runner<A> {
 }
 
 impl<A: App + 'static> PointerHandler for Runner<A> {
-    fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+    fn pointer_frame(&mut self, _: &Connection, qh: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
         for event in events {
             let point = (event.position.0 as f32, event.position.1 as f32);
             match &event.kind {
@@ -537,8 +685,23 @@ impl<A: App + 'static> PointerHandler for Runner<A> {
                     }
                 }
                 PointerEventKind::Leave { .. } => self.pointer.input.pointer = None,
-                PointerEventKind::Motion { .. } => self.pointer.input.pointer = Some(point),
-                PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
+                PointerEventKind::Motion { .. } => {
+                    self.pointer.input.pointer = Some(point);
+                    // Held past the window's edge: the compositor keeps
+                    // sending motion here, and a drag under way can go on
+                    // to other apps.
+                    let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+                    let outside = point.0 < 0.0 || point.1 < 0.0 || point.0 >= w || point.1 >= h;
+                    if self.pointer.input.pressed && outside && !self.asked_out && self.outgoing.is_none() {
+                        self.asked_out = true;
+                        if let Some(out) = self.app.drag_out() {
+                            self.start_drag_out(qh, out);
+                        }
+                    }
+                }
+                PointerEventKind::Press { button, serial, .. } if *button == BTN_LEFT => {
+                    self.press_serial = Some(*serial);
+                    self.asked_out = false;
                     self.pointer.input.pointer = Some(point);
                     self.pointer.input.pressed = true;
                     self.pointer.clicked = true;
@@ -573,6 +736,108 @@ impl<A: App + 'static> PointerHandler for Runner<A> {
     }
 }
 
+impl<A: App + 'static> ShmHandler for Runner<A> {
+    fn shm_state(&mut self) -> &mut Shm {
+        self.shm.as_mut().expect("bound before any shm event")
+    }
+}
+
+impl<A: App + 'static> DataDeviceHandler for Runner<A> {
+    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64, _: &wl_surface::WlSurface) {
+        self.drop_hover();
+    }
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+        self.app.drop_hover(None);
+        self.dirty = true;
+    }
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {
+        self.drop_hover();
+    }
+    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {
+        let Some(offer) = self.data_device.as_ref().and_then(|d| d.data().drag_offer()) else { return };
+        let point = (offer.x as f32, offer.y as f32);
+        let action = if offer.selected_action.contains(DndAction::Move) {
+            DropAction::Move
+        } else if offer.selected_action.contains(DndAction::Copy) {
+            DropAction::Copy
+        } else {
+            // Refused here: nothing to read.
+            offer.destroy();
+            self.app.drop_hover(None);
+            return;
+        };
+        // Our own drag, come back: its files are known, and reading our own
+        // pipe on this thread would wait for ourselves.
+        if let Some(out) = &self.outgoing {
+            let paths = out.paths.clone();
+            offer.finish();
+            offer.destroy();
+            self.app.drop_files(point, paths, action);
+            self.dirty = true;
+            return;
+        }
+        match offer.receive("text/uri-list".into()) {
+            Ok(mut pipe) => {
+                let received = Arc::clone(&self.received);
+                let ping = self.ping.clone();
+                std::thread::spawn(move || {
+                    use std::io::Read;
+                    let mut text = String::new();
+                    // A source that never closes its end would hold this
+                    // thread, not the window.
+                    let _ = pipe.read_to_string(&mut text);
+                    if let Ok(mut slot) = received.lock() {
+                        *slot = Some(parse_uri_list(&text));
+                    }
+                    ping.ping();
+                });
+                self.pending_drop = Some((offer, point, action));
+            }
+            Err(err) => {
+                tracing::warn!("drop not read: {err}");
+                offer.destroy();
+                self.app.drop_hover(None);
+            }
+        }
+    }
+}
+
+impl<A: App + 'static> DataOfferHandler for Runner<A> {
+    fn source_actions(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+    fn selected_action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+}
+
+impl<A: App + 'static> DataSourceHandler for Runner<A> {
+    fn accept_mime(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: Option<String>) {}
+    fn send_request(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, mime: String, mut fd: WritePipe) {
+        let Some(out) = &self.outgoing else { return };
+        let text = if mime == "text/uri-list" {
+            uri_list(&out.paths)
+        } else {
+            out.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")
+        };
+        // On a thread: a long list fills the pipe until the other app
+        // reads it.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = fd.write_all(text.as_bytes());
+        });
+    }
+    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {
+        self.outgoing = None;
+        self.app.drag_out_ended(false);
+        self.dirty = true;
+    }
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {
+        self.outgoing = None;
+        self.app.drag_out_ended(true);
+        self.dirty = true;
+    }
+    fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
+}
+
 impl<A: App + 'static> ProvidesRegistryState for Runner<A> {
     fn registry(&mut self) -> &mut RegistryState {
         &mut self.registry_state
@@ -582,3 +847,19 @@ impl<A: App + 'static> ProvidesRegistryState for Runner<A> {
 
 delegate_dispatch2!(@<A: App + 'static> Runner<A>);
 delegate_registry!(@<A: App + 'static> Runner<A>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn uri_lists_round_trip_and_skip_what_is_not_a_file() {
+        let paths = vec![PathBuf::from("/home/me/a b.txt"), PathBuf::from("/tmp/#x")];
+        let text = uri_list(&paths);
+        assert_eq!(text, "file:///home/me/a%20b.txt\r\nfile:///tmp/%23x\r\n");
+        assert_eq!(parse_uri_list(&text), paths);
+        let mixed = "# a comment\r\nhttps://example.org/x\r\nfile:///etc/hosts\n\n";
+        assert_eq!(parse_uri_list(mixed), [PathBuf::from("/etc/hosts")]);
+    }
+}
