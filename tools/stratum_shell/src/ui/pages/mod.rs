@@ -20,7 +20,7 @@ pub mod devices;
 pub mod display;
 pub mod equalizer;
 pub mod idle_settings;
-pub mod layout;
+pub use stratum_ui::widgets::layout;
 pub mod mixer;
 pub mod network_extras;
 pub mod night_light;

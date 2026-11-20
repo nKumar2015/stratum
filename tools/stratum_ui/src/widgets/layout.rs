@@ -14,7 +14,8 @@
 //! renderer.
 
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
-use crate::ui::{self, InputState, PaintCtx};
+use crate::widgets::draw as ui;
+use crate::widgets::{InputState, Ui};
 
 /// A rect with no fill or radius.
 pub fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
@@ -86,14 +87,14 @@ pub fn hovered(input: &InputState, rect: Rect) -> bool {
 /// Draw the page title and its summary line. Returns the header's own rect,
 /// so a page can put buttons at its right, and the body below it.
 pub fn header(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     area: Rect,
     title: &str,
     summary: &str,
 ) -> (Rect, Rect) {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
+    let m = ctx.metrics().page.clone();
+    let typo = ctx.metrics().typography.clone();
     let title_h = m.title * 1.3;
     let summary_h = m.summary * 1.5;
     let height = title_h + m.header_gap + summary_h;
@@ -106,7 +107,7 @@ pub fn header(
         rect(area.x, area.y, area.width, title_h),
         m.title,
         typo.weight_bold,
-        ctx.theme.text_main,
+        ctx.theme().text_main,
     );
     if !summary.is_empty() {
         let line = ui::elide(ctx, summary, m.summary, typo.weight_regular, area.width);
@@ -118,7 +119,7 @@ pub fn header(
             rect(area.x, area.y + title_h + m.header_gap, area.width, summary_h),
             m.summary,
             typo.weight_regular,
-            ctx.theme.text_muted,
+            ctx.theme().text_muted,
         );
     }
     let top = area.y + height + m.header_bottom;
@@ -126,19 +127,19 @@ pub fn header(
 }
 
 /// A section label at `y`. Returns the y where the section's cards start.
-pub fn section(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, area: Rect, y: f32, label: &str) -> f32 {
-    let height = ctx.metrics.page.section_label_height;
+pub fn section(ctx: &mut impl Ui, list: &mut DisplayList, area: Rect, y: f32, label: &str) -> f32 {
+    let height = ctx.metrics().page.section_label_height;
     ui::paint_text_vcentered(
         ctx,
         list,
         label,
         area.x,
         rect(area.x, y, area.width, height),
-        ctx.metrics.typography.label,
-        ctx.metrics.typography.weight_bold,
-        ctx.theme.text_muted,
+        ctx.metrics().typography.label,
+        ctx.metrics().typography.weight_bold,
+        ctx.theme().text_muted,
     );
-    y + height + ctx.metrics.page.label_gap
+    y + height + ctx.metrics().page.label_gap
 }
 
 /// How a card is drawn.
@@ -155,9 +156,9 @@ pub enum Card {
 }
 
 /// Draw a card in `style`.
-pub fn card(ctx: &PaintCtx<'_>, list: &mut DisplayList, rect: Rect, style: Card) {
-    let m = &ctx.metrics.page;
-    let theme = ctx.theme;
+pub fn card(ctx: &impl Ui, list: &mut DisplayList, rect: Rect, style: Card) {
+    let m = &ctx.metrics().page;
+    let theme = ctx.theme();
     let rect = Rect { radius: m.card_radius, ..rect };
     let (fill, border, width) = match style {
         Card::Plain => (theme.surface_high, theme.outline, m.outline),
@@ -176,7 +177,7 @@ pub fn card(ctx: &PaintCtx<'_>, list: &mut DisplayList, rect: Rect, style: Card)
         ),
     };
     list.push_rect(Rect { color: fill, ..rect });
-    if ctx.appearance.framed_border || style != Card::Plain {
+    if ctx.appearance().framed_border || style != Card::Plain {
         ui::stroke_rounded(list, rect, border, width);
     }
 }
@@ -193,8 +194,8 @@ pub fn clickable(input: &InputState, rect: Rect, active: bool) -> Card {
 }
 
 /// A round badge with a glyph centred in it, its top-left at `(x, y)`.
-pub fn badge(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, x: f32, y: f32, glyph: &str, fg: Color, bg: Color) {
-    let m = ctx.metrics.page.clone();
+pub fn badge(ctx: &mut impl Ui, list: &mut DisplayList, x: f32, y: f32, glyph: &str, fg: Color, bg: Color) {
+    let m = ctx.metrics().page.clone();
     let circle = Rect {
         radius: m.badge * 0.5,
         color: bg,
@@ -208,7 +209,7 @@ pub fn badge(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, x: f32, y: f32, gly
 /// it with `accent` (a mute that is engaged). Returns whether it was clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn icon_button(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -218,8 +219,8 @@ pub fn icon_button(
     input: &InputState,
     clicked: bool,
 ) -> bool {
-    let m = ctx.metrics.page.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let theme = ctx.theme().clone();
     let area = rect(x, y, m.badge, m.badge);
     let hot = hovered(input, area);
     let (fg, bg) = match (on, hot) {
@@ -232,16 +233,16 @@ pub fn icon_button(
 }
 
 /// How wide [`text_button`] draws `label`.
-pub fn text_button_width(ctx: &mut PaintCtx<'_>, label: &str) -> f32 {
-    let size = ctx.metrics.typography.caption;
-    ctx.measure(label, size) + ctx.metrics.page.card_padding * 2.0
+pub fn text_button_width(ctx: &mut impl Ui, label: &str) -> f32 {
+    let size = ctx.metrics().typography.caption;
+    ctx.measure(label, size) + ctx.metrics().page.card_padding * 2.0
 }
 
 /// A pill with a label, badge-high, its top-left at `(x, y)`. A disabled
 /// one is drawn faded and ignores clicks. Returns whether it was clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn text_button(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -258,7 +259,7 @@ pub fn text_button(
 /// whether it was clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn chip(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -272,7 +273,7 @@ pub fn chip(
 
 #[allow(clippy::too_many_arguments)]
 fn pill(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -282,9 +283,9 @@ fn pill(
     input: &InputState,
     clicked: bool,
 ) -> bool {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let typo = ctx.metrics().typography.clone();
+    let theme = ctx.theme().clone();
     let area = rect(x, y, text_button_width(ctx, label), m.badge);
     let hot = enabled && hovered(input, area);
     let fill = match (enabled, selected, hot) {
@@ -320,7 +321,7 @@ fn pill(
 /// leftmost, and the index of the one clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn text_buttons(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     right: f32,
     y: f32,
@@ -329,7 +330,7 @@ pub fn text_buttons(
     input: &InputState,
     clicked: bool,
 ) -> (f32, Option<usize>) {
-    let gap = ctx.metrics.page.grid_gap * 0.5;
+    let gap = ctx.metrics().page.grid_gap * 0.5;
     let mut x = right;
     let mut hit = None;
     for (i, label) in labels.iter().enumerate().rev() {
@@ -347,7 +348,7 @@ pub fn text_buttons(
 /// index clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn chip_flow(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -357,8 +358,8 @@ pub fn chip_flow(
     input: &InputState,
     clicked: bool,
 ) -> (f32, Option<usize>) {
-    let gap = ctx.metrics.page.grid_gap * 0.5;
-    let height = ctx.metrics.page.badge;
+    let gap = ctx.metrics().page.grid_gap * 0.5;
+    let height = ctx.metrics().page.badge;
     let (mut cx, mut cy) = (x, y);
     let mut hit = None;
     for (i, label) in labels.iter().enumerate() {
@@ -379,7 +380,7 @@ pub fn chip_flow(
 /// framed box. Returns whether it was clicked; the owner keeps whether it is
 /// open and paints [`dropdown_list`] last, so the list lies over the page.
 pub fn dropdown(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     rect: Rect,
     label: &str,
@@ -387,9 +388,9 @@ pub fn dropdown(
     input: &InputState,
     clicked: bool,
 ) -> bool {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let typo = ctx.metrics().typography.clone();
+    let theme = ctx.theme().clone();
     let hot = hovered(input, rect);
     let face = Rect { radius: m.button_radius, ..rect };
     let fill = if hot { mix(theme.surface_highest, theme.text_main, 0.06) } else { theme.surface_highest };
@@ -407,12 +408,12 @@ pub fn dropdown(
 }
 
 /// How wide a [`dropdown`] must be to show the longest of `options`.
-pub fn dropdown_width(ctx: &mut PaintCtx<'_>, options: &[String], height: f32) -> f32 {
-    let size = ctx.metrics.typography.body;
+pub fn dropdown_width(ctx: &mut impl Ui, options: &[String], height: f32) -> f32 {
+    let size = ctx.metrics().typography.body;
     let widest = options.iter().map(|o| ctx.measure(o, size)).fold(0.0, f32::max);
     // A pixel of slack: the face takes the padding off again, and rounding
     // could leave the widest option a hair short, which elides it.
-    (widest + ctx.metrics.page.card_padding * 0.75 + height).ceil() + 1.0
+    (widest + ctx.metrics().page.card_padding * 0.75 + height).ceil() + 1.0
 }
 
 /// An open dropdown's options, in a card below `anchor`. Paint it after
@@ -426,7 +427,7 @@ pub fn dropdown_width(ctx: &mut PaintCtx<'_>, options: &[String], height: f32) -
 /// under it next frame, and the option clicked.
 #[allow(clippy::too_many_arguments)]
 pub fn dropdown_list(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     anchor: Rect,
     options: &[String],
@@ -435,9 +436,9 @@ pub fn dropdown_list(
     input: &InputState,
     clicked: bool,
 ) -> (Rect, Option<usize>) {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let typo = ctx.metrics().typography.clone();
+    let theme = ctx.theme().clone();
     let inset = m.label_gap * 0.5;
     let row_h = m.editor_row_height;
     let pad = m.card_padding * 0.75;
@@ -527,7 +528,7 @@ pub fn scroll_list(scroll: &mut Option<f32>, delta: f32) {
 /// whether the pointer is over it.
 #[allow(clippy::too_many_arguments)]
 pub fn list_row(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     row: Rect,
     glyph: &str,
@@ -547,7 +548,7 @@ pub fn list_row(
 /// (one that expands below this line).
 #[allow(clippy::too_many_arguments)]
 pub fn row_content(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     row: Rect,
     glyph: &str,
@@ -556,8 +557,8 @@ pub fn row_content(
     trailing: Option<&str>,
     active: bool,
 ) {
-    let m = ctx.metrics.page.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let theme = ctx.theme().clone();
     let pad = m.card_padding;
     let (fg, bg) = if active {
         (theme.on_primary, theme.primary)
@@ -581,7 +582,7 @@ pub fn row_content(
 /// selected option). Returns whether the pointer is over it.
 #[allow(clippy::too_many_arguments)]
 pub fn tile(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     cell: Rect,
     glyph: &str,
@@ -590,8 +591,8 @@ pub fn tile(
     on: bool,
     input: &InputState,
 ) -> bool {
-    let m = ctx.metrics.page.clone();
-    let theme = ctx.theme.clone();
+    let m = ctx.metrics().page.clone();
+    let theme = ctx.theme().clone();
     let hot = hovered(input, cell);
     card(ctx, list, cell, clickable(input, cell, on));
 
@@ -619,14 +620,14 @@ pub fn tile(
 /// A bold line over a caption, centred vertically in `area` and cut to its
 /// width.
 pub fn two_lines(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     area: Rect,
     title: &str,
     caption: &str,
     caption_color: Color,
 ) {
-    let typo = ctx.metrics.typography.clone();
+    let typo = ctx.metrics().typography.clone();
     let line = typo.line(typo.body);
     let caption_h = typo.line(typo.caption);
     let top = area.y + (area.height - line - caption_h) * 0.5;
@@ -639,7 +640,7 @@ pub fn two_lines(
         rect(area.x, top, area.width, line),
         typo.body,
         typo.weight_bold,
-        ctx.theme.text_main,
+        ctx.theme().text_main,
     );
     let caption = ui::elide(ctx, caption, typo.caption, typo.weight_regular, area.width);
     ui::paint_text_vcentered(
@@ -655,9 +656,9 @@ pub fn two_lines(
 }
 
 /// A card with a small label over a value, for facts that are not controls.
-pub fn info_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect, label: &str, value: &str) {
-    let m = ctx.metrics.page.clone();
-    let typo = ctx.metrics.typography.clone();
+pub fn info_card(ctx: &mut impl Ui, list: &mut DisplayList, cell: Rect, label: &str, value: &str) {
+    let m = ctx.metrics().page.clone();
+    let typo = ctx.metrics().typography.clone();
     card(ctx, list, cell, Card::Plain);
     let pad = m.card_padding;
     let width = cell.width - pad * 2.0;
@@ -673,7 +674,7 @@ pub fn info_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect, lab
         rect(cell.x, top, cell.width, label_h),
         typo.label,
         typo.weight_regular,
-        ctx.theme.text_muted,
+        ctx.theme().text_muted,
     );
     let value = ui::elide(ctx, value, typo.body, typo.weight_bold, width);
     ui::paint_text_vcentered(
@@ -684,15 +685,15 @@ pub fn info_card(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, cell: Rect, lab
         rect(cell.x, top + label_h, cell.width, value_h),
         typo.body,
         typo.weight_bold,
-        ctx.theme.text_main,
+        ctx.theme().text_main,
     );
 }
 
 /// A horizontal meter filled to `fraction`.
-pub fn meter(ctx: &PaintCtx<'_>, list: &mut DisplayList, rect: Rect, fraction: f32, color: Color) {
+pub fn meter(ctx: &impl Ui, list: &mut DisplayList, rect: Rect, fraction: f32, color: Color) {
     let track = Rect {
         radius: rect.height * 0.5,
-        color: ctx.theme.surface_highest,
+        color: ctx.theme().surface_highest,
         ..rect
     };
     list.push_rect(track);

@@ -71,12 +71,7 @@ pub fn location(config: &NightLightConfig) -> Option<Location> {
     Some(Location { latitude: found["latitude"].as_f64()?, longitude: found["longitude"].as_f64()? })
 }
 
-/// `"HH:MM"` as minutes after midnight.
-pub fn parse_time(text: &str) -> Option<u32> {
-    let (h, m) = text.split_once(':')?;
-    let (h, m): (u32, u32) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
-    (h < 24 && m < 60).then_some(h * 60 + m)
-}
+pub use crate::config::parse_time;
 
 /// Minutes after midnight as `"HH:MM"`.
 pub fn format_time(minutes: u32) -> String {

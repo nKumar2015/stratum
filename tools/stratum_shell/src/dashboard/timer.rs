@@ -300,6 +300,17 @@ pub fn parse_duration(text: &str) -> Option<Duration> {
     (number.is_empty() && total > 0).then(|| Duration::from_secs(total))
 }
 
+/// The Pomodoro cycle `[dashboard.timer]` sets.
+pub fn pomodoro(config: &crate::config::TimerConfig) -> Pomodoro {
+    let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
+    Pomodoro {
+        work: minutes(config.work_min),
+        short_break: minutes(config.break_min),
+        long_break: minutes(config.long_break_min),
+        rounds: config.rounds,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,3 +422,4 @@ mod tests {
         assert_eq!(timer.progress(t0), None);
     }
 }
+

@@ -2041,20 +2041,15 @@ dependencies = [
  "bytemuck",
  "calloop",
  "chrono",
- "cosmic-text",
- "fontdb",
  "futures-lite",
  "image",
  "libc",
- "lyon",
  "pollster",
- "raw-window-handle",
- "resvg",
  "serde",
  "serde_json",
  "smithay-client-toolkit",
  "stratum_sys",
- "swash",
+ "stratum_ui",
  "tokio",
  "toml",
  "tracing",
@@ -2062,7 +2057,6 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
- "wgpu",
  "zbus",
 ]
 
@@ -2081,6 +2075,30 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
+]
+
+[[package]]
+name = "stratum_ui"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "chrono",
+ "cosmic-text",
+ "fontdb",
+ "image",
+ "libc",
+ "lyon",
+ "pollster",
+ "raw-window-handle",
+ "resvg",
+ "serde",
+ "serde_json",
+ "smithay-client-toolkit",
+ "swash",
+ "toml",
+ "tracing",
+ "wayland-client",
+ "wgpu",
 ]
 
 [[package]]

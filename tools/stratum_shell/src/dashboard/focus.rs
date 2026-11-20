@@ -153,7 +153,7 @@ impl Focus {
         match (function, arg) {
             ("start", None) if self.timer.active() && !self.timer.finished(now) => self.timer.resume(now),
             ("start", None) => return Err("no timer to resume: give a length (25m, 90s, 1h30m), pomodoro or stopwatch".into()),
-            ("start", Some("pomodoro")) => self.timer.start_pomodoro(config.pomodoro(), now),
+            ("start", Some("pomodoro")) => self.timer.start_pomodoro(crate::dashboard::timer::pomodoro(config), now),
             ("start", Some("stopwatch")) => self.timer.start_stopwatch(now),
             ("start", Some(length)) => match timer::parse_duration(length) {
                 Some(length) => self.timer.start_countdown(length, now),
@@ -184,7 +184,7 @@ impl Focus {
             Button::ClearDone => self.clear_done(),
             Button::TimerPreset(minutes) => self.timer.start_countdown(Duration::from_secs(minutes * 60), now),
             Button::Stopwatch => self.timer.start_stopwatch(now),
-            Button::Pomodoro => self.timer.start_pomodoro(config.pomodoro(), now),
+            Button::Pomodoro => self.timer.start_pomodoro(crate::dashboard::timer::pomodoro(config), now),
             Button::TimerToggle => self.timer.toggle(now),
             Button::TimerReset => self.timer.reset(),
             Button::TimerAdd => self.timer.add(Duration::from_secs(60), now),

@@ -1111,7 +1111,7 @@ fn path_hash(path: &Path) -> u64 {
 ///
 /// There is no CPU copy of it: an entry is written once, uploaded with its
 /// gutter from a staging buffer, and never read back.
-pub(crate) struct Atlas {
+pub struct Atlas {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     packer: ShelfPacker,
@@ -1199,7 +1199,7 @@ impl Atlas {
     }
 
     /// Upload an RGBA image and return its UV rect.
-    pub(crate) fn upload_rgba(
+    pub fn upload_rgba(
         &mut self,
         queue: &wgpu::Queue,
         pixels: &[u8],
@@ -1216,7 +1216,7 @@ impl Atlas {
     }
 
     /// Upload an 8-bit glyph mask as white-with-coverage RGBA.
-    pub(crate) fn upload_mask(&mut self, queue: &wgpu::Queue, glyph: &RasterGlyph) -> Option<(f32, f32, f32, f32)> {
+    pub fn upload_mask(&mut self, queue: &wgpu::Queue, glyph: &RasterGlyph) -> Option<(f32, f32, f32, f32)> {
         let width = glyph.width as usize;
         self.upload(queue, glyph.width, glyph.height, |row, dst| {
             let src = &glyph.data[row as usize * width..(row as usize + 1) * width];
@@ -1227,7 +1227,7 @@ impl Atlas {
     }
 
     /// Rewind to the top of the atlas; see `ShelfPacker`.
-    pub(crate) fn begin_frame(&mut self) {
+    pub fn begin_frame(&mut self) {
         self.packer.begin_frame();
     }
 

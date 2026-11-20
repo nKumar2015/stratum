@@ -1,0 +1,35 @@
+[package]
+name = "stratum_ui"
+version.workspace = true
+edition.workspace = true
+description = "Stratum's renderer, text, icons, configuration and widgets, shared by the shell and its apps"
+
+[dependencies]
+# Rendering: Vulkan through wgpu, behind our own Renderer trait.
+wgpu = { version = "30", default-features = false, features = ["std", "vulkan", "wgsl"] }
+raw-window-handle = "0.6.2"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+# Vector geometry, text shaping, and icon rasterization.
+lyon = "1.0"
+cosmic-text = "0.19"
+# Must match cosmic-text's fontdb version so glyph font IDs are the same type.
+fontdb = "0.23"
+swash = "0.2"
+# No default features: they add SVG <text> layout with its own font stack,
+# and GIF, WebP and JPEG decoders for embedded rasters. Icons need none of it.
+resvg = { version = "0.48", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# Keysyms for the text field, and (for the apps) windows and input.
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
+# The renderer presents into a wl_surface; `system` gives wgpu its pointer.
+wayland-client = { version = "0.31", features = ["system"] }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "1.1"
+chrono = { workspace = true }
+libc = { workspace = true }
+tracing = { workspace = true }

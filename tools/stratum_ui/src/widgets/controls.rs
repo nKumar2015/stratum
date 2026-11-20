@@ -5,11 +5,11 @@
 //! interacting. Page code stays linear and there is no second widget tree.
 
 use crate::render::display_list::{DisplayList, Rect};
-use crate::ui::{InputState, PaintCtx};
+use crate::widgets::{InputState, Ui};
 
 /// Draw a horizontal slider. Returns a new 0..=1 value while dragging.
 pub fn slider(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     rect: Rect,
     value: f32,
@@ -17,7 +17,7 @@ pub fn slider(
     input: &InputState,
 ) -> Option<f32> {
     let value = value.clamp(0.0, 1.0);
-    let page = &ctx.metrics.page;
+    let page = &ctx.metrics().page;
     let track_height = page.slider_track;
     let knob = page.slider_knob;
 
@@ -28,12 +28,12 @@ pub fn slider(
         height: track_height,
         radius: track_height * 0.5,
         // The top of the surface ramp, so the track shows on a card too.
-        color: ctx.theme.surface_highest,
+        color: ctx.theme().surface_highest,
     };
     list.push_rect(track);
     list.push_rect(Rect {
         width: rect.width * value,
-        color: ctx.theme.primary,
+        color: ctx.theme().primary,
         ..track
     });
 
@@ -44,7 +44,7 @@ pub fn slider(
         width: knob,
         height: knob,
         radius: knob * 0.5,
-        color: ctx.theme.text_main,
+        color: ctx.theme().text_main,
     });
 
     if !dragging {
@@ -58,7 +58,7 @@ pub fn slider(
 /// the track. Returns the step nearest the pointer while dragging. With a
 /// single step there is nothing to choose and it never returns one.
 pub fn stepped_slider(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     rect: Rect,
     index: usize,
@@ -66,7 +66,7 @@ pub fn stepped_slider(
     dragging: bool,
     input: &InputState,
 ) -> Option<usize> {
-    let page = &ctx.metrics.page;
+    let page = &ctx.metrics().page;
     let track_height = page.slider_track;
     let knob = page.slider_knob;
     let last = count.saturating_sub(1).max(1) as f32;
@@ -79,15 +79,15 @@ pub fn stepped_slider(
         width: rect.width,
         height: track_height,
         radius: track_height * 0.5,
-        color: ctx.theme.surface_highest,
+        color: ctx.theme().surface_highest,
     };
     list.push_rect(track);
-    list.push_rect(Rect { width: at(index) - rect.x, color: ctx.theme.primary, ..track });
+    list.push_rect(Rect { width: at(index) - rect.x, color: ctx.theme().primary, ..track });
     // A mark per step, in the colour that reads on the part of the track
     // it sits on.
     let dot = track_height * 0.5;
     for i in 0..count {
-        let color = if i <= index { ctx.theme.on_primary } else { ctx.theme.text_muted };
+        let color = if i <= index { ctx.theme().on_primary } else { ctx.theme().text_muted };
         list.push_rect(Rect { x: at(i) - dot * 0.5, y: cy - dot * 0.5, width: dot, height: dot, radius: dot * 0.5, color });
     }
     list.push_rect(Rect {
@@ -96,7 +96,7 @@ pub fn stepped_slider(
         width: knob,
         height: knob,
         radius: knob * 0.5,
-        color: ctx.theme.text_main,
+        color: ctx.theme().text_main,
     });
 
     if !dragging || count < 2 {
@@ -109,7 +109,7 @@ pub fn stepped_slider(
 /// A switch, its top-left at `(x, y)`. Returns the new state when it is
 /// clicked.
 pub fn switch(
-    ctx: &mut PaintCtx<'_>,
+    ctx: &mut impl Ui,
     list: &mut DisplayList,
     x: f32,
     y: f32,
@@ -117,7 +117,7 @@ pub fn switch(
     input: &InputState,
     clicked: bool,
 ) -> Option<bool> {
-    let page = &ctx.metrics.page;
+    let page = &ctx.metrics().page;
     let width = page.toggle_width;
     let height = page.toggle_height;
     let inset = 2.0;
@@ -129,9 +129,9 @@ pub fn switch(
         height,
         radius: height * 0.5,
         color: if on {
-            ctx.theme.primary
+            ctx.theme().primary
         } else {
-            ctx.theme.surface_highest
+            ctx.theme().surface_highest
         },
     };
     list.push_rect(sw);
@@ -146,7 +146,7 @@ pub fn switch(
         width: knob_size,
         height: knob_size,
         radius: knob_size * 0.5,
-        color: ctx.theme.text_main,
+        color: ctx.theme().text_main,
     });
 
     let hit = input

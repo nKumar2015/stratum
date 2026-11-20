@@ -49,7 +49,7 @@ pub struct Config {
     pub dashboard: DashboardConfig,
     pub render: RenderConfig,
     /// Sizes for everything the shell draws. Colours live in `themes`.
-    pub metrics: crate::ui::style::Metrics,
+    pub metrics: crate::style::Metrics,
 }
 
 impl Config {
@@ -104,7 +104,7 @@ impl Config {
             return Err("night_light.temperature must be 1000-6500".into());
         }
         for (key, time) in [("start", &night.start), ("end", &night.end)] {
-            if crate::night_light::parse_time(time).is_none() {
+            if parse_time(time).is_none() {
                 return Err(format!("night_light.{key}: `{time}` is not HH:MM"));
             }
         }
@@ -198,10 +198,12 @@ impl Config {
         resolved
     }
 
-    /// The shipped defaults alone, as tests see them.
-    #[cfg(test)]
+    /// The shipped defaults alone, as tests see them (the shell's and the
+    /// apps' too, so it is not test-only here; release builds never call it,
+    /// and it is linked out with the text it embeds).
+    #[doc(hidden)]
     pub fn test_defaults() -> Self {
-        let text = include_str!("../config.default.toml");
+        let text = include_str!("../../stratum_shell/config.default.toml");
         Self::from_layers(&[(Path::new("config.default.toml"), text)]).expect("shipped defaults are valid")
     }
 }
@@ -329,8 +331,15 @@ fn defaults_candidates() -> Vec<PathBuf> {
         candidates.push(prefix.join("share/stratum/config.default.toml"));
     }
     #[cfg(debug_assertions)]
-    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("config.default.toml"));
+    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../stratum_shell/config.default.toml"));
     candidates
+}
+
+/// `"HH:MM"` as minutes after midnight.
+pub fn parse_time(text: &str) -> Option<u32> {
+    let (h, m) = text.split_once(':')?;
+    let (h, m): (u32, u32) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
 fn user_path() -> Option<PathBuf> {
@@ -377,7 +386,7 @@ pub struct ThemeConfig {
 
 impl ThemeConfig {
     /// The palette, or the first colour that does not parse.
-    pub(crate) fn to_theme(&self) -> Result<Theme, String> {
+    pub fn to_theme(&self) -> Result<Theme, String> {
         let c = |field: &str, value: &str| {
             parse_color(value).ok_or_else(|| format!("{field}: `{value}` is not a colour"))
         };
@@ -412,7 +421,7 @@ impl ThemeConfig {
 
     /// The palette of a theme from a loaded configuration, whose colours
     /// were checked when it loaded.
-    pub(crate) fn resolved(&self) -> Theme {
+    pub fn resolved(&self) -> Theme {
         self.to_theme().expect("theme colours are validated when the config loads")
     }
 }
@@ -686,7 +695,7 @@ pub struct WeatherConfig {
     /// Set both to skip the postal code lookup.
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
-    pub units: stratum_sys::managers::weather::Units,
+    pub units: WeatherUnits,
     pub refresh_min: u64,
     /// Hours and days forecast.
     pub hours: usize,
@@ -765,18 +774,6 @@ pub struct TimerConfig {
     pub break_min: u64,
     pub long_break_min: u64,
     pub rounds: u32,
-}
-
-impl TimerConfig {
-    pub fn pomodoro(&self) -> crate::dashboard::timer::Pomodoro {
-        let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
-        crate::dashboard::timer::Pomodoro {
-            work: minutes(self.work_min),
-            short_break: minutes(self.break_min),
-            long_break: minutes(self.long_break_min),
-            rounds: self.rounds,
-        }
-    }
 }
 
 /// Which GPU the shell renders on. Read once at start; a reload does not move
@@ -910,6 +907,18 @@ pub struct NightLightConfig {
     pub longitude: Option<f64>,
 }
 
+/// The weather's units. The same as `stratum_sys`'s `weather::Units`,
+/// which the shell converts to: naming that here would link the system
+/// managers into every app that reads the config.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeatherUnits {
+    /// °F and mph.
+    Imperial,
+    /// °C and km/h.
+    Metric,
+}
+
 /// A resolved, ready-to-draw palette.
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -943,7 +952,7 @@ pub struct Theme {
 }
 
 /// Parse `#rgb`, `#rrggbb`, or `#rrggbbaa`.
-pub(crate) fn parse_color(value: &str) -> Option<Color> {
+pub fn parse_color(value: &str) -> Option<Color> {
     let hex = value.trim().strip_prefix('#')?;
     if !hex.is_ascii() {
         return None;
@@ -1004,7 +1013,7 @@ impl std::error::Error for ConfigError {}
 mod tests {
     use super::*;
 
-    const DEFAULTS: &str = include_str!("../config.default.toml");
+    const DEFAULTS: &str = include_str!("../../stratum_shell/config.default.toml");
 
     fn with_user(user: &str) -> Result<Config, ConfigError> {
         Config::from_layers(&[(Path::new("defaults"), DEFAULTS), (Path::new("user"), user)])
@@ -1012,7 +1021,7 @@ mod tests {
 
     #[test]
     fn the_monochrome_theme_ships_and_reads_well() {
-        use crate::ui::color::contrast;
+        use crate::color::contrast;
         let config = Config::test_defaults();
         let theme = config.themes["monochrome"].to_theme().unwrap();
         assert!(contrast(theme.text_main, theme.bg_main) >= 7.0);

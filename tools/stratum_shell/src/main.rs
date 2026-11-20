@@ -4,12 +4,12 @@
 //! Wayland connection, renders with wgpu on Vulkan, and hosts the system
 //! managers (`stratum_sys`) directly.
 
+// Shared with the apps; re-exported at the paths the shell has always used.
+use stratum_ui::{config, custom_themes, icons, paths, render, settings_override, text, theme_choice};
+
 mod actions;
 mod clipboard;
-mod config;
-mod custom_themes;
 mod dashboard;
-mod desktop;
 mod display_manager;
 mod displays;
 mod palette;
@@ -24,25 +24,19 @@ mod net_rates;
 mod night_light;
 mod osd;
 mod pam;
-mod paths;
 mod polkit_dialog;
 mod screenshot;
 mod screenshot_viewer;
-mod theme_choice;
 mod theme_switcher;
 mod power_menu;
 mod toasts;
 mod tray;
 mod tray_menu;
-mod icons;
 mod idle;
 mod key_repeat;
 mod launcher;
 mod logind;
-mod render;
-mod settings_override;
 mod sys_state;
-mod text;
 mod ui;
 mod wayland;
 

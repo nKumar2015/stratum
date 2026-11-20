@@ -9,10 +9,11 @@
 
 use std::sync::Arc;
 
-use crate::pam::Secret;
+use crate::secret::Secret;
 use crate::render::display_list::{DisplayList, Rect};
 use crate::text::TextStyle;
-use crate::ui::{self, PaintCtx};
+use crate::widgets::draw as ui;
+use crate::widgets::Ui;
 
 /// What a keypress did to the field.
 #[derive(Debug)]
@@ -69,12 +70,10 @@ impl TextField {
         self.input.clear();
     }
 
-    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.input.is_empty()
     }
 
-    #[cfg(test)]
     pub fn chars(&self) -> usize {
         self.input.chars()
     }
@@ -142,40 +141,40 @@ impl TextField {
     /// The frame around the field is the owner's.
     pub fn paint(
         &self,
-        ctx: &mut PaintCtx<'_>,
+        ctx: &mut impl Ui,
         list: &mut DisplayList,
         field: Rect,
         style: FieldStyle<'_>,
         busy: bool,
     ) {
-        let weight = ctx.metrics.typography.weight_regular;
+        let weight = ctx.metrics().typography.weight_regular;
         let text_style = TextStyle {
-            family: Arc::from(ctx.theme.font.as_str()),
+            family: Arc::from(ctx.theme().font.as_str()),
             size: style.text,
             weight,
-            color: ctx.theme.text_main,
+            color: ctx.theme().text_main,
         };
         let usable = field.width - style.padding * 2.0 - style.caret_width * 2.0;
         let x = field.x + style.padding;
 
         let shown = if style.masked {
             let dot = "\u{25cf}";
-            let dot_w = ctx.text.measure(dot, &text_style).0.max(1.0);
+            let dot_w = ctx.text().measure(dot, &text_style).0.max(1.0);
             let fits = (usable / dot_w).floor().max(0.0) as usize;
             dot.repeat(self.input.chars().min(fits))
         } else {
-            tail_that_fits(self.input.expose(), usable, |s| ctx.text.measure(s, &text_style).0)
+            tail_that_fits(self.input.expose(), usable, |s| ctx.text().measure(s, &text_style).0)
         };
         let width = if shown.is_empty() {
             0.0
         } else {
-            ctx.text.measure(&shown, &text_style).0
+            ctx.text().measure(&shown, &text_style).0
         };
 
         if !shown.is_empty() {
-            ui::paint_text_vcentered(ctx, list, &shown, x, field, style.text, weight, ctx.theme.text_main);
+            ui::paint_text_vcentered(ctx, list, &shown, x, field, style.text, weight, ctx.theme().text_main);
         } else if let Some(placeholder) = style.placeholder {
-            ui::paint_text_vcentered(ctx, list, placeholder, x + style.caret_width * 2.0, field, style.text, weight, ctx.theme.text_muted);
+            ui::paint_text_vcentered(ctx, list, placeholder, x + style.caret_width * 2.0, field, style.text, weight, ctx.theme().text_muted);
         }
         if !busy {
             let caret_h = style.text * 1.1;
@@ -185,7 +184,7 @@ impl TextField {
                 width: style.caret_width,
                 height: caret_h,
                 radius: 0.0,
-                color: ctx.theme.text_main,
+                color: ctx.theme().text_main,
             });
         }
     }

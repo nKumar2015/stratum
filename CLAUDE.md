@@ -49,6 +49,12 @@ tools/stratum_sys/     library: system managers (audio, wifi, bluetooth,
                        publish theirs through `Publisher`
 tools/stratum_cli/     CLI, a socket client only; its IPC targets are the
                        contract external keybinds use
+tools/stratum_ui/      what the shell and its apps share: the renderer,
+                       text, icons, desktop entries, the config with its
+                       themes and metrics (and theme.json, custom themes,
+                       settings.json), the widgets (drawing helpers,
+                       controls, text field, page layout) and `app`, a
+                       window runner for standalone apps
 tools/stratum_shell/   the native shell
 module.nix             Home Manager module: shell, CLI, runtime tools, user unit
 ```
@@ -681,6 +687,29 @@ treating those as changes was the largest source of idle CPU.
 
 Widgets read state while painting. They never subscribe; `render_pending` redraws
 when `take_dirty` reports a change.
+
+### The shared crate
+
+`stratum_ui` holds everything an app needs to look like the shell. The
+shell re-exports its modules at their old paths (`crate::render`,
+`crate::config`, `crate::ui::style`, `crate::ui::controls`,
+`crate::ui::pages::layout`, ...), so shell code never names the crate.
+Widgets draw through the `widgets::Ui` trait (theme, appearance, metrics,
+text and icon engines), which the shell's `PaintCtx` and an app's `AppUi`
+implement; the helpers are generic over it, so a shell page calls them with
+its `PaintCtx` as before. `config.default.toml` stays in
+`tools/stratum_shell/` (the flake and the module read it there); the crate
+finds it by relative path for `test_defaults()` and debug builds. Nothing
+in it may depend on `stratum_sys`: that would link PipeWire and
+PulseAudio into every app (hence `config::WeatherUnits`, which the shell
+converts to the manager's `Units`).
+
+`app::run` opens one xdg toplevel and runs an `app::App` in it: the
+keyboard with repeat, the pointer with latched presses and double clicks,
+integer buffer scale from the outputs it is on, a `Waker` for background
+threads, and the config and theme reloaded when the user's file,
+`theme.json`, `settings.json` or the custom themes change, so an app
+follows a theme switched in the shell. One window per process.
 
 ### UI layer
 

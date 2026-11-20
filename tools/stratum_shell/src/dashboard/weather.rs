@@ -100,7 +100,7 @@ fn configured_location(config: &WeatherConfig) -> Option<Location> {
 fn is_current(report: &Report, config: &WeatherConfig, cache: &Cache) -> bool {
     let location = configured_location(config)
         .or_else(|| cache.location.clone().filter(|_| cache.location_key == location_key(config)));
-    location.is_some_and(|l| report.key == report_key(&l, config.units)) && report.age() < config.refresh_min * 60
+    location.is_some_and(|l| report.key == report_key(&l, units(config.units))) && report.age() < config.refresh_min * 60
 }
 
 /// Fetches the weather when it is due. Owned by `SystemState`.
@@ -191,17 +191,26 @@ fn fetch(config: &WeatherConfig) -> Result<Report, String> {
             }
         },
     };
-    let forecast = weather::forecast(&location, config.units, config.hours, config.days)?;
+    let forecast = weather::forecast(&location, units(config.units), config.hours, config.days)?;
     let report = Report {
         place: location.name.clone(),
-        units: config.units,
+        units: units(config.units),
         forecast,
         fetched: now(),
-        key: report_key(&location, config.units),
+        key: report_key(&location, units(config.units)),
     };
     cache.report = Some(report.clone());
     store_cache(&cache);
     Ok(report)
+}
+
+
+/// The config's units as the weather manager names them.
+pub fn units(units: crate::config::WeatherUnits) -> Units {
+    match units {
+        crate::config::WeatherUnits::Imperial => Units::Imperial,
+        crate::config::WeatherUnits::Metric => Units::Metric,
+    }
 }
 
 #[cfg(test)]
@@ -229,18 +238,18 @@ mod tests {
         let config = config();
         let dc = Location { name: "Washington D.C.".into(), latitude: 38.89511, longitude: -77.03637 };
         let cache = Cache { location_key: location_key(&config), location: Some(dc.clone()), report: None };
-        assert!(is_current(&report(&dc, config.units, now()), &config, &cache));
+        assert!(is_current(&report(&dc, units(config.units), now()), &config, &cache));
         let stale = now() - config.refresh_min * 60;
-        assert!(!is_current(&report(&dc, config.units, stale), &config, &cache), "too old");
+        assert!(!is_current(&report(&dc, units(config.units), stale), &config, &cache), "too old");
         assert!(!is_current(&report(&dc, Units::Metric, now()), &config, &cache), "other units");
 
         // A new postal code makes the cached place, and so the report, stale.
         let moved = WeatherConfig { zip: "10001".into(), ..config.clone() };
-        assert!(!is_current(&report(&dc, config.units, now()), &moved, &cache));
+        assert!(!is_current(&report(&dc, units(config.units), now()), &moved, &cache));
 
         // Configured coordinates need no lookup.
         let fixed = WeatherConfig { latitude: Some(dc.latitude), longitude: Some(dc.longitude), ..config };
-        assert!(is_current(&report(&dc, fixed.units, now()), &fixed, &Cache::default()));
+        assert!(is_current(&report(&dc, units(fixed.units), now()), &fixed, &Cache::default()));
     }
 
     #[test]
