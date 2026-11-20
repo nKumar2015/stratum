@@ -735,8 +735,10 @@ desktop portal's FileChooser, ahead of GTK's.
   `subclasses`, `generic-icons`; no content sniffing beyond "short and
   UTF-8 is text/plain"), `entries` (folders first, natural order), `places`
   (user dirs, GTK bookmarks, `/run/media` mounts), `trash` (the freedesktop
-  spec in `$XDG_DATA_HOME/Trash`; a file on another file system is refused,
-  and Shift+Delete deletes it), `ops` (copy and move on a thread with
+  spec: `$XDG_DATA_HOME/Trash`, and a file on another drive goes to that
+  drive's `.Trash/$uid` or `.Trash-$uid` with its path relative to the
+  drive; the Trash view merges every mounted drive's, and live tests use a
+  tmpfs mounted under `unshare -rm`, never a real drive), `ops` (copy and move on a thread with
   progress and cancel; never overwrites, a taken name gets ` (copy)`),
   `open` (`mimeapps.list` defaults and associations, then entries whose
   `MimeType` names the type or an ancestor; apps start with `setsid`).

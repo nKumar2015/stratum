@@ -121,6 +121,8 @@ pub struct Browser {
     job: Option<Job>,
     message: Option<(String, bool, Instant)>,
     thumbs: HashMap<PathBuf, Option<IconImage>>,
+    /// In the Trash view, the folder each item was deleted from.
+    origins: HashMap<PathBuf, PathBuf>,
     thumb_tx: Option<std::sync::mpsc::Sender<(PathBuf, u32)>>,
     thumb_done: Arc<Mutex<Vec<Thumbnail>>>,
     waker: Option<Waker>,
@@ -179,6 +181,7 @@ impl Browser {
             job: None,
             message: None,
             thumbs: HashMap::new(),
+            origins: HashMap::new(),
             thumb_tx: None,
             thumb_done: Arc::default(),
             waker: None,
@@ -211,8 +214,10 @@ impl Browser {
 
     /// Read the folder again, keeping the selection where it still exists.
     fn reload(&mut self) {
-        self.dir_stamp = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
-        match entries::list(&self.dir, &self.db) {
+        self.dir_stamp = self.stamp();
+        self.origins.clear();
+        let listed = if trash::is_trash(&self.dir) { Ok(self.list_trash()) } else { entries::list(&self.dir, &self.db) };
+        match listed {
             Ok(mut list) => {
                 entries::sort(&mut list, self.sort, self.descending);
                 if let Some(chooser) = &self.chooser {
@@ -227,6 +232,42 @@ impl Browser {
                 self.error = Some(err.to_string());
             }
         }
+    }
+
+    /// When the folder last changed; for the Trash, the latest of every
+    /// trash's.
+    fn stamp(&self) -> Option<SystemTime> {
+        let modified = |dir: &Path| std::fs::metadata(dir).and_then(|m| m.modified()).ok();
+        if trash::is_trash(&self.dir) {
+            trash::all().iter().filter_map(|t| modified(&t.files())).max()
+        } else {
+            modified(&self.dir)
+        }
+    }
+
+    /// Every trash's items, each under the name it had and with the
+    /// folder it came from in `origins`.
+    fn list_trash(&mut self) -> Vec<Entry> {
+        let mut out = Vec::new();
+        for trash in trash::all() {
+            let Ok(items) = entries::list(&trash.files(), &self.db) else { continue };
+            for mut entry in items {
+                if let Some(from) = trash::original(&entry.path) {
+                    if let Some(name) = from.file_name() {
+                        // Its name in the trash may have a `.2` added.
+                        entry.name = name.to_string_lossy().into_owned();
+                        if let Some(mime) = self.db.guess(&entry.name).filter(|_| !entry.is_dir) {
+                            entry.mime = mime.to_string();
+                        }
+                    }
+                    if let Some(folder) = from.parent() {
+                        self.origins.insert(entry.path.clone(), folder.to_path_buf());
+                    }
+                }
+                out.push(entry);
+            }
+        }
+        out
     }
 
     /// Go to `dir`, remembering where we were.
@@ -463,7 +504,7 @@ impl Browser {
             [] => self.say(format!("Moved {} to the trash", count(paths.len(), "item")), false),
             [(path, trash::TrashError::OtherDevice), ..] => {
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                self.say(format!("{name} is on another drive; Shift+Delete deletes it for good"), true);
+                self.say(format!("{name} is on a drive with no trash; Shift+Delete deletes it for good"), true);
             }
             [(_, err), ..] => self.say(format!("Could not move to the trash: {err}"), true),
         }
@@ -481,7 +522,7 @@ impl Browser {
         let mut errors = 0;
         for path in &paths {
             let result = match (in_trash, path.file_name()) {
-                (true, Some(name)) => trash::delete(&name.to_string_lossy()),
+                (true, Some(_)) => trash::delete(path),
                 _ => ops::remove(path),
             };
             if result.is_err() {
@@ -499,8 +540,8 @@ impl Browser {
     fn restore_selected(&mut self) {
         let mut restored = 0;
         for path in self.selected_paths() {
-            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
-            match trash::restore(&name) {
+            let name = self.entries.iter().find(|e| e.path == path).map(|e| e.name.clone()).unwrap_or_default();
+            match trash::restore(&path) {
                 Ok(_) => restored += 1,
                 Err(err) => self.say(format!("Could not restore {name}: {err}"), true),
             }
@@ -964,6 +1005,14 @@ impl Browser {
                     let name_w = size_x - name_x - m.gap;
                     if renaming.as_ref() == Some(&entry.path) {
                         self.paint_rename(ui, list, rect(name_x - m.gap * 0.5, cell.y + 3.0, name_w, cell.height - 6.0));
+                    } else if let Some(folder) = self.origins.get(&entry.path) {
+                        // In the Trash, the folder it came from after the
+                        // name, muted, sharing the column.
+                        let name = ui::elide(ui, &entry.name, m.text, 400, name_w * 0.5);
+                        ui::paint_text_vcentered(ui, list, &name, name_x, cell, m.text, 400, text_color);
+                        let from_x = name_x + ui.measure(&name, m.text) + m.gap * 2.0;
+                        let from = ui::elide(ui, &tilde(folder), m.detail_text, 400, name_x + name_w - from_x);
+                        ui::paint_text_vcentered(ui, list, &from, from_x, cell, m.detail_text, 400, theme.text_muted);
                     } else {
                         let name = ui::elide(ui, &entry.name, m.text, 400, name_w);
                         ui::paint_text_vcentered(ui, list, &name, name_x, cell, m.text, 400, text_color);
@@ -1202,7 +1251,7 @@ impl Browser {
             return false;
         }
         self.last_check = Instant::now();
-        let stamp = std::fs::metadata(&self.dir).and_then(|m| m.modified()).ok();
+        let stamp = self.stamp();
         if stamp != self.dir_stamp {
             self.reload();
             return true;
@@ -1268,6 +1317,16 @@ fn pointer_double(input: &InputState, area: Rect, clicked: bool) -> bool {
     clicked && layout::hovered(input, area)
 }
 
+/// `path` with the home folder written `~`.
+fn tilde(path: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 pub fn count(n: usize, what: &str) -> String {
     if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") }
 }
@@ -1289,7 +1348,11 @@ impl App for Browser {
         let m: FilesMetrics = ui.config.metrics.files.clone();
         let config = ui.config.files.clone();
         // An open menu or dialog takes the pointer from what it covers.
-        let covered = self.confirm.is_some() || self.menu_rect.is_some_and(|r| layout::hovered(&pointer.input, r));
+        // A dialog opened during this frame (the status bar's Empty the
+        // trash) must not take the click that opened it as a click
+        // outside, which closed it at once.
+        let confirming = self.confirm.is_some();
+        let covered = confirming || self.menu_rect.is_some_and(|r| layout::hovered(&pointer.input, r));
         let masked = InputState { pointer: if covered { None } else { pointer.input.pointer }, pressed: pointer.input.pressed };
         let input = &masked;
         let clicked = pointer.clicked && !covered;
@@ -1314,7 +1377,7 @@ impl App for Browser {
         }
         list.push_rect(Rect { y: toolbar.y + toolbar.height - 1.0, height: 1.0, color: ui.theme.border_inactive, ..toolbar });
         self.paint_toolbar(ui, list, toolbar, input, clicked);
-        self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked);
+        self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked && confirming);
 
         // The menu, over everything.
         self.menu_rect = None;
