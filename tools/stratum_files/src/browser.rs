@@ -62,6 +62,10 @@ enum Command {
     Restore,
     EmptyTrash,
     Undo,
+    /// A place in the sidebar, opened from its menu.
+    OpenPlace(PathBuf),
+    AddBookmark(PathBuf),
+    RemoveBookmark(PathBuf),
     NewFolder,
     CopyPath,
     TerminalHere,
@@ -799,6 +803,14 @@ impl Browser {
             }
             Command::Restore => self.restore_selected(),
             Command::Undo => self.undo(),
+            Command::OpenPlace(path) => {
+                if trash::is_trash(&path) {
+                    let _ = std::fs::create_dir_all(&path);
+                }
+                self.go(path);
+            }
+            Command::AddBookmark(path) => self.set_bookmark(&path, true),
+            Command::RemoveBookmark(path) => self.set_bookmark(&path, false),
             Command::EmptyTrash => {
                 let all: Vec<PathBuf> = self.entries.iter().map(|e| e.path.clone()).collect();
                 self.ask_delete(all);
@@ -836,6 +848,12 @@ impl Browser {
                 if self.selected.len() == 1 {
                     items.push(("Rename", Command::Rename));
                 }
+                // One folder: in or out of the bookmarks.
+                if let [one] = self.selected_paths().as_slice() {
+                    if one.is_dir() {
+                        items.push(self.bookmark_item(one));
+                    }
+                }
                 items.extend([("Copy path", Command::CopyPath), ("Move to the trash", Command::Trash), ("Delete for good", Command::Delete)]);
             }
         } else if in_trash {
@@ -843,6 +861,8 @@ impl Browser {
         } else {
             items.extend([("New folder", Command::NewFolder), ("Paste", Command::Paste), ("Select all", Command::SelectAll)]);
             items.extend([("Open a terminal here", Command::TerminalHere), ("Copy path", Command::CopyPath)]);
+            let dir = self.dir.clone();
+            items.push(self.bookmark_item(&dir));
             items.push((if self.show_hidden { "Hide hidden files" } else { "Show hidden files" }, Command::ToggleHidden));
         }
         // The last change, first, on the folder's own menu.
@@ -853,6 +873,46 @@ impl Browser {
             scroll: None,
             fresh: true,
         });
+    }
+
+    fn bookmarked(&self, path: &Path) -> bool {
+        self.places.iter().any(|(s, p)| *s == Section::Bookmarks && p.path == path)
+    }
+
+    /// "Add to bookmarks" or "Remove from bookmarks" for a folder.
+    fn bookmark_item(&self, path: &Path) -> (&'static str, Command) {
+        if self.bookmarked(path) {
+            ("Remove from bookmarks", Command::RemoveBookmark(path.to_path_buf()))
+        } else {
+            ("Add to bookmarks", Command::AddBookmark(path.to_path_buf()))
+        }
+    }
+
+    /// A sidebar row's menu: open it, and keep or drop it as a bookmark.
+    fn place_menu(&mut self, at: (f32, f32), section: Section, path: PathBuf, width: f32) {
+        let mut items: Vec<(String, Command)> = vec![("Open".into(), Command::OpenPlace(path.clone()))];
+        if trash::is_trash(&path) {
+            items.push(("Empty the trash".into(), Command::EmptyTrash));
+        } else if section == Section::Bookmarks || path.is_dir() {
+            let (label, command) = self.bookmark_item(&path);
+            items.push((label.into(), command));
+        }
+        self.menu = Some(Menu { anchor: rect(at.0, at.1, width, 0.0), items, scroll: None, fresh: true });
+    }
+
+    /// Add `path` to the bookmarks, or take it out, and show the sidebar
+    /// as it now is.
+    fn set_bookmark(&mut self, path: &Path, keep: bool) {
+        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let result = if keep { places::add_bookmark(path) } else { places::remove_bookmark(path) };
+        match result {
+            Ok(()) => {
+                self.places = places::load();
+                self.say(if keep { format!("Added {name} to the bookmarks") } else { format!("Removed {name} from the bookmarks") }, false);
+            }
+            Err(err) => self.say(format!("The bookmarks were not changed: {err}"), true),
+        }
+        self.repaint = true;
     }
 
     // ---- Thumbnails ----------------------------------------------------
@@ -1069,7 +1129,7 @@ impl Browser {
         hit
     }
 
-    fn paint_sidebar(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
+    fn paint_sidebar(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool, secondary: bool) {
         let m = ui.config.metrics.files.clone();
         let theme = ui.theme.clone();
         // Clipped to its card, and scrolled when the places do not fit.
@@ -1083,6 +1143,7 @@ impl Browser {
         let mut y = top;
         let mut section = None;
         let mut go = None;
+        let mut menu = None;
         for (s, place) in self.places.clone() {
             if section != Some(s) {
                 let label = match s {
@@ -1115,8 +1176,12 @@ impl Browser {
             let weight = if current { ui.config.metrics.typography.weight_bold } else { 400 };
             ui::paint_text_vcentered(ui, list, &name, text_x, row, m.text, weight, if current { theme.primary } else { theme.text_main });
             let visible = row.y + row.height > area.y && row.y < area.y + area.height;
-            if clicked && visible && layout::hovered(input, row) && layout::hovered(input, area) {
+            let under = visible && layout::hovered(input, row) && layout::hovered(input, area);
+            if clicked && under {
                 go = Some(place.path.clone());
+            }
+            if secondary && under {
+                menu = Some((s, place.path.clone()));
             }
             if visible {
                 // Only what shows, and only its shown part, takes a drop.
@@ -1128,6 +1193,9 @@ impl Browser {
         }
         list.pop_clip();
         self.sidebar_height = y - top + m.padding;
+        if let (Some((section, path)), Some(at)) = (menu, input.pointer) {
+            self.place_menu(at, section, path, m.menu_width);
+        }
         if let Some(dir) = go {
             if trash::is_trash(&dir) {
                 let _ = std::fs::create_dir_all(&dir);
@@ -1986,7 +2054,7 @@ impl App for Browser {
 
         self.drop_zones.clear();
         paint_card(ui, list, sidebar);
-        self.paint_sidebar(ui, list, sidebar, input, clicked);
+        self.paint_sidebar(ui, list, sidebar, input, clicked, pointer_in.secondary);
         paint_card(ui, list, main);
         let inner = rect(main.x + m.padding, main.y + m.padding * 0.5, main.width - m.padding * 2.0, main.height - m.padding);
         let title = rect(inner.x, inner.y, inner.width, m.title_height);

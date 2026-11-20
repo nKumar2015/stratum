@@ -59,6 +59,71 @@ pub fn parse_bookmarks(text: &str) -> Vec<Place> {
         .collect()
 }
 
+/// The GTK bookmarks file, which Thunar and Nautilus share.
+pub fn bookmarks_file() -> PathBuf {
+    config_home().join("gtk-3.0/bookmarks")
+}
+
+/// Whether a bookmarks line names `path` (labelled or not).
+fn names(line: &str, path: &Path) -> bool {
+    let uri = line.split_once(' ').map_or(line, |(u, _)| u).trim();
+    stratum_ui::uri::to_path(uri).is_some_and(|p| p == path)
+}
+
+pub fn is_bookmarked(text: &str, path: &Path) -> bool {
+    text.lines().any(|l| names(l, path))
+}
+
+/// The bookmarks text with `path` added at the end, unless it is there.
+pub fn with_bookmark(text: &str, path: &Path) -> String {
+    if is_bookmarked(text, path) {
+        return text.to_string();
+    }
+    let mut out = text.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&stratum_ui::uri::from_path(path));
+    out.push('\n');
+    out
+}
+
+/// The bookmarks text without `path`; every other line kept as written.
+pub fn without_bookmark(text: &str, path: &Path) -> String {
+    text.lines().filter(|l| !names(l, path)).map(|l| format!("{l}\n")).collect()
+}
+
+/// Rewrite the bookmarks file through `change`. A file that is a link
+/// (one Home Manager made, say) is not replaced: the change belongs in
+/// whatever made it.
+fn change_bookmarks(change: impl FnOnce(&str) -> String) -> Result<(), String> {
+    let file = bookmarks_file();
+    if std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(format!("{} is a link, managed elsewhere", file.display()));
+    }
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let changed = change(&text);
+    if changed == text {
+        return Ok(());
+    }
+    let dir = file.parent().ok_or("no folder for the bookmarks")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // Written beside it and renamed over it, so a crash never leaves half.
+    let temp = dir.join(format!(".bookmarks-{}", std::process::id()));
+    std::fs::write(&temp, changed).and_then(|()| std::fs::rename(&temp, &file)).map_err(|e| {
+        let _ = std::fs::remove_file(&temp);
+        e.to_string()
+    })
+}
+
+pub fn add_bookmark(path: &Path) -> Result<(), String> {
+    change_bookmarks(|text| with_bookmark(text, path))
+}
+
+pub fn remove_bookmark(path: &Path) -> Result<(), String> {
+    change_bookmarks(|text| without_bookmark(text, path))
+}
+
 /// Removable and user mounts from `/proc/self/mounts`: under
 /// `/run/media/$USER`, `/media` or `/mnt`.
 pub fn parse_mounts(text: &str, user: &str) -> Vec<Place> {
@@ -98,7 +163,7 @@ pub fn load() -> Vec<(Section, Place)> {
         }
     }
     out.push((Section::Places, Place { name: "Trash".into(), path: crate::trash::files_dir(), icon: "user-trash" }));
-    let bookmarks = std::fs::read_to_string(config_home().join("gtk-3.0/bookmarks")).unwrap_or_default();
+    let bookmarks = std::fs::read_to_string(bookmarks_file()).unwrap_or_default();
     out.extend(parse_bookmarks(&bookmarks).into_iter().map(|p| (Section::Bookmarks, p)));
     let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
     let user = std::env::var("USER").unwrap_or_default();
@@ -116,6 +181,20 @@ mod tests {
         let text = "# comment\nXDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_MUSIC_DIR=\"/data/music\"\nXDG_TEMPLATES_DIR=\"$HOME/\"\n";
         let dirs = parse_user_dirs(text, Path::new("/home/me"));
         assert_eq!(dirs, [("DESKTOP".to_string(), PathBuf::from("/home/me/Desktop")), ("MUSIC".to_string(), PathBuf::from("/data/music"))]);
+    }
+
+    #[test]
+    fn bookmarks_are_added_once_and_removed_alone() {
+        let text = "file:///home/me/My%20Code Code\nsmb://server/x\nfile:///srv/share";
+        let added = with_bookmark(text, Path::new("/home/me/new dir"));
+        assert_eq!(added, "file:///home/me/My%20Code Code\nsmb://server/x\nfile:///srv/share\nfile:///home/me/new%20dir\n");
+        assert_eq!(with_bookmark(&added, Path::new("/home/me/new dir")), added, "not twice");
+        assert_eq!(with_bookmark("", Path::new("/a")), "file:///a\n");
+        // A labelled one goes with its label; the rest stay as written.
+        let removed = without_bookmark(&added, Path::new("/home/me/My Code"));
+        assert_eq!(removed, "smb://server/x\nfile:///srv/share\nfile:///home/me/new%20dir\n");
+        assert!(is_bookmarked(&removed, Path::new("/srv/share")));
+        assert!(!is_bookmarked(&removed, Path::new("/home/me/My Code")));
     }
 
     #[test]

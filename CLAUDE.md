@@ -737,7 +737,10 @@ desktop portal's FileChooser, ahead of GTK's.
 - The model is pure and tested: `mime` (shared-mime-info's `globs2`,
   `subclasses`, `generic-icons`; no content sniffing beyond "short and
   UTF-8 is text/plain"), `entries` (folders first, natural order), `places`
-  (user dirs, GTK bookmarks, `/run/media` mounts), `trash` (the freedesktop
+  (user dirs, GTK bookmarks, `/run/media` mounts; bookmarks are added and
+  removed from a folder's menu or a sidebar row's, rewriting only their
+  own line, and a bookmarks file that is a link is never replaced),
+  `trash` (the freedesktop
   spec: `$XDG_DATA_HOME/Trash`, and a file on another drive goes to that
   drive's `.Trash/$uid` or `.Trash-$uid` with its path relative to the
   drive; the Trash view merges every mounted drive's, and live tests use a
