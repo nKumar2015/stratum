@@ -7,9 +7,19 @@
 /// and leave stale copies behind.
 pub struct Secret(String);
 
+/// What [`Secret::new`] reserves: a password, a reply, a file name
+/// (`NAME_MAX` is 255 bytes).
+pub const DEFAULT_CAPACITY: usize = 256;
+
 impl Secret {
     pub fn new() -> Self {
-        Self(String::with_capacity(256))
+        Self::with_capacity(DEFAULT_CAPACITY)
+    }
+
+    /// A buffer holding at most `bytes` bytes, for text that is longer but
+    /// still bounded (a typed path: `PATH_MAX` is 4096).
+    pub fn with_capacity(bytes: usize) -> Self {
+        Self(String::with_capacity(bytes))
     }
 
     pub fn push(&mut self, ch: char) {
@@ -48,7 +58,7 @@ impl Secret {
 
     /// Move the contents out, leaving this buffer empty.
     pub fn take(&mut self) -> Secret {
-        let mut taken = Secret::new();
+        let mut taken = Secret::with_capacity(self.0.capacity());
         for ch in self.0.chars() {
             taken.push(ch);
         }
@@ -126,5 +136,26 @@ mod tests {
             value.push('x');
         }
         assert_eq!(value.0.capacity(), capacity, "typing must not move the buffer");
+    }
+
+    #[test]
+    fn a_larger_buffer_holds_more_and_keeps_its_limit() {
+        let mut value = Secret::with_capacity(4096);
+        for _ in 0..1000 {
+            value.push('x');
+        }
+        assert_eq!(value.chars(), 1000);
+        let taken = value.take();
+        assert_eq!(taken.chars(), 1000);
+        let mut value = Secret::with_capacity(4096);
+        for _ in 0..5000 {
+            value.push('x');
+        }
+        assert_eq!(value.chars(), 4096);
+        let mut short = Secret::new();
+        for _ in 0..1000 {
+            short.push('x');
+        }
+        assert_eq!(short.chars(), DEFAULT_CAPACITY, "the default buffer still refuses past its capacity");
     }
 }

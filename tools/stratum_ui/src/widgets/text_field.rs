@@ -61,7 +61,18 @@ impl TextField {
 
     /// A field already holding `text`, for editing a shown value.
     pub fn with_text(text: &str) -> Self {
-        let mut field = Self::new();
+        Self::with_text_capacity(text, crate::secret::DEFAULT_CAPACITY)
+    }
+
+    /// An empty field that holds up to `bytes` bytes rather than the
+    /// default 256, for text longer than a name (a typed path, a search).
+    pub fn with_capacity(bytes: usize) -> Self {
+        Self { input: Secret::with_capacity(bytes) }
+    }
+
+    /// [`TextField::with_text`] with room for `bytes` bytes.
+    pub fn with_text_capacity(text: &str, bytes: usize) -> Self {
+        let mut field = Self::with_capacity(bytes);
         text.chars().for_each(|ch| field.input.push(ch));
         field
     }
@@ -197,13 +208,21 @@ fn tail_that_fits(text: &str, max_width: f32, mut measure: impl FnMut(&str) -> f
         return text.to_string();
     }
     let chars: Vec<char> = text.chars().collect();
-    for start in 1..chars.len() {
-        let candidate: String = std::iter::once('\u{2026}').chain(chars[start..].iter().copied()).collect();
-        if measure(&candidate) <= max_width {
-            return candidate;
+    let candidate = |start: usize| -> String { std::iter::once('\u{2026}').chain(chars[start..].iter().copied()).collect() };
+    // The first cut that fits, found by bisection: a shorter tail is never
+    // wider, and a path field holds thousands of characters, which one
+    // measurement per character would shape (and push out of the shaping
+    // cache) on every paint.
+    let (mut lo, mut hi) = (1, chars.len());
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if measure(&candidate(mid)) <= max_width {
+            hi = mid;
+        } else {
+            lo = mid + 1;
         }
     }
-    String::new()
+    if lo < chars.len() { candidate(lo) } else { String::new() }
 }
 
 #[cfg(test)]
@@ -217,6 +236,35 @@ mod tests {
             field.key(Keysym::a, Some(&ch.to_string()), false);
         }
         field
+    }
+
+    #[test]
+    fn the_tail_that_fits_is_found_in_few_measurements() {
+        let text: String = (0..4000).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+        let mut calls = 0;
+        let shown = tail_that_fits(&text, 100.0, |s| {
+            calls += 1;
+            s.chars().count() as f32
+        });
+        assert_eq!(shown.chars().count(), 100);
+        assert!(shown.starts_with('\u{2026}') && text.ends_with(&shown[3..]));
+        assert!(calls < 20, "{calls} measurements");
+        assert_eq!(tail_that_fits("abc", 10.0, |s| s.chars().count() as f32), "abc");
+        assert_eq!(tail_that_fits("abc", 0.5, |s| s.chars().count() as f32), "");
+    }
+
+    #[test]
+    fn a_long_field_keeps_a_long_path() {
+        let path: String = "/a".repeat(500);
+        let mut field = TextField::with_text_capacity(&path, 4096);
+        assert_eq!(field.text(), path);
+        field.key(Keysym::a, Some("b"), false);
+        assert_eq!(field.chars(), 1001);
+        let FieldKey::Submit(secret) = field.key(Keysym::Return, None, false) else {
+            panic!("expected a submit");
+        };
+        assert_eq!(secret.chars(), 1001);
+        assert_eq!(TextField::with_text(&path).chars(), 256, "a default field still stops at 256 bytes");
     }
 
     #[test]

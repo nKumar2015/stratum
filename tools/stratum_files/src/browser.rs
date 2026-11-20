@@ -140,6 +140,10 @@ type Thumbnail = (PathBuf, Option<IconImage>);
 /// Seconds a status message stays.
 const MESSAGE_SECONDS: f32 = 4.0;
 
+/// Room in the typed-path and search fields: Linux's `PATH_MAX`. A field
+/// holds 256 bytes by default, a name's limit, which a deep path passes.
+const LONG_FIELD: usize = libc::PATH_MAX as usize;
+
 impl Browser {
     pub fn new(dir: PathBuf, config: &stratum_ui::config::FilesConfig) -> Self {
         let mut browser = Self {
@@ -165,7 +169,7 @@ impl Browser {
                 _ => SortKey::Name,
             },
             descending: config.sort_descending,
-            search: TextField::new(),
+            search: TextField::with_capacity(LONG_FIELD),
             editing: Editing::None,
             places: places::load(),
             menu: None,
@@ -761,7 +765,7 @@ impl Browser {
                 if let Some(dir) = self.paint_breadcrumbs(ui, list, path_area, input, clicked) {
                     self.go(dir);
                 } else if pointer_double(input, path_area, clicked) {
-                    self.editing = Editing::Path(TextField::with_text(&self.dir.display().to_string()));
+                    self.editing = Editing::Path(TextField::with_text_capacity(&self.dir.display().to_string(), LONG_FIELD));
                 }
             }
         }
@@ -1458,7 +1462,7 @@ impl App for Browser {
                     self.search.clear();
                 }
             }
-            Keysym::l | Keysym::L if key.ctrl => self.editing = Editing::Path(TextField::with_text(&self.dir.display().to_string())),
+            Keysym::l | Keysym::L if key.ctrl => self.editing = Editing::Path(TextField::with_text_capacity(&self.dir.display().to_string(), LONG_FIELD)),
             Keysym::f | Keysym::F if key.ctrl => self.editing = Editing::Search,
             Keysym::h | Keysym::H if key.ctrl => self.show_hidden = !self.show_hidden,
             Keysym::a | Keysym::A if key.ctrl => self.run(Command::SelectAll, &config),
