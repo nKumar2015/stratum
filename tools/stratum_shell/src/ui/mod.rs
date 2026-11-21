@@ -16,6 +16,7 @@ pub mod hover_menu;
 pub mod notification_card;
 pub mod pages;
 pub mod sidebar;
+pub mod tachometer;
 pub mod widgets;
 
 use crate::text::TextEngine;

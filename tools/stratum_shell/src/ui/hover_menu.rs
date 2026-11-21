@@ -157,6 +157,11 @@ pub struct HoverMenus {
     profile: Optimistic<String>,
     output: Optimistic<String>,
     input: Optimistic<String>,
+    /// The power dial's needle, in degrees, the angle it is swinging to,
+    /// and where the pointer holds it while dragged.
+    needle: crate::ui::animation::Tween,
+    needle_target: Option<f32>,
+    dial_drag: Option<f32>,
 }
 
 impl HoverMenus {
@@ -164,7 +169,14 @@ impl HoverMenus {
         Self::default()
     }
 
+    /// Whether the open menu moves on its own (the power dial's needle) and
+    /// must be painted every frame.
+    pub fn animating(&self) -> bool {
+        self.intent.open().is_some_and(|o| o.kind == HoverKind::Battery) && (self.needle.is_animating() || self.dial_drag.is_some())
+    }
+
     pub fn tick(&mut self, dt: f32) {
+        self.needle.tick(dt);
         self.profile.tick(dt);
         self.output.tick(dt);
         self.input.tick(dt);
@@ -208,7 +220,7 @@ impl HoverMenus {
             HoverKind::Audio => self.audio(ctx, list, &mut frame, input),
             HoverKind::Bluetooth => bluetooth(ctx, list, &mut frame),
             HoverKind::Wifi => network(ctx, list, &mut frame),
-            HoverKind::Battery => self.battery(ctx, list, &mut frame),
+            HoverKind::Battery => self.battery(ctx, list, &mut frame, input),
             HoverKind::Drives => drives(ctx, list, &mut frame),
         }
 
@@ -306,68 +318,270 @@ impl HoverMenus {
         }
     }
 
-    fn battery(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
+    /// The battery: a big percentage over a level bar, three stat chips,
+    /// the power mode on a tachometer, and the stay-awake and night-light
+    /// tiles that used to be bar icons.
+    fn battery(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame, input: &InputState) {
         let m = ctx.metrics.hover_menu.clone();
         let snapshot = ctx.state.battery.get();
         let battery = &snapshot["battery"];
         let state = battery["state"].as_str().unwrap_or("");
-        let pct = battery["pct"].as_u64().unwrap_or(0);
+        let pct = battery["pct"].as_u64().unwrap_or(0).min(100);
         // Labels from BatteryHoverMenu.qml.
         let state_text = match state {
             "charging" => "Charging",
             "discharging" => "On Battery",
-            "fully-charged" | "pending-charge" => "Plugged In",
+            "fully-charged" => "Full",
+            "pending-charge" => "Not charging",
             _ => "Battery",
         };
-        let row = f.take(line(&m, m.title));
-        ui::paint_text_vcentered(ctx, list, &format!("{state_text} \u{b7} {pct}%"), row.x, row, m.title, ctx.metrics.typography.weight_bold, ctx.theme.text_main);
+        let level_color = if state == "charging" || state == "fully-charged" {
+            ctx.theme.success
+        } else if pct <= 20 {
+            ctx.theme.error
+        } else if pct <= 40 {
+            ctx.theme.warning
+        } else {
+            ctx.theme.primary
+        };
+
+        // The percentage, large, with the state beside it.
+        let hero = f.take(line(&m, m.hero));
+        ui::paint_text_vcentered(ctx, list, &format!("{pct}%"), hero.x, hero, m.hero, ctx.metrics.typography.weight_bold, ctx.theme.text_main);
+        let state_w = measure(ctx, state_text, m.text, ctx.metrics.typography.weight_medium);
+        let glyph = if state == "charging" { "\u{f140b} " } else { "" };
+        let glyph_w = if glyph.is_empty() { 0.0 } else { measure(ctx, glyph, m.text, ctx.metrics.typography.weight_medium) };
+        let state_x = hero.x + hero.width - state_w - glyph_w;
+        if !glyph.is_empty() {
+            ui::paint_text_vcentered(ctx, list, glyph, state_x, hero, m.text, ctx.metrics.typography.weight_medium, level_color);
+        }
+        ui::paint_text_vcentered(ctx, list, state_text, state_x + glyph_w, hero, m.text, ctx.metrics.typography.weight_medium, level_color);
         f.gap(m.gap);
 
-        let projected_label = match state {
-            "charging" => "To Full",
-            "discharging" => "Remaining",
-            "fully-charged" | "pending-charge" => "Status",
-            _ => "Projected",
-        };
-        let projected = match state {
-            "fully-charged" => "Fully Charged".to_string(),
-            "pending-charge" => "Not Charging".to_string(),
-            _ => battery["projected_text"].as_str().unwrap_or("Unknown").to_string(),
-        };
-        let screen_on = battery["screen_on_time"].as_str().unwrap_or("\u{2014}").to_string();
-        let rate = snapshot["charging_info"].as_str().unwrap_or("\u{2014}").to_string();
-        f.stat(ctx, list, "Screen On", &screen_on);
-        f.stat(ctx, list, projected_label, &projected);
-        f.stat(ctx, list, "\u{f140b}  Rate", &rate);
+        // The level bar, with a terminal nub like a battery's.
+        let bar = f.take(m.bar_height);
+        let nub_w = m.bar_height * 0.35;
+        let track = Rect { width: bar.width - nub_w - m.border * 2.0, radius: m.bar_height * 0.5, color: ctx.theme.bg_widget, ..bar };
+        list.push_rect(track);
+        if pct > 0 {
+            let fill_w = (track.width * pct as f32 / 100.0).max(track.height);
+            list.push_rect(Rect { width: fill_w, color: level_color, ..track });
+        }
+        let nub_h = m.bar_height * 0.5;
+        list.push_rect(Rect {
+            x: track.x + track.width + m.border * 2.0,
+            y: bar.y + (bar.height - nub_h) * 0.5,
+            width: nub_w,
+            height: nub_h,
+            radius: nub_w * 0.5,
+            color: ctx.theme.bg_widget,
+        });
+        f.gap(m.section_gap);
 
-        f.section(ctx, list, "Power Mode");
+        // Stat chips: screen on, then the time left and the rate where
+        // there are any (plugged in and full, the hero line says so).
+        let mut chips = vec![("Screen on", battery["screen_on_time"].as_str().unwrap_or("\u{2014}").to_string())];
+        let projected = battery["projected_text"].as_str().filter(|t| !t.is_empty() && *t != "Unknown");
+        match (state, projected) {
+            ("charging", Some(time)) => chips.push(("To full", time.to_string())),
+            ("discharging", Some(time)) => chips.push(("Remaining", time.to_string())),
+            _ => {}
+        }
+        // upower's `45.312 W`, to one decimal.
+        if let Some(watts) = snapshot["charging_info"].as_str().and_then(|r| r.strip_suffix(" W")).and_then(|w| w.trim().parse::<f32>().ok()) {
+            chips.push(("Rate", format!("{watts:.1} W")));
+        }
+        let row = f.take(m.chip_height);
+        let chip_w = (row.width - m.gap * (chips.len() - 1) as f32) / chips.len() as f32;
+        for (i, (label, value)) in chips.iter().enumerate() {
+            let chip = Rect { x: row.x + i as f32 * (chip_w + m.gap), width: chip_w, radius: m.button_radius, color: ctx.theme.bg_widget, ..row };
+            list.push_rect(chip);
+            let inner = Rect { x: chip.x + m.gap, width: chip.width - m.gap * 2.0, ..chip };
+            let half = Rect { height: chip.height * 0.5, y: chip.y + m.gap * 0.5, ..inner };
+            ui::paint_text_vcentered(ctx, list, label, inner.x, half, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
+            let value = ui::elide(ctx, value, m.text, ctx.metrics.typography.weight_medium, inner.width);
+            let lower = Rect { y: chip.y + chip.height * 0.5 - m.gap * 0.5, ..half };
+            ui::paint_text_vcentered(ctx, list, &value, inner.x, lower, m.text, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
+        }
+
+        f.section(ctx, list, "\u{f04c5}  Power Mode");
+        self.power_dial(ctx, list, f, input, &snapshot);
+
+        f.section(ctx, list, "Quick Settings");
+        let row = f.take(m.tile_height);
+        let tile_w = (row.width - m.gap) * 0.5;
+        let awake = ctx.state.idle_inhibit.get();
+        let night = ctx.state.night_light.get();
+        let night_text = if night.problem.is_some() {
+            "Unavailable".to_string()
+        } else {
+            let until = night
+                .manual
+                .and(night.until)
+                .filter(|t| *t < i64::MAX)
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string());
+            match (night.on, until) {
+                (true, Some(t)) => format!("On until {t}"),
+                (false, Some(t)) => format!("Off until {t}"),
+                (true, None) => "On".into(),
+                (false, None) => "Off".into(),
+            }
+        };
+        // nf-md-coffee / coffee_outline, weather_night / moon_waning_crescent.
+        let tiles = [
+            (if awake { "\u{f0176}" } else { "\u{f06ca}" }, "Stay awake", if awake { "Idle held off".to_string() } else { "Off".to_string() }, awake),
+            (if night.on { "\u{f0594}" } else { "\u{f0f65}" }, "Night light", night_text, night.on),
+        ];
+        for (i, (glyph, title, subtitle, on)) in tiles.iter().enumerate() {
+            let tile = Rect { x: row.x + i as f32 * (tile_w + m.gap), width: tile_w, radius: m.button_radius, ..row };
+            let hovered = f.hover(tile);
+            let fill = if *on {
+                crate::ui::pages::layout::mix(ctx.theme.bg_widget, ctx.theme.primary, 0.22)
+            } else if hovered {
+                ctx.theme.bg_hover
+            } else {
+                ctx.theme.bg_widget
+            };
+            ui::paint_frame(list, tile, m.border, if *on { ctx.theme.primary } else { ctx.theme.border_inactive }, fill);
+            let icon_box = Rect { width: m.icon * 2.0, ..tile };
+            ui::paint_text_centered(ctx, list, glyph, icon_box, m.icon, if *on { ctx.theme.primary } else { ctx.theme.text_muted });
+            let text_x = icon_box.x + icon_box.width;
+            let text_w = tile.x + tile.width - text_x - m.gap;
+            let top = Rect { y: tile.y + m.gap * 0.5, height: tile.height * 0.5 - m.gap * 0.5, ..tile };
+            let bottom = Rect { y: tile.y + tile.height * 0.5, ..top };
+            let title = ui::elide(ctx, title, m.text, ctx.metrics.typography.weight_medium, text_w);
+            ui::paint_text_vcentered(ctx, list, &title, text_x, top, m.text, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
+            let subtitle = ui::elide(ctx, subtitle, m.caption, ctx.metrics.typography.weight_regular, text_w);
+            ui::paint_text_vcentered(ctx, list, &subtitle, text_x, bottom, m.caption, ctx.metrics.typography.weight_regular, if *on { ctx.theme.primary } else { ctx.theme.text_muted });
+            if f.clicked_in(tile) {
+                f.events.push(MenuEvent::System(if i == 0 { SystemAction::IdleInhibit(!awake) } else { SystemAction::NightLight("toggle") }));
+            }
+        }
+    }
+
+    /// The power mode as a tachometer: economy, normal, the redline. Drag
+    /// the needle (or click a zone); it settles in the zone it is let go
+    /// in, and the mode follows.
+    fn power_dial(&mut self, ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame, input: &InputState, snapshot: &serde_json::Value) {
+        use crate::ui::tachometer as dial;
+        let m = ctx.metrics.hover_menu.clone();
+        // nf-md-leaf, scale_balance, rocket_launch.
+        let modes = [
+            ("low-power", "Saver", "Longest battery", "\u{f032a}", ctx.theme.success),
+            ("balanced", "Normal", "Balanced", "\u{f05d1}", ctx.theme.primary),
+            ("balanced-performance", "Performance", "Fastest, louder fans", "\u{f14de}", ctx.theme.error),
+        ];
+        let n = modes.len();
         let real = snapshot["profile"].as_str().unwrap_or("balanced").to_string();
         let active = self.profile.view(real);
-        let options = [("low-power", "Saver"), ("balanced", "Normal"), ("balanced-performance", "Performance")];
-        let row = f.take(m.button_height);
-        let w = (row.width - m.gap * (options.len() - 1) as f32) / options.len() as f32;
-        for (i, (key, label)) in options.iter().enumerate() {
-            let rect = Rect {
-                x: row.x + i as f32 * (w + m.gap),
-                width: w,
-                radius: m.button_radius,
-                ..row
-            };
-            let selected = active == *key;
-            ui::paint_frame(
-                list,
-                rect,
-                m.border,
-                if selected { ctx.theme.border_active } else { ctx.theme.border_inactive },
-                if selected { ctx.theme.bg_hover } else { ctx.theme.bg_widget },
-            );
-            ui::paint_text_centered_weighted(ctx, list, label, rect, m.text, ctx.metrics.typography.weight_medium, if selected { ctx.theme.text_main } else { ctx.theme.text_muted });
-            if f.clicked_in(rect) && !selected {
+        let active_index = modes.iter().position(|(key, ..)| *key == active).unwrap_or(1);
+
+        // Room for the mode glyphs outside the arc, above and beside it,
+        // and the readout in the open bottom.
+        let outer = m.dial_radius + m.dial_band * 0.5 + m.gap + m.icon;
+        let below = m.dial_radius * 0.5 + m.dial_band + line(&m, m.text) * 0.5;
+        let area = f.take(outer + below);
+        let centre = Point::new(area.x + area.width * 0.5, area.y + outer);
+
+        // The needle: dragged, or swinging to the active mode.
+        let target = dial::zone_centre(active_index, n);
+        if self.needle_target.is_none() {
+            self.needle.snap(target);
+        } else if self.dial_drag.is_none() && self.needle_target != Some(target) {
+            self.needle.to(target, m.dial_seconds, crate::ui::animation::Easing::OutBack);
+        }
+        self.needle_target = Some(target);
+
+        let over = f.pointer.filter(|p| {
+            let (dx, dy) = (p.x - centre.x, p.y - centre.y);
+            let distance = (dx * dx + dy * dy).sqrt();
+            distance <= m.dial_radius + m.dial_band && area.contains(*p)
+        });
+        let mut chosen = None;
+        match (self.dial_drag, over, f.clicked, input.pressed) {
+            // A press on the dial takes the needle.
+            (None, Some(p), true, true) => self.dial_drag = Some(dial::pointer_angle(centre, p)),
+            // Pressed and let go between two paints: a click on a zone.
+            (None, Some(p), true, false) => chosen = Some(dial::zone_at(dial::pointer_angle(centre, p), n)),
+            // Dragging: the needle follows the pointer anywhere.
+            (Some(_), _, _, true) => {
+                if let Some(p) = f.pointer {
+                    self.dial_drag = Some(dial::pointer_angle(centre, p));
+                }
+            }
+            // Let go: it settles in the zone it was let go in.
+            (Some(angle), _, _, false) => {
+                self.dial_drag = None;
+                self.needle.snap(angle);
+                chosen = Some(dial::zone_at(angle, n));
+            }
+            _ => {}
+        }
+        if let Some(index) = chosen {
+            let key = modes[index].0;
+            let centre_angle = dial::zone_centre(index, n);
+            self.needle.to(centre_angle, m.dial_seconds, crate::ui::animation::Easing::OutBack);
+            self.needle_target = Some(centre_angle);
+            if key != active {
                 self.profile.set(key.to_string());
                 f.events.push(MenuEvent::System(SystemAction::SetPowerProfile(key.to_string())));
             }
         }
+
+        let angle = self.dial_drag.unwrap_or_else(|| self.needle.value());
+        let pointing = dial::zone_at(angle, n);
+        let style = dial::Style {
+            radius: m.dial_radius,
+            band: m.dial_band,
+            tick: m.dial_tick,
+            needle: m.dial_needle,
+            hub: m.dial_hub,
+            zones: modes.iter().map(|mode| mode.4).collect(),
+            lit: pointing,
+            track: ctx.theme.bg_widget,
+            ticks: ctx.theme.text_muted,
+            hub_fill: ctx.theme.bg_main,
+        };
+        dial::paint(list, centre, angle, &style);
+
+        // Each mode's glyph outside its zone.
+        for (i, (_, _, _, glyph, color)) in modes.iter().enumerate() {
+            let at = dial::point(centre, m.dial_radius + m.dial_band * 0.5 + m.gap + m.icon * 0.5, dial::zone_centre(i, n));
+            let cell = Rect { x: at.x - m.icon * 0.5, y: at.y - m.icon * 0.5, width: m.icon, height: m.icon, radius: 0.0, color: Color::TRANSPARENT };
+            ui::paint_text_centered(ctx, list, glyph, cell, m.icon, if i == pointing { *color } else { ctx.theme.text_muted });
+        }
+
+        // The readout in the open bottom: the mode the needle points at.
+        let (_, name, detail, _, color) = modes[pointing];
+        let name_row = Rect {
+            x: area.x,
+            y: centre.y + m.dial_hub,
+            width: area.width,
+            height: line(&m, m.title),
+            radius: 0.0,
+            color: Color::TRANSPARENT,
+        };
+        ui::paint_text_centered_weighted(ctx, list, name, name_row, m.title, ctx.metrics.typography.weight_bold, color);
+        let detail_row = Rect { y: name_row.y + name_row.height, height: line(&m, m.caption), ..name_row };
+        ui::paint_text_centered(ctx, list, detail, detail_row, m.caption, ctx.theme.text_muted);
+        // The readout may reach past what the arc needed below.
+        let bottom = detail_row.y + detail_row.height;
+        if bottom > f.y {
+            f.y = bottom;
+        }
     }
+}
+
+/// A text's width at `size` and `weight` in the theme's font.
+fn measure(ctx: &mut PaintCtx<'_>, text: &str, size: f32, weight: u16) -> f32 {
+    let style = crate::text::TextStyle {
+        family: std::sync::Arc::from(ctx.theme.font.as_str()),
+        size,
+        weight,
+        color: ctx.theme.text_main,
+    };
+    ctx.text.measure(text, &style).0
 }
 
 fn bluetooth(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {

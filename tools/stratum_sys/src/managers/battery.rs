@@ -159,8 +159,19 @@ fn read_screen_on_time() -> String {
     "Unknown".to_string()
 }
 
+/// The ACPI platform profile, which is world-writable here. Debug builds
+/// read and write `STRATUM_PLATFORM_PROFILE` instead when it is set, so a
+/// live test never changes the machine's.
+pub fn platform_profile_path() -> std::path::PathBuf {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("STRATUM_PLATFORM_PROFILE") {
+        return path.into();
+    }
+    "/sys/firmware/acpi/platform_profile".into()
+}
+
 fn read_active_profile() -> String {
-    let path = Path::new("/sys/firmware/acpi/platform_profile");
+    let path = platform_profile_path();
     if let Ok(text) = fs::read_to_string(path) {
         let trimmed = text.trim();
         if !trimmed.is_empty() {

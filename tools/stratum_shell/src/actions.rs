@@ -503,7 +503,7 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
         }
         SystemAction::SetPowerProfile(profile) => {
             // Writes the ACPI platform profile directly; the CLI does the same.
-            std::fs::write("/sys/firmware/acpi/platform_profile", profile)
+            std::fs::write(managers::battery::platform_profile_path(), profile)
                 .map_err(|err| format!("failed to set power profile: {err}"))?;
             state.battery.set(managers::battery::status());
             serde_json::json!({ "ok": true })

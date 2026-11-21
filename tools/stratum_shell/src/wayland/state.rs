@@ -562,6 +562,7 @@ impl App {
             || self.theme_switcher.animating()
             || self.overview.animating()
             || self.window_switcher.animating()
+            || self.hover_menus.animating()
             || self.dim_fading()
         {
             return std::time::Duration::from_millis(16);

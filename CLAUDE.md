@@ -292,8 +292,9 @@ test` and `clippy` leave a stale binary.
 **Idle** (`idle.rs` policy, pure and tested; `wayland/state/idle.rs`
 plumbing; `logind.rs`). Each `[idle]` stage (dim, lock, screens off,
 suspend) is its own `ext-idle-notify-v1` notification, so a client holding
-an idle inhibitor (a video) holds them all off, and so does the stay-awake
-icon (`idle_inhibit` widget, `stratum-cli idle inhibit|uninhibit|toggle`).
+an idle inhibitor (a video) holds them all off, and so does stay awake
+(the battery menu's tile, the optional `idle_inhibit` bar widget,
+`stratum-cli idle inhibit|uninhibit|toggle`).
 The dim is an overlay layer per output holding a single-pixel buffer that
 `wp_viewporter` stretches, never a swapchain; its fade commits one cached
 buffer per opacity step. Screens go off through
@@ -534,7 +535,19 @@ they open through `Widget::hover_target`, keyed by output. The menu is
 immediate-mode and painted once per change: the painted height sizes the
 surface, and a size change waits for the configure before drawing. Their
 actions are real (audio devices, Bluetooth, the platform power profile), so
-live tests must not click them.
+live tests must not click them; for the power profile, debug builds read
+and write `STRATUM_PLATFORM_PROFILE` instead of the world-writable
+`/sys/firmware/acpi/platform_profile`.
+
+The battery menu is a big percentage over a level bar, stat chips for what
+the state has (screen on, time left, rate), the power mode on a tachometer
+(`ui/tachometer.rs`, pure and tested: three zones from economy to the
+redline; drag the needle or click a zone, and it settles in the zone it is
+let go in), and tiles for stay awake and night light, which left the bar
+(the `idle_inhibit` and `night_light` widgets still exist). The tiles'
+actions are shell state, so `apply_hover_events` runs them on the loop
+rather than the worker. While the needle swings or is dragged,
+`HoverMenus::animating` repaints the menu every frame.
 
 App icons come from `IconTheme::load_app_icon`, which maps a window class to
 its desktop entry's `Icon` (`desktop.rs`) before trying the class as an icon

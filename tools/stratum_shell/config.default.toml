@@ -312,13 +312,13 @@ framed = false
 [[sidebar.widgets]]
 kind = "quick_panel"
 framed = true
-height = 140
+height = 86
+# Stay awake and night light are in the battery's menu. They can still be
+# icons here: { kind = "idle_inhibit" } and { kind = "night_light" }.
 children = [
   { kind = "audio", framed = false },
   { kind = "bluetooth", framed = false },
   { kind = "wifi", framed = false },
-  { kind = "idle_inhibit", framed = false }, # stay awake: click to hold idle off
-  { kind = "night_light", framed = false },  # warmer screens now, or back to the schedule
 ]
 
 [[sidebar.widgets]]
@@ -678,6 +678,16 @@ button_radius = 6.0
 value_width = 38.0      # volume percentage
 stat_split = 0.38       # where values start in label/value rows
 max_devices = 6         # Bluetooth devices before "+N more"
+hero = 28.0             # the battery menu's percentage
+bar_height = 10.0       # its level bar
+chip_height = 40.0      # screen-on, remaining and rate
+tile_height = 50.0      # stay awake and night light
+dial_radius = 76.0      # the power-mode tachometer
+dial_band = 8.0         # its arc
+dial_tick = 4.0         # minor ticks; major ones are twice as long
+dial_needle = 3.0
+dial_hub = 14.0
+dial_seconds = 0.4      # the needle swinging to a new mode
 
 [metrics.dashboard]
 margin = 12.0           # from the top of the screen

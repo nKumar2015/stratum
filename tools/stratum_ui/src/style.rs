@@ -910,6 +910,20 @@ pub struct HoverMenuMetrics {
     pub stat_split: f32,
     /// Bluetooth devices listed before "+N more".
     pub max_devices: usize,
+    /// The battery menu: the big percentage, its level bar, the stat chips
+    /// and the quick toggles' tiles.
+    pub hero: f32,
+    pub bar_height: f32,
+    pub chip_height: f32,
+    pub tile_height: f32,
+    /// The power-mode tachometer: radius, arc width, tick length, needle
+    /// width, hub diameter, and how long the needle takes to swing.
+    pub dial_radius: f32,
+    pub dial_band: f32,
+    pub dial_tick: f32,
+    pub dial_needle: f32,
+    pub dial_hub: f32,
+    pub dial_seconds: f32,
 }
 
 /// A tray item's context menu.

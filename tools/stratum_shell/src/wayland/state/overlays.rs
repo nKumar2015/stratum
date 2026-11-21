@@ -307,6 +307,9 @@ impl App {
         use crate::ui::hover_menu::MenuEvent;
         for event in events {
             match event {
+                // Shell state, not the worker's: the battery menu's tiles.
+                MenuEvent::System(crate::actions::SystemAction::IdleInhibit(on)) => self.set_idle_inhibited(on),
+                MenuEvent::System(crate::actions::SystemAction::NightLight(command)) => self.night_light_command(command),
                 MenuEvent::System(action) => self.actions.push(action),
                 MenuEvent::Close => self.hover_menus.intent.close(),
                 MenuEvent::OpenPage(page) => {

@@ -455,6 +455,9 @@ impl App {
             self.mark_hover_dirty();
         }
         self.hover_menus.tick(dt);
+        if self.hover_menus.animating() {
+            self.mark_hover_dirty();
+        }
         let open_hover = self.hover_menus.intent.open().cloned();
         let mut hover_events = Vec::new();
         for i in 0..self.hover_surfaces.len() {
