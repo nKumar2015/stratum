@@ -29,7 +29,7 @@ Rules from the user that apply to every item:
 | File manager's next round: long paths, other-drive trash, undo, preview, thumbnails, drag and drop, Hyprland portal fix, loaf-fm look, bookmarks | `81ab92c` … `b9e29a0` (pushed 2026-11-20) | — |
 | Workspace overview (5) and window switcher (6), over `hyprland-toplevel-export-v1` | `6d14f17` (pushed 2026-11-20); empty workspaces hidden from the overview afterwards | — |
 | Per-app outputs through an EQ for each device (a follow-up to the mixer) | `9a44aae` | pavucontrol |
-| Removable drives (7): udisks2, a bar icon and menu, toasts with Open and Eject, unmounted drives and Unmount/Eject in the file manager, a passphrase prompt for LUKS drives | `9dc66a4` | udiskie-style helpers (none installed) |
+| Removable drives (7): udisks2, a bar icon and menu, toasts with Open and Eject, unmounted drives and Unmount/Eject in the file manager, a passphrase prompt for LUKS drives | `f1469a1` | udiskie-style helpers (none installed) |
 | Battery menu revamp: stay awake and night light moved into it, the power mode as a draggable tachometer (asked for 2026-11-20) | `fb10c9b` | — |
 | Privacy indicators (10): microphone, camera (inotify on `/dev/video*`) and screen sharing (PipeWire screen-cast nodes), with a menu naming the apps | `9dc66a4` | — |
 | DND schedule and per-app notification rules (11): toast, silent or off per app | `9dc66a4` | — |
