@@ -103,6 +103,23 @@ impl App {
         }
     }
 
+    /// Do Not Disturb's schedule: on at its start, off at its end.
+    pub(super) fn tick_dnd_schedule(&mut self) {
+        use chrono::Timelike;
+        let config = &self.config.notifications;
+        let (Some(start), Some(end)) = (crate::config::parse_time(&config.dnd_start), crate::config::parse_time(&config.dnd_end)) else {
+            return;
+        };
+        let now = chrono::Local::now();
+        let minutes = now.hour() * 60 + now.minute();
+        if let Some(on) = self.dnd_schedule.step(config.dnd_schedule, minutes, start, end) {
+            info!("do not disturb {} by its schedule", if on { "on" } else { "off" });
+            if self.state.dnd.set(on) {
+                self.state.notify();
+            }
+        }
+    }
+
     pub(super) fn mark_polkit_dirty(&mut self) {
         for entry in &mut self.polkit_surfaces {
             entry.dirty = true;

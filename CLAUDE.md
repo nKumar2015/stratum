@@ -520,6 +520,32 @@ stand-in udisks on a private bus (`DBUS_SYSTEM_BUS_ADDRESS`; zbus's
 `fdo::ObjectManager` at `/org/freedesktop/UDisks2` with Drive, Block and
 Filesystem objects), never by mounting or powering off a real drive.
 
+The **privacy indicator** (`privacy.rs`, pure and tested;
+`ui/widgets/privacy.rs`; the `Privacy` hover menu) shows a dot per thing
+in use, and takes no room otherwise. The microphone is the audio
+snapshot's `recording` streams, less paused ones and any on a sink's
+monitor. The camera is whoever holds `/dev/video*` open: an inotify watch
+of opens and closes (nothing holds a camera open while idle), then a scan
+of `/proc` names the holders; when PipeWire holds it, the apps taking video
+from PipeWire are named instead. A shared screen is a PipeWire
+`Video/Source` with no `device.api` (the portal's screen-cast stream); the
+audio monitor publishes those and the video clients on the `video`
+channel. Debug builds watch `STRATUM_VIDEO_DIR` instead of `/dev`, so a
+test opens a stand-in file, never the camera. Test the microphone and
+screen sharing on a sandboxed PipeWire (WirePlumber with every monitor
+off): a virtual source (`module-null-sink media.class=Audio/Source/Virtual`)
+recorded with `parec`, and a node made with `pw-cli create-node` whose
+`media.class` is `Video/Source`.
+
+**Notification rules** (`[notifications]`, set on the Notifications page
+under the list): each app's notifications toast (the default), stay in
+the list silently (`Toasts::set_silent`), or are dropped at the server
+(`NotificationServer::set_rules`, answered with an id and forgotten). The
+apps are a table set whole through `SetSetting`. Do Not Disturb's daily
+schedule (`dnd.rs`, pure and tested) only acts on crossings, so a toggle
+by hand holds until the next start or end; it is looked at once per loop
+iteration.
+
 **Wi-Fi connect** (`stratum_sys::managers::wifi::connect`) uses NetworkManager's
 D-Bus API, never `nmcli … password`: a command line is readable by every local
 user. It waits up to 60 s for the activation, so the shell runs it on a thread

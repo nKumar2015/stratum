@@ -155,6 +155,8 @@ pub struct NotificationServer {
     /// gone. It is a blocking connection so `close` can be called from the UI
     /// thread.
     connection: Mutex<Option<zbus::blocking::Connection>>,
+    /// Apps whose notifications are dropped (`AppMode::Off`).
+    off: Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl NotificationServer {
@@ -166,6 +168,7 @@ impl NotificationServer {
             }),
             sink,
             connection: Mutex::new(None),
+            off: Mutex::default(),
         })
     }
 
@@ -204,6 +207,17 @@ impl NotificationServer {
             store.notifications = notifications;
         }
         self.publish();
+    }
+
+    /// Drop the notifications of the apps `config` turns off, from now on.
+    pub fn set_rules(&self, config: &crate::config::NotificationsConfig) {
+        if let Ok(mut off) = self.off.lock() {
+            *off = config.apps.iter().filter(|(_, mode)| **mode == crate::config::AppMode::Off).map(|(app, _)| app.clone()).collect();
+        }
+    }
+
+    fn is_off(&self, app: &str) -> bool {
+        self.off.lock().is_ok_and(|off| off.contains(app))
     }
 
     /// The id the next notification will get, for saving.
@@ -390,10 +404,19 @@ impl Served {
             })
             .unwrap_or(0);
 
+        // An app turned off on the Notifications page: answered with an
+        // id, as the spec requires, and otherwise forgotten.
+        let off = self.inner.is_off(&app_name);
         let mut store = match self.inner.store.lock() {
             Ok(store) => store,
             Err(_) => return replaces_id,
         };
+        if off {
+            debug!("dropped a notification from {app_name}: turned off");
+            let id = store.next_id;
+            store.next_id = store.next_id.wrapping_add(1).max(1);
+            return id;
+        }
 
         // Replace in place only a notification that exists: a stale
         // replaces_id must not become an id that a later one collides with.

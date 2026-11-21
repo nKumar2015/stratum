@@ -31,6 +31,8 @@ Rules from the user that apply to every item:
 | Per-app outputs through an EQ for each device (a follow-up to the mixer) | `9a44aae` | pavucontrol |
 | Removable drives (7): udisks2, a bar icon and menu, toasts with Open and Eject, unmounted drives and Unmount/Eject in the file manager, a passphrase prompt for LUKS drives | committed 2026-11-20 | udiskie-style helpers (none installed) |
 | Battery menu revamp: stay awake and night light moved into it, the power mode as a draggable tachometer (asked for 2026-11-20) | `fb10c9b` | — |
+| Privacy indicators (10): microphone, camera (inotify on `/dev/video*`) and screen sharing (PipeWire screen-cast nodes), with a menu naming the apps | not yet committed | — |
+| DND schedule and per-app notification rules (11): toast, silent or off per app | not yet committed | — |
 
 On the user's side: the file manager is enabled in `~/nixos-config`;
 `nix flake update stratum` and a rebuild bring in everything pushed,
@@ -61,15 +63,17 @@ Estimated costs from the original plan; measure before committing
 
 | # | Feature | Idle | While open / binary |
 |---|---|---|---|
-| 10 | Privacy indicators: a bar dot while a mic or camera is in use (PipeWire stream state; the mixer's `recording` list already has the mic part) or the screen is shared (portal ScreenCast sessions) | ~0 | ~+10 KB |
-| 11 | Do-not-disturb schedules and per-app notification rules (mute, no toast, keep in history), on the Notifications page | ~0 | ~+15 KB |
 | 12 | Screen recording: a "record region" mode in the screenshot overlay running `wf-recorder` (or the portal), a stop button and timer in the bar | 0 | wf-recorder 30–60 MB while recording; ~+20 KB |
 | 13 | Colour picker: a screenshot-overlay mode with a magnifier, copies hex/rgb | 0 | a backdrop texture per output (~15 MB at 1440p) while open; ~+15 KB |
 | 14 | On-screen keyboard, touch gestures: only if the laptop is used as a tablet | — | — |
 | 15 | Polish: notifications grouped by app; keyboard-layout and Caps Lock widgets; a calendar popup on the clock (reuse `dashboard/agenda.rs`); a weather widget; per-output bar layouts | 0 | a few MB VRAM per popup; ~+10 KB each |
 
-(5, 6, 7, 8 and 9 of Tier 2, the overview, the switcher, removable
-drives, network extras and the mixer, are done.)
+(5 to 11 of Tier 2 are done.)
+
+Measured for 10 and 11 together (release, against `9f91705`): shell +100 KB
+(17.06 → 17.17 MB). Idle: one more sleeping thread (the camera's inotify
+watch); the screen-cast check rides on the PipeWire monitor's existing
+registry listener.
 
 Removable drives needed `services.udisks2.enable = true` in
 `~/nixos-config` (added 2026-11-20, not yet rebuilt). udisksd is D-Bus
@@ -106,5 +110,5 @@ option), since that is the pattern the user chose.
 
 ## Suggested next
 
-Privacy indicators (10): cheap, and the mixer already sees recording
-streams. Then DND schedules and per-app notification rules (11).
+Screen recording (12), whose own indicator the privacy dot could carry;
+or the colour picker (13), a mode of the screenshot overlay.

@@ -19,6 +19,7 @@ pub struct Metrics {
     pub bar: BarMetrics,
     pub workspaces: WorkspacesMetrics,
     pub tray: TrayMetrics,
+    pub privacy: PrivacyMetrics,
     pub osd: OsdMetrics,
     pub toasts: ToastMetrics,
     pub power_menu: PowerMenuMetrics,
@@ -146,6 +147,16 @@ impl WorkspacesMetrics {
     pub fn window_height(&self) -> f32 {
         self.visible as f32 * self.step() - self.gap
     }
+}
+
+/// The privacy indicator in the bar: its glyphs, the gap between them,
+/// and the padding inside its pill.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivacyMetrics {
+    pub icon: f32,
+    pub gap: f32,
+    pub padding: f32,
 }
 
 /// The tray strip.

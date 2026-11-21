@@ -42,6 +42,8 @@ pub struct Config {
     pub launcher: LauncherConfig,
     pub clipboard: ClipboardConfig,
     pub drives: DrivesConfig,
+    pub privacy: PrivacyConfig,
+    pub notifications: NotificationsConfig,
     pub night_light: NightLightConfig,
     pub files: FilesConfig,
     pub screenshot: ScreenshotConfig,
@@ -525,6 +527,8 @@ pub enum WidgetKind {
     NightLight,
     /// Removable drives: shown only while one is attached.
     Drives,
+    /// Microphone, camera and screen sharing in use: shown only then.
+    Privacy,
 }
 
 /// Look-and-feel knobs that are not colours.
@@ -936,6 +940,48 @@ pub struct ClipboardConfig {
     pub max_entries: usize,
     /// A copy larger than this is not recorded.
     pub max_entry_mb: usize,
+}
+
+/// Do Not Disturb's schedule and how each app's notifications are shown,
+/// set on the Notifications page.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationsConfig {
+    /// Turn Do Not Disturb on at `dnd_start` and off at `dnd_end`, daily.
+    pub dnd_schedule: bool,
+    /// `HH:MM`; the window may run past midnight.
+    pub dnd_start: String,
+    pub dnd_end: String,
+    /// By app name, as notifications give it; apps not named toast.
+    pub apps: BTreeMap<String, AppMode>,
+}
+
+impl NotificationsConfig {
+    /// How `app`'s notifications are shown.
+    pub fn mode(&self, app: &str) -> AppMode {
+        self.apps.get(app).copied().unwrap_or(AppMode::Toast)
+    }
+}
+
+/// How an app's notifications are shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppMode {
+    /// A toast, and kept in the list.
+    Toast,
+    /// Kept in the list without a toast.
+    Silent,
+    /// Dropped.
+    Off,
+}
+
+/// The privacy indicator (`crate::privacy` in the shell).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivacyConfig {
+    /// Watch the cameras. Read at start; the microphone and screen sharing
+    /// come from the audio monitor either way.
+    pub camera: bool,
 }
 
 /// Removable drives, through udisks2 (`crate::drives` in the shell).

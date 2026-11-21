@@ -23,6 +23,9 @@ impl App {
         self.state.dashboard_feed.spawn(Arc::clone(&self.state));
         self.dashboard.load_focus();
         self.set_drive_opener();
+        if self.config.privacy.camera {
+            crate::privacy::start(Arc::clone(&self.state));
+        }
         if self.config.drives.enabled {
             crate::drives::start(Arc::clone(&self.state), self.config.drives.notify, self.config.drives.automount);
         }
@@ -137,6 +140,7 @@ impl App {
             }
             self.notification_saver =
                 crate::notification_store::default_path().map(crate::notification_store::Saver::start);
+            server.set_rules(&self.config.notifications);
             self.notifications = Some(Arc::clone(&server));
             std::thread::Builder::new()
                 .name("stratum-notifications".into())
@@ -264,6 +268,9 @@ impl App {
                     self.clipboard_reconfigured();
                 }
                 self.set_drive_opener();
+                if let Some(server) = &self.notifications {
+                    server.set_rules(&self.config.notifications);
+                }
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
                 // An open settings window would otherwise keep the old
                 // config until restart.

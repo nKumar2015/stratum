@@ -33,6 +33,8 @@ pub enum HoverKind {
     Battery,
     /// Removable drives; it has no settings page.
     Drives,
+    /// Who is using the microphone, the camera or the screen.
+    Privacy,
 }
 
 impl HoverKind {
@@ -42,7 +44,7 @@ impl HoverKind {
             HoverKind::Bluetooth => Some(Page::Bluetooth),
             HoverKind::Wifi => Some(Page::Wifi),
             HoverKind::Battery => Some(Page::Battery),
-            HoverKind::Drives => None,
+            HoverKind::Drives | HoverKind::Privacy => None,
         }
     }
 }
@@ -213,6 +215,7 @@ impl HoverMenus {
             HoverKind::Wifi => ("\u{f0928}", "Network"),
             HoverKind::Battery => ("\u{f0084}", "Battery"),
             HoverKind::Drives => ("\u{f129e}", "Drives"),
+            HoverKind::Privacy => ("\u{f0208}", "In Use"),
         };
         frame.header(ctx, list, &format!("{glyph}  {title}"));
 
@@ -222,6 +225,7 @@ impl HoverMenus {
             HoverKind::Wifi => network(ctx, list, &mut frame),
             HoverKind::Battery => self.battery(ctx, list, &mut frame, input),
             HoverKind::Drives => drives(ctx, list, &mut frame),
+            HoverKind::Privacy => privacy(ctx, list, &mut frame),
         }
 
         if let Some(page) = kind.page() {
@@ -667,6 +671,37 @@ fn network(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
         if let (false, Some(pct)) = (ethernet, signal) {
             f.stat(ctx, list, "Signal", &format!("{pct}%"));
         }
+    }
+}
+
+/// What is in use, each with the apps using it.
+fn privacy(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
+    use crate::ui::widgets::privacy::{CAMERA, MICROPHONE, SCREEN};
+    let m = ctx.metrics.hover_menu.clone();
+    let shown = ctx.state.privacy();
+    if !shown.any() {
+        f.note(ctx, list, "Nothing is in use");
+        return;
+    }
+    let screen = if shown.screen { vec!["Being shared".to_string()] } else { Vec::new() };
+    for (glyph, title, color, apps) in [
+        (MICROPHONE, "Microphone", ctx.theme.warning, &shown.microphone),
+        (CAMERA, "Camera", ctx.theme.success, &shown.camera),
+        (SCREEN, "Screen", ctx.theme.error, &screen),
+    ] {
+        if apps.is_empty() {
+            continue;
+        }
+        let row = f.take(m.row_height);
+        ui::paint_text_vcentered(ctx, list, glyph, row.x, row, m.icon, ctx.metrics.typography.weight_regular, color);
+        let x = row.x + m.icon + m.gap;
+        ui::paint_text_vcentered(ctx, list, title, x, row, m.text, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
+        let names = ui::wrap_text(ctx, &apps.join(", "), m.caption, ctx.metrics.typography.weight_regular, row.width - (x - row.x), 3);
+        for name in names {
+            let line = f.take(line(&m, m.caption));
+            ui::paint_text_vcentered(ctx, list, &name, x, line, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
+        }
+        f.gap(m.row_gap);
     }
 }
 

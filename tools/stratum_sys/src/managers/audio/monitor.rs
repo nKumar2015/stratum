@@ -109,10 +109,22 @@ fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
     let watched_on_remove = Rc::clone(&watched);
     let schedule_on_global = Rc::clone(&schedule);
     let schedule_on_remove = Rc::clone(&schedule);
+    // Screens being shared and apps taking video, for the privacy
+    // indicator: published on their own channel when they change.
+    let video = Rc::new(RefCell::new(HashMap::<u32, VideoNode>::new()));
+    let video_on_global = Rc::clone(&video);
+    let video_on_remove = Rc::clone(&video);
+    let video_publisher = publisher.clone();
+    let video_publisher_on_remove = publisher.clone();
+    publish_video(&publisher, &video.borrow());
     let registry_weak = registry.downgrade();
     let _listener = registry
         .add_listener_local()
         .global(move |global| {
+            if let Some(node) = video_node(global) {
+                video_on_global.borrow_mut().insert(global.id, node);
+                publish_video(&video_publisher, &video_on_global.borrow());
+            }
             if let Some(registry) = registry_weak.upgrade() {
                 if let Some(entry) = watch(&registry, global, &schedule_on_global) {
                     watched_on_global.borrow_mut().insert(global.id, entry);
@@ -127,6 +139,9 @@ fn run_pipewire_event_loop(publisher: Publisher) -> Result<(), String> {
             }
         })
         .global_remove(move |id| {
+            if video_on_remove.borrow_mut().remove(&id).is_some() {
+                publish_video(&video_publisher_on_remove, &video_on_remove.borrow());
+            }
             watched_on_remove.borrow_mut().remove(&id);
             if relevant_ids_on_remove.borrow_mut().remove(&id) {
                 schedule_on_remove();
@@ -214,6 +229,50 @@ fn should_refresh_on_global(global: &GlobalObject<&pipewire::spa::utils::dict::D
         }
         _ => false,
     }
+}
+
+/// Video that says something about privacy.
+#[derive(Clone, Debug, PartialEq)]
+enum VideoNode {
+    /// A screen or window being shared: a `Video/Source` with no device
+    /// behind it, as the desktop portal's screen-cast streams are
+    /// (`xdph-streaming-*`). Cameras have `device.api` (v4l2, libcamera).
+    Screen,
+    /// An app taking video (`Stream/Input/Video`), by name: a camera or a
+    /// shared screen through PipeWire.
+    Client(String),
+}
+
+fn video_node(global: &GlobalObject<&pipewire::spa::utils::dict::DictRef>) -> Option<VideoNode> {
+    if global.type_ != ObjectType::Node {
+        return None;
+    }
+    match prop_value(global, &keys::MEDIA_CLASS)? {
+        "Video/Source" if prop_value(global, "device.api").is_none() => Some(VideoNode::Screen),
+        "Stream/Input/Video" => {
+            let name = ["application.name", "application.process.binary", "node.name"]
+                .iter()
+                .find_map(|key| prop_value(global, key).filter(|v| !v.is_empty()))
+                .unwrap_or("Unknown");
+            Some(VideoNode::Client(name.to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// `{"screens": n, "clients": [names]}` on the `video` channel.
+fn publish_video(publisher: &Publisher, nodes: &HashMap<u32, VideoNode>) {
+    let screens = nodes.values().filter(|n| **n == VideoNode::Screen).count();
+    let mut clients: Vec<&str> = nodes
+        .values()
+        .filter_map(|n| match n {
+            VideoNode::Client(name) => Some(name.as_str()),
+            VideoNode::Screen => None,
+        })
+        .collect();
+    clients.sort_unstable();
+    clients.dedup();
+    publisher.emit("video", json!({ "screens": screens, "clients": clients }));
 }
 
 /// An app playing or recording: `Stream/Output/Audio`, `Stream/Input/Audio`.

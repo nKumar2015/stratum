@@ -102,6 +102,20 @@ enabled = true          # read at start; off in a second shell
 max_entries = 250       # the oldest go first
 max_entry_mb = 16       # larger copies are not kept
 
+# Notifications, as the Notifications page sets them.
+[notifications]
+dnd_schedule = false    # Do Not Disturb from dnd_start to dnd_end, daily
+dnd_start = "22:00"
+dnd_end = "07:00"
+# By app name: "toast" (the default), "silent" (kept in the list, no toast)
+# or "off" (dropped). For example: apps = { Discord = "silent" }
+apps = {}
+
+# The privacy indicator: a dot in the bar while the microphone or camera
+# is in use or the screen is shared, naming the apps in its menu.
+[privacy]
+camera = true           # watch /dev/video*; read at start
+
 # Removable drives, through udisks2 (`services.udisks2.enable` in NixOS).
 # Nothing talks to udisks until a USB drive or card appears, since its
 # daemon stays up once started. A drive shows as an icon in the bar while
@@ -289,6 +303,11 @@ inverted_corners = true # scooped corners where the rail meets the screen edge
 
 [[sidebar.widgets]]
 kind = "launcher"
+framed = false
+
+# Only there while the microphone or camera is in use or a screen is shared.
+[[sidebar.widgets]]
+kind = "privacy"
 framed = false
 
 [[sidebar.widgets]]
@@ -654,6 +673,11 @@ stagger_ms = 28         # between one slice and the next
 slide_ms = 260          # the band sliding to a new focus
 close_ms = 160
 rise = 40.0             # how far slices rise while opening
+
+[metrics.privacy]
+icon = 14.0             # each dot's glyph
+gap = 4.0
+padding = 4.0           # inside its pill
 
 [metrics.hover_menu]
 open_ms = 350           # rest on an icon this long to open its menu

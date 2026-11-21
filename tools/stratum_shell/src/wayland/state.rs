@@ -65,6 +65,7 @@ macro_rules! paint_ctx {
             displays: &$app.config.displays,
             idle: &$app.config.idle,
             night_light: &$app.config.night_light,
+            notifications: &$app.config.notifications,
             output_name: $output,
             axis: $app.config.sidebar.axis(),
             dt: $dt,
@@ -231,6 +232,8 @@ pub struct App {
     hover_geometry: Option<(u32, i32, String)>,
     /// A press landed on the hover menu since its last paint.
     hover_clicked: bool,
+    /// Do Not Disturb's schedule (`crate::dnd`).
+    dnd_schedule: crate::dnd::Schedule,
     /// When the pointer left both the open tray menu and its icon.
     tray_menu_left_at: Option<std::time::Instant>,
     /// A press landed on the settings window since its last paint. Its pages
@@ -455,6 +458,7 @@ impl App {
             hover_surfaces: Vec::new(),
             hover_geometry: None,
             hover_clicked: false,
+            dnd_schedule: Default::default(),
             tray_menu_left_at: None,
             settings_press: false,
             last_frame: std::time::Instant::now(),

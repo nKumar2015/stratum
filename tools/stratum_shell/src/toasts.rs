@@ -72,6 +72,8 @@ pub struct Toasts {
     metrics: crate::ui::style::ToastMetrics,
     /// Do-not-disturb: keep the stack consistent, but do not add cards.
     muted: bool,
+    /// Apps whose notifications never toast (`AppMode::Silent`).
+    silent: std::collections::BTreeSet<String>,
     /// Card layouts from the last paint, for hit-testing and hover.
     layouts: Vec<(u32, CardLayout)>,
     /// The card under the pointer, which does not expire.
@@ -92,12 +94,18 @@ impl Toasts {
         self.muted = muted;
     }
 
+    /// The apps that are kept in the list without toasting.
+    pub fn set_silent(&mut self, config: &crate::config::NotificationsConfig) {
+        self.silent = config.apps.iter().filter(|(_, mode)| **mode == crate::config::AppMode::Silent).map(|(app, _)| app.clone()).collect();
+    }
+
     pub fn new(metrics: &crate::ui::style::ToastMetrics) -> Self {
         Self {
             entries: Vec::new(),
             dismissed: HashMap::new(),
             metrics: metrics.clone(),
             muted: false,
+            silent: Default::default(),
             layouts: Vec::new(),
             hovered: None,
             reply: None,
@@ -134,6 +142,12 @@ impl Toasts {
                 continue;
             }
             if self.dismissed.contains_key(&notification.id) {
+                continue;
+            }
+            if self.silent.contains(&notification.app_name) {
+                // Marked, so making the app toast again later does not
+                // bring back what it already sent.
+                self.dismissed.insert(notification.id, ());
                 continue;
             }
             if self.muted {

@@ -29,6 +29,7 @@ impl App {
         // Before the lock's early return: the colours follow the clock while
         // locked too.
         self.tick_night_light();
+        self.tick_dnd_schedule();
         // First, so a failure on any other surface cannot keep it from drawing.
         self.render_lock(dt);
         // A sleep held back for the lock screen goes ahead once it has drawn.
@@ -118,6 +119,7 @@ impl App {
         // their notifications, but no new card appears.
         if state_changed {
             self.toasts.set_muted(self.state.dnd.get());
+            self.toasts.set_silent(&self.config.notifications);
             let list = self.state.notifications.get();
             self.toasts.sync(&list);
             // Save for the next run whenever the list or DND changed.

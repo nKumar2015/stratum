@@ -40,6 +40,8 @@ pub struct PaintCtx<'a> {
     /// The settings the Battery and Display pages edit.
     pub idle: &'a crate::config::IdleConfig,
     pub night_light: &'a crate::config::NightLightConfig,
+    /// The Notifications page's settings.
+    pub notifications: &'a crate::config::NotificationsConfig,
     /// Which of `themes` are custom themes the user made (and may edit).
     pub custom_themes: &'a std::collections::BTreeSet<String>,
     /// Which output's bar is being painted (for per-monitor workspace focus).

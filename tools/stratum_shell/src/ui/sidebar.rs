@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::config::{Axis, Config, SidebarPosition, WidgetConfig, WidgetKind};
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::widgets::{
-    AppTitle, Battery, Clock, Drives, Icon, IconKind, IdleInhibit, Launcher, QuickPanel, Spacer, Tray,
+    AppTitle, Battery, Clock, Drives, Icon, Privacy, IconKind, IdleInhibit, Launcher, QuickPanel, Spacer, Tray,
     Workspaces,
 };
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
@@ -249,6 +249,7 @@ fn build_widget(entry: &WidgetConfig) -> Box<dyn Widget> {
         WidgetKind::Wifi => Box::new(Icon::new(IconKind::Wifi)),
         WidgetKind::Battery => Box::new(Battery::new()),
         WidgetKind::Drives => Box::new(Drives::default()),
+        WidgetKind::Privacy => Box::new(Privacy::default()),
         WidgetKind::Clock => Box::new(Clock::new()),
         WidgetKind::IdleInhibit => Box::new(IdleInhibit::default()),
         WidgetKind::NightLight => Box::new(crate::ui::widgets::NightLight::default()),

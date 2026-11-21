@@ -146,6 +146,11 @@ pub struct SystemState {
     /// An encrypted volume to ask the passphrase for, until the dialog
     /// opens.
     pub drives_unlock: Cell<Option<crate::drives::UnlockAsk>>,
+    /// Screens being shared and apps taking video, from the audio
+    /// monitor: `{"screens": n, "clients": [names]}`.
+    pub video: Cell<serde_json::Value>,
+    /// The processes holding a camera open (`crate::privacy`).
+    pub camera: Cell<Vec<String>>,
     /// How the last tracked action ended (`SystemAction::Tracked`), so the
     /// page that issued it can report the outcome.
     pub action_result: Cell<ActionResult>,
@@ -193,6 +198,8 @@ impl SystemState {
             net_rates: Cell::default(),
             net_rates_watch: Default::default(),
             drives: Cell::default(),
+            video: Cell::new(serde_json::Value::Null),
+            camera: Cell::default(),
             drives_busy: Cell::default(),
             drives_handle: Default::default(),
             drives_unlock: Cell::new(None),
@@ -200,6 +207,11 @@ impl SystemState {
             waker: Mutex::new(None),
             tray_handle: Mutex::new(None),
         })
+    }
+
+    /// What the privacy indicator shows now.
+    pub fn privacy(&self) -> crate::privacy::Indicators {
+        crate::privacy::Indicators::from_state(&self.audio.get(), &self.video.get(), &self.camera.get())
     }
 
     /// Install the running tray so actions can reach it.
@@ -254,6 +266,8 @@ impl SystemState {
             | self.dnd.take_dirty()
             | self.idle_inhibit.take_dirty()
             | self.drives.take_dirty()
+            | self.video.take_dirty()
+            | self.camera.take_dirty()
             | self.drives_busy.take_dirty()
             | self.drives_unlock.take_dirty()
             | self.action_result.take_dirty()
@@ -272,6 +286,7 @@ impl SystemState {
                 "battery" => state.battery.set(payload),
                 "music" => state.music.set(payload),
                 "polkit" => state.polkit.set(payload),
+                "video" => state.video.set(payload),
                 other => {
                     tracing::warn!("unhandled state channel: {other}");
                     false
