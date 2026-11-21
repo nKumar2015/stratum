@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::config::{Axis, Config, SidebarPosition, WidgetConfig, WidgetKind};
 use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::widgets::{
-    AppTitle, Battery, Clock, Icon, IconKind, IdleInhibit, Launcher, QuickPanel, Spacer, Tray,
+    AppTitle, Battery, Clock, Drives, Icon, IconKind, IdleInhibit, Launcher, QuickPanel, Spacer, Tray,
     Workspaces,
 };
 use crate::ui::{self, Action, ClickCtx, InputState, PaintCtx, Widget};
@@ -153,7 +153,9 @@ impl Sidebar {
             .collect();
 
         let fixed_total: f32 = heights.iter().flatten().sum();
-        let gaps = self.spacing * (self.widgets.len().saturating_sub(1)) as f32;
+        // A widget with nothing to show (an empty tray, no drives) takes
+        // no gap either.
+        let gaps = self.spacing * (heights.iter().filter(|s| **s != Some(0.0)).count().saturating_sub(1)) as f32;
         let flexible_count = heights.iter().filter(|h| h.is_none()).count();
         let available = (bottom - top - fixed_total - gaps).max(0.0);
         let flexible_height = if flexible_count > 0 {
@@ -174,7 +176,9 @@ impl Sidebar {
                 color: Color::TRANSPARENT,
             };
             widget.paint(ctx, list, rect, input);
-            cursor += height + self.spacing;
+            if intrinsic != Some(0.0) {
+                cursor += height + self.spacing;
+            }
         }
     }
 
@@ -198,7 +202,9 @@ impl Sidebar {
             .collect();
 
         let fixed_total: f32 = widths.iter().flatten().sum();
-        let gaps = self.spacing * (self.widgets.len().saturating_sub(1)) as f32;
+        // A widget with nothing to show (an empty tray, no drives) takes
+        // no gap either.
+        let gaps = self.spacing * (widths.iter().filter(|s| **s != Some(0.0)).count().saturating_sub(1)) as f32;
         let flexible_count = widths.iter().filter(|w| w.is_none()).count();
         let available = (right - left - fixed_total - gaps).max(0.0);
         let flexible_width = if flexible_count > 0 {
@@ -219,7 +225,9 @@ impl Sidebar {
                 color: Color::TRANSPARENT,
             };
             widget.paint(ctx, list, rect, input);
-            cursor += width + self.spacing;
+            if intrinsic != Some(0.0) {
+                cursor += width + self.spacing;
+            }
         }
     }
 }
@@ -240,6 +248,7 @@ fn build_widget(entry: &WidgetConfig) -> Box<dyn Widget> {
         WidgetKind::Bluetooth => Box::new(Icon::new(IconKind::Bluetooth)),
         WidgetKind::Wifi => Box::new(Icon::new(IconKind::Wifi)),
         WidgetKind::Battery => Box::new(Battery::new()),
+        WidgetKind::Drives => Box::new(Drives::default()),
         WidgetKind::Clock => Box::new(Clock::new()),
         WidgetKind::IdleInhibit => Box::new(IdleInhibit::default()),
         WidgetKind::NightLight => Box::new(crate::ui::widgets::NightLight::default()),

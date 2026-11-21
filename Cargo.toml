@@ -2,6 +2,7 @@
 members = [
     "tools/stratum_sys",
     "tools/stratum_ui",
+    "tools/stratum_drives",
     "tools/stratum_shell",
     "tools/stratum_files",
     "tools/stratum_cli",

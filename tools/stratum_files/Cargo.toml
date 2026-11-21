@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 # The renderer, theme, widgets and window runner the shell uses.
 stratum_ui = { path = "../stratum_ui" }
+# Drives through udisks, shared with the shell.
+stratum_drives = { path = "../stratum_drives" }
 # Thumbnails decoded here; anything else goes to the thumbnailers installed.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 # The thumbnail cache's Thumb::URI and Thumb::MTime text chunks; image

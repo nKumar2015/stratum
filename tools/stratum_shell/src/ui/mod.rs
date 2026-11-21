@@ -110,6 +110,8 @@ pub enum Action {
     ToggleIdleInhibit,
     /// Night light on or off by hand (the night_light icon).
     ToggleNightLight,
+    /// Open a hover menu at once (an icon with no page behind it).
+    ShowHoverMenu(crate::ui::hover_menu::OpenMenu),
 }
 
 /// Which mouse button produced a click.

@@ -202,6 +202,10 @@ impl App {
                 self.set_idle_inhibited(inhibited);
             }
             Action::ToggleNightLight => self.night_light_command("toggle"),
+            Action::ShowHoverMenu(menu) => {
+                self.hover_menus.intent.show(menu);
+                self.mark_hover_dirty();
+            }
             Action::OpenDashboard(output) => {
                 if !self.dashboard.is_open() {
                     self.dashboard.open_on(&output, None);

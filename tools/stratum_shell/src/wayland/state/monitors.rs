@@ -8,6 +8,13 @@ impl App {
     /// The managers publish into `SystemState` from their own threads, so the
     /// UI thread only ever reads. Hyprland changes wake the render loop by
     /// marking every surface dirty.
+    /// What a drive's folder is opened with, after a start or reload.
+    pub(super) fn set_drive_opener(&self) {
+        let mut command = self.config.launcher.launch_prefix.clone();
+        command.extend(self.config.drives.open_command.iter().cloned());
+        self.state.drives_handle.set_open_command(command);
+    }
+
     pub(super) fn start_monitors(&mut self) {
         use stratum_sys::managers;
 
@@ -15,6 +22,10 @@ impl App {
         self.actions.start_worker(Arc::clone(&self.state));
         self.state.dashboard_feed.spawn(Arc::clone(&self.state));
         self.dashboard.load_focus();
+        self.set_drive_opener();
+        if self.config.drives.enabled {
+            crate::drives::start(Arc::clone(&self.state), self.config.drives.notify, self.config.drives.automount);
+        }
 
         // The managers' async entry points expect a Tokio runtime. The shell's
         // UI thread runs calloop, so give them a small dedicated runtime.
@@ -252,6 +263,7 @@ impl App {
                 if clipboard_changed {
                     self.clipboard_reconfigured();
                 }
+                self.set_drive_opener();
                 self.sidebar = Sidebar::new(Arc::clone(&self.config));
                 // An open settings window would otherwise keep the old
                 // config until restart.

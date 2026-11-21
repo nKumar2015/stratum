@@ -137,6 +137,15 @@ pub struct SystemState {
     /// them (`net_rates`).
     pub net_rates: Cell<crate::net_rates::NetRates>,
     pub net_rates_watch: crate::net_rates::Watch,
+    /// Drives with a filesystem to show, published by the drive watcher
+    /// (`crate::drives`) once it has had reason to ask udisks.
+    pub drives: Cell<Vec<stratum_drives::Drive>>,
+    /// Drives and filesystems with an operation under way, by object path.
+    pub drives_busy: Cell<Vec<String>>,
+    pub drives_handle: crate::drives::Handle,
+    /// An encrypted volume to ask the passphrase for, until the dialog
+    /// opens.
+    pub drives_unlock: Cell<Option<crate::drives::UnlockAsk>>,
     /// How the last tracked action ended (`SystemAction::Tracked`), so the
     /// page that issued it can report the outcome.
     pub action_result: Cell<ActionResult>,
@@ -183,6 +192,10 @@ impl SystemState {
             hotspot_password: Cell::new(None),
             net_rates: Cell::default(),
             net_rates_watch: Default::default(),
+            drives: Cell::default(),
+            drives_busy: Cell::default(),
+            drives_handle: Default::default(),
+            drives_unlock: Cell::new(None),
             action_result: Cell::new(ActionResult::default()),
             waker: Mutex::new(None),
             tray_handle: Mutex::new(None),
@@ -240,6 +253,9 @@ impl SystemState {
             | self.theme_wallpapers.take_dirty()
             | self.dnd.take_dirty()
             | self.idle_inhibit.take_dirty()
+            | self.drives.take_dirty()
+            | self.drives_busy.take_dirty()
+            | self.drives_unlock.take_dirty()
             | self.action_result.take_dirty()
     }
 

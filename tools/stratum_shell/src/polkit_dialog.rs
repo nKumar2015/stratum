@@ -10,6 +10,12 @@
 //!
 //! Like the power menu it is a fullscreen overlay with exclusive keyboard
 //! focus, mapped only on the output that was focused when the request came in.
+//!
+//! The same dialog asks for an encrypted drive's passphrase
+//! ([`Purpose::Unlock`], from `crate::drives`): a passphrase is a secret
+//! typed into the shell the same way, and one dialog holds the keyboard at
+//! a time. A polkit request that arrives meanwhile takes its place, since a
+//! program is waiting on it.
 
 use serde_json::Value;
 
@@ -18,13 +24,26 @@ use crate::render::display_list::{Color, DisplayList, Point, Rect};
 use crate::ui::text_field::{FieldKey, FieldStyle, TextField};
 use crate::ui::{self, PaintCtx};
 
-/// One request from polkitd.
+/// What the dialog is asking for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// polkitd asks for the user's password.
+    Polkit,
+    /// A LUKS volume's passphrase, by udisks object; `open` opens the
+    /// filesystem once it is mounted.
+    Unlock { volume: String, open: bool },
+}
+
+/// One request: from polkitd, or to unlock a drive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub cookie: String,
+    /// The polkit action, or the drive's name.
     pub action: String,
     pub message: String,
+    /// The user whose password polkit wants, or the volume's name.
     pub user: String,
+    pub purpose: Purpose,
 }
 
 /// Something the caller has to do.
@@ -42,15 +61,25 @@ pub enum DialogAction {
     /// The user closed the dialog; tell the agent so the requester stops
     /// waiting.
     Dismiss { cookie: String },
+    /// Unlock this volume with the passphrase, and answer with a
+    /// [`Verdict`] for `cookie`.
+    Unlock {
+        cookie: String,
+        volume: String,
+        passphrase: Secret,
+        open: bool,
+    },
 }
 
 /// The answer to a submitted password.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Accepted,
     Retry { remaining: u32 },
     /// No attempts left; the agent has already failed the request.
     Exhausted,
+    /// Not accepted, with why (a wrong passphrase); the dialog stays open.
+    Failed(String),
 }
 
 /// Placement of the card's interactive parts from the last paint.
@@ -130,6 +159,7 @@ impl PolkitDialog {
                 action: text("action"),
                 message: text("message"),
                 user: text("user"),
+                purpose: Purpose::Polkit,
             });
             self.target = Some(focused.to_string());
             self.field.clear();
@@ -140,15 +170,38 @@ impl PolkitDialog {
         }
 
         // The agent finished a request: closed by polkitd, answered, or
-        // exhausted. An inactive payload without a cookie closes whatever is
-        // open.
+        // exhausted. An inactive payload without a cookie closes whatever
+        // polkit request is open, never an unlock.
         match &self.request {
-            Some(request) if cookie.is_empty() || request.cookie == cookie => {
+            Some(request) if request.purpose == Purpose::Polkit && (cookie.is_empty() || request.cookie == cookie) => {
                 self.close();
                 true
             }
             _ => false,
         }
+    }
+
+    /// Ask for the passphrase of the encrypted `volume` (a udisks object),
+    /// named `name` on the drive `drive`, on the output `focused`. Refused
+    /// (false) while another request is open.
+    pub fn open_unlock(&mut self, volume: &str, name: &str, drive: &str, open: bool, focused: &str) -> bool {
+        if self.request.is_some() {
+            return false;
+        }
+        self.request = Some(Request {
+            cookie: format!("unlock:{volume}"),
+            action: drive.to_string(),
+            message: format!("Enter the passphrase to unlock {name}."),
+            user: name.to_string(),
+            purpose: Purpose::Unlock { volume: volume.to_string(), open },
+        });
+        self.closed = None;
+        self.target = Some(focused.to_string());
+        self.field.clear();
+        self.verifying = false;
+        self.error = None;
+        self.hits = None;
+        true
     }
 
     fn close(&mut self) {
@@ -168,10 +221,18 @@ impl PolkitDialog {
         };
         self.verifying = true;
         self.error = None;
-        DialogAction::Submit {
-            cookie: request.cookie.clone(),
-            user: request.user.clone(),
-            password,
+        match &request.purpose {
+            Purpose::Polkit => DialogAction::Submit {
+                cookie: request.cookie.clone(),
+                user: request.user.clone(),
+                password,
+            },
+            Purpose::Unlock { volume, open } => DialogAction::Unlock {
+                cookie: request.cookie.clone(),
+                volume: volume.clone(),
+                passphrase: password,
+                open: *open,
+            },
         }
     }
 
@@ -180,8 +241,14 @@ impl PolkitDialog {
             return DialogAction::None;
         };
         let cookie = request.cookie.clone();
+        let polkit = request.purpose == Purpose::Polkit;
         self.close();
-        DialogAction::Dismiss { cookie }
+        // Nothing waits on an unlock: closing it is all.
+        if polkit {
+            DialogAction::Dismiss { cookie }
+        } else {
+            DialogAction::Redraw
+        }
     }
 
     pub fn key(
@@ -245,6 +312,11 @@ impl PolkitDialog {
                     if remaining == 1 { "" } else { "s" }
                 ));
             }
+            Verdict::Failed(why) => {
+                self.verifying = false;
+                self.field.clear();
+                self.error = Some(why);
+            }
         }
         true
     }
@@ -262,6 +334,7 @@ impl PolkitDialog {
         // Wrap first: the card's height follows its text.
         let inner_w = m.width - m.padding * 2.0;
         let title_w = inner_w - m.icon - m.icon_gap;
+        let unlock = request.purpose != Purpose::Polkit;
         let action = if request.action.is_empty() {
             "System action requires elevation.".to_string()
         } else {
@@ -330,11 +403,11 @@ impl PolkitDialog {
             color: Color::TRANSPARENT,
         };
 
-        // Header: shield glyph, title, action id.
+        // Header: shield (or lock) glyph, title, action id (or drive).
         ui::paint_text_centered(
             ctx,
             list,
-            "\u{f15fc}",
+            if unlock { "\u{f033e}" } else { "\u{f15fc}" },
             row(x, y, m.icon, m.icon),
             m.icon,
             theme.primary,
@@ -344,7 +417,7 @@ impl PolkitDialog {
         ui::paint_text_vcentered(
             ctx,
             list,
-            "Authentication Required",
+            if unlock { "Unlock Encrypted Drive" } else { "Authentication Required" },
             tx,
             row(tx, ty, title_w, line(m.title)),
             m.title,
@@ -385,7 +458,7 @@ impl PolkitDialog {
         ui::paint_text_vcentered(
             ctx,
             list,
-            &format!("Password for {}", request.user),
+            &if unlock { "Passphrase".to_string() } else { format!("Password for {}", request.user) },
             x,
             row(x, y, inner_w, line(m.caption)),
             m.caption,
@@ -425,10 +498,12 @@ impl PolkitDialog {
         );
         y += m.field_height + 8.0;
         if let Some(error) = &self.error {
+            // One line: udisks' reasons can be long.
+            let error = ui::elide(ctx, error, m.caption, typo.weight_bold, inner_w);
             ui::paint_text_vcentered(
                 ctx,
                 list,
-                error,
+                &error,
                 x,
                 row(x, y, inner_w, line(m.caption)),
                 m.caption,
@@ -490,10 +565,11 @@ impl PolkitDialog {
         ui::paint_text_centered_weighted(
             ctx,
             list,
-            if self.verifying {
-                "Verifying..."
-            } else {
-                "Authenticate"
+            match (self.verifying, unlock) {
+                (true, true) => "Unlocking...",
+                (true, false) => "Verifying...",
+                (false, true) => "Unlock",
+                (false, false) => "Authenticate",
             },
             confirm,
             typo.body,
@@ -631,6 +707,37 @@ mod tests {
         dialog.sync(&request("c2"), "a");
         assert!(!dialog.verdict("c1", Verdict::Accepted));
         assert!(dialog.is_open());
+    }
+
+    #[test]
+    fn an_unlock_asks_for_a_passphrase_and_survives_polkit_going_idle() {
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
+        assert!(dialog.open_unlock("/o/sdb2", "Secret", "SanDisk", true, "eDP-1"));
+        assert_eq!(dialog.target(), Some("eDP-1"));
+        assert!(!dialog.open_unlock("/o/sdb3", "Other", "SanDisk", true, "eDP-1"), "one at a time");
+        // The agent publishing that nothing is pending leaves it open.
+        assert!(!dialog.sync(&json!({"active": false}), "eDP-1"));
+        assert!(dialog.is_open());
+        typed(&mut dialog, "hunter2");
+        let DialogAction::Unlock { cookie, volume, passphrase, open } = dialog.key(Keysym::Return, None, false) else {
+            panic!("expected an unlock");
+        };
+        assert_eq!((cookie.as_str(), volume.as_str(), passphrase.expose(), open), ("unlock:/o/sdb2", "/o/sdb2", "hunter2", true));
+        assert!(dialog.verdict(&cookie, Verdict::Failed("Incorrect passphrase".into())));
+        assert!(dialog.is_open(), "a wrong passphrase may be retyped");
+        assert_eq!(dialog.error.as_deref(), Some("Incorrect passphrase"));
+        assert!(matches!(dialog.key(Keysym::Escape, None, false), DialogAction::Redraw), "no agent to tell");
+        assert!(!dialog.is_open());
+    }
+
+    #[test]
+    fn a_polkit_request_takes_over_an_unlock() {
+        let mut dialog = PolkitDialog::new(&crate::config::Config::test_defaults().metrics.polkit);
+        dialog.open_unlock("/o/sdb2", "Secret", "SanDisk", false, "a");
+        assert!(dialog.sync(&request("c1"), "a"));
+        typed(&mut dialog, "pw");
+        assert!(matches!(dialog.key(Keysym::Return, None, false), DialogAction::Submit { .. }));
+        assert!(!dialog.verdict("unlock:/o/sdb2", Verdict::Accepted), "the unlock's answer is dropped");
     }
 
     #[test]

@@ -11,6 +11,7 @@ mod browser;
 mod chooser;
 mod clipboard;
 mod dnd;
+mod drives;
 mod entries;
 mod mime;
 mod open;

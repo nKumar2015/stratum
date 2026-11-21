@@ -7,6 +7,7 @@
 pub mod app_title;
 pub mod battery;
 pub mod clock;
+pub mod drives;
 pub mod icon;
 pub mod idle_inhibit;
 pub mod night_light;
@@ -19,6 +20,7 @@ pub mod workspaces;
 pub use app_title::AppTitle;
 pub use battery::Battery;
 pub use clock::Clock;
+pub use drives::Drives;
 pub use icon::{Icon, IconKind};
 pub use idle_inhibit::IdleInhibit;
 pub use night_light::NightLight;

@@ -46,6 +46,7 @@ stratum_ui = { path = "../stratum_ui" }
 
 # System managers. The shell embeds them directly.
 stratum_sys = { path = "../stratum_sys" }
+stratum_drives = { path = "../stratum_drives" }
 # The managers use tokio internally; the shell gives them a small runtime on a
 # worker thread instead of blocking the Wayland loop.
 tokio = { workspace = true }

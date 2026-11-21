@@ -2082,6 +2082,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "stratum_drives",
  "stratum_ui",
  "tracing",
  "tracing-subscriber",
@@ -2103,6 +2104,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smithay-client-toolkit",
+ "stratum_drives",
  "stratum_sys",
  "stratum_ui",
  "tokio",
@@ -2113,6 +2115,16 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
+ "zbus",
+]
+
+[[package]]
+name = "stratum_drives"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "tracing",
  "zbus",
 ]
 

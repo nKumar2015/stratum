@@ -28,6 +28,8 @@ Rules from the user that apply to every item:
 | `stratum_ui` crate; file manager and FileChooser portal | `5d18075` `79ac476` | thunar |
 | File manager's next round: long paths, other-drive trash, undo, preview, thumbnails, drag and drop, Hyprland portal fix, loaf-fm look, bookmarks | `81ab92c` … `b9e29a0` (pushed 2026-11-20) | — |
 | Workspace overview (5) and window switcher (6), over `hyprland-toplevel-export-v1` | `6d14f17` (pushed 2026-11-20); empty workspaces hidden from the overview afterwards | — |
+| Per-app outputs through an EQ for each device (a follow-up to the mixer) | `9a44aae` | pavucontrol |
+| Removable drives (7): udisks2, a bar icon and menu, toasts with Open and Eject, unmounted drives and Unmount/Eject in the file manager, a passphrase prompt for LUKS drives | committed 2026-11-20 | udiskie-style helpers (none installed) |
 
 On the user's side: the file manager is enabled in `~/nixos-config`;
 `nix flake update stratum` and a rebuild bring in everything pushed,
@@ -58,7 +60,6 @@ Estimated costs from the original plan; measure before committing
 
 | # | Feature | Idle | While open / binary |
 |---|---|---|---|
-| 7 | Removable drives (udisks2 over zbus): a toast when one appears, mount / unmount / eject, a bar icon, "Open" in the file manager (whose Drives section would gain unmounted drives too) | < 1 MB | ~+40 KB |
 | 10 | Privacy indicators: a bar dot while a mic or camera is in use (PipeWire stream state; the mixer's `recording` list already has the mic part) or the screen is shared (portal ScreenCast sessions) | ~0 | ~+10 KB |
 | 11 | Do-not-disturb schedules and per-app notification rules (mute, no toast, keep in history), on the Notifications page | ~0 | ~+15 KB |
 | 12 | Screen recording: a "record region" mode in the screenshot overlay running `wf-recorder` (or the portal), a stop button and timer in the bar | 0 | wf-recorder 30–60 MB while recording; ~+20 KB |
@@ -66,8 +67,23 @@ Estimated costs from the original plan; measure before committing
 | 14 | On-screen keyboard, touch gestures: only if the laptop is used as a tablet | — | — |
 | 15 | Polish: notifications grouped by app; keyboard-layout and Caps Lock widgets; a calendar popup on the clock (reuse `dashboard/agenda.rs`); a weather widget; per-output bar layouts | 0 | a few MB VRAM per popup; ~+10 KB each |
 
-(5, 6, 8 and 9 of Tier 2, the overview, the switcher, network extras and
-the mixer, are done.)
+(5, 6, 7, 8 and 9 of Tier 2, the overview, the switcher, removable
+drives, network extras and the mixer, are done.)
+
+Removable drives needed `services.udisks2.enable = true` in
+`~/nixos-config` (added 2026-11-20, not yet rebuilt). udisksd is D-Bus
+activated and stays up once started (~10–15 MB, system-wide), so the shell
+waits for a removable disk in `/dev` before asking it anything; the file
+manager starts it when it lists drives. Tested against a stand-in udisks
+only: not yet with a real USB stick, polkit or an unlocked LUKS drive.
+Not built: `stratum-cli` commands for drives.
+
+Measured for 7 before the passphrase prompt (release builds against `9a44aae`): shell +385 KB
+(17.21 → 17.59 MB), file manager +454 KB (12.54 → 12.99 MB), mostly zbus's
+blocking calls and zvariant's (de)serialisers, far over the +40 KB
+estimated; using plain `call_method` instead of `Proxy` took ~200 KB off
+the file manager. Idle, with no removable drive and udisks not running:
+RSS unchanged within noise (66.55 vs 66.52 MB), two more sleeping threads.
 
 Also from this round:
 - Network locations in the file manager: put off by the user
@@ -89,6 +105,5 @@ option), since that is the pattern the user chose.
 
 ## Suggested next
 
-Removable drives (7), since the file manager's Drives section and the
-toasts both want it; then privacy indicators (10), cheap and the mixer
-already sees recording streams.
+Privacy indicators (10): cheap, and the mixer already sees recording
+streams. Then DND schedules and per-app notification rules (11).

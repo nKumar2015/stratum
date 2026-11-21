@@ -47,6 +47,8 @@ tools/stratum_sys/     library: system managers (audio, wifi, bluetooth,
                        polkit), host-agnostic; queries return JSON
                        snapshots, and the audio monitor and polkit agent
                        publish theirs through `Publisher`
+tools/stratum_drives/  drives through udisks2 (zbus only), shared by the
+                       shell and the file manager
 tools/stratum_cli/     CLI, a socket client only; its IPC targets are the
                        contract external keybinds use
 tools/stratum_ui/      what the shell and its apps share: the renderer,
@@ -485,6 +487,38 @@ get keys only while the settings window has keyboard focus. Every pointer
 event over the window marks it dirty: without that, hover and drags were
 only seen when something else repainted.
 
+**Removable drives** (`tools/stratum_drives`, the shell's `drives.rs`,
+`ui/widgets/drives.rs`, the `Drives` hover menu; in the file manager
+`drives.rs` and `places::with_drives`) go through udisks2, which the NixOS
+config must enable (`services.udisks2.enable`; the module warns). udisksd is
+D-Bus activated and stays up once started (~10–15 MB), so the shell does
+not ask it anything until there is a reason: `wait_for_disk` sleeps on an
+inotify watch of `/dev` unless a disk on USB, MMC, FireWire or Thunderbolt
+(or marked removable) is attached, or udisks already runs. The file manager
+starts it by listing drives. `parse` turns `GetManagedObjects` into drives
+and their filesystems (ignored partitions, loop devices and the system's own
+mounts left out; an unlocked LUKS volume shown as its filesystem). Opening a
+locked one asks for its passphrase: in the shell, the polkit dialog with
+`Purpose::Unlock` (`SystemState::drives_unlock` carries the request to the
+loop; a wrong passphrase keeps it open with udisks' innermost reason); in
+the file manager, a dialog of its own. Eject locks it again before
+powering off. The polkit dialog renders last of the overlays and waits for
+a mapped hover menu to close: mapping it in the pass where the menu or a
+toast that asked for it unmaps is the configure race. The bar
+icon is there only while a removable drive is attached (a widget sized 0
+takes no gap either); resting on it or clicking it opens the menu, which has
+no settings page. Each new filesystem toasts over the session bus with Open
+and Eject, titled by the filesystem's name: the server replaces a
+notification with the same app and title. A toast goes when its drive does.
+Mount, unmount and eject run on threads of their own, never the action
+worker, since a mount may wait for a polkit password; failures post a
+notification. A drive opens with `[launcher] launch_prefix` +
+`[drives] open_command` (`stratum-files`; the module sets `xdg-open` without
+the file manager: here `xdg-open` on a folder opens VS Code). Test against a
+stand-in udisks on a private bus (`DBUS_SYSTEM_BUS_ADDRESS`; zbus's
+`fdo::ObjectManager` at `/org/freedesktop/UDisks2` with Drive, Block and
+Filesystem objects), never by mounting or powering off a real drive.
+
 **Wi-Fi connect** (`stratum_sys::managers::wifi::connect`) uses NetworkManager's
 D-Bus API, never `nmcli … password`: a command line is readable by every local
 user. It waits up to 60 s for the activation, so the shell runs it on a thread
@@ -722,10 +756,10 @@ every commit.
 
 The installed shell owns `org.freedesktop.Notifications`,
 `org.kde.StatusNotifierWatcher`, the polkit agent, the idle stages and the
-logind sleep lock, the clipboard history, and the IPC socket. A second shell needs
+logind sleep lock, the clipboard history, the drive toasts, and the IPC socket. A second shell needs
 `[behavior] tray = false`, `notifications = false`, `polkit = false`,
-`[idle] enabled = false`, `[clipboard] enabled = false` and its own
-`STRATUM_SOCKET`. To exercise notifications or the
+`[idle] enabled = false`, `[clipboard] enabled = false`,
+`[drives] enabled = false` and its own `STRATUM_SOCKET`. To exercise notifications or the
 tray in a dev build, use a private bus instead:
 
 ```sh

@@ -102,6 +102,16 @@ enabled = true          # read at start; off in a second shell
 max_entries = 250       # the oldest go first
 max_entry_mb = 16       # larger copies are not kept
 
+# Removable drives, through udisks2 (`services.udisks2.enable` in NixOS).
+# Nothing talks to udisks until a USB drive or card appears, since its
+# daemon stays up once started. A drive shows as an icon in the bar while
+# it is attached; rest on it for its menu.
+[drives]
+enabled = true          # read at start; off in a second shell
+notify = true           # a toast when a drive is plugged in
+automount = false       # mount a new drive at once instead of on Open
+open_command = ["stratum-files"] # gets the folder last; e.g. ["thunar"]
+
 # Night light: warmer screens at night, set on the Display page or with
 # `stratum-cli nightlight on|off|toggle|auto`. Only one program may set an
 # output's colours, so it reports a conflict while gammastep or hyprsunset
@@ -291,6 +301,11 @@ framed = false
 
 [[sidebar.widgets]]
 kind = "tray"
+framed = false
+
+# Only there while a removable drive is attached.
+[[sidebar.widgets]]
+kind = "drives"
 framed = false
 
 # Container: draws a rounded frame and stacks its children.

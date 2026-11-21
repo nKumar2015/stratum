@@ -162,9 +162,29 @@ pub enum SystemAction {
     },
     /// Hide the tray menu.
     TrayMenuClose,
+    /// Mount, open, unmount or eject a drive (`crate::drives`). Run on a
+    /// thread of its own, since a mount may wait for a polkit password.
+    Drive(crate::drives::DriveOp),
     /// Post a desktop notification, through whichever server holds the
     /// session's (this shell's own, usually). `urgency` is the spec's 0–2.
     Notify { app: &'static str, icon: &'static str, urgency: u8, summary: String, body: String },
+}
+
+/// Post a notification and return its id. Over the bus even to this
+/// shell's own server, so DND, the toast and the notification centre treat
+/// it like any other. `actions` are key/label pairs, flattened.
+pub fn notify(app: &str, icon: &str, urgency: u8, summary: &str, body: &str, actions: &[&str]) -> Result<u32, String> {
+    let bus = zbus::blocking::Connection::session().map_err(|err| format!("no session bus: {err}"))?;
+    let hints = std::collections::HashMap::from([("urgency", zbus::zvariant::Value::U8(urgency))]);
+    bus.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &(app, 0u32, icon, summary, body, actions, hints, -1i32),
+    )
+    .and_then(|reply| reply.body().deserialize::<u32>())
+    .map_err(|err| format!("notify failed: {err}"))
 }
 
 /// What `SystemAction::BluetoothDevice` does.
@@ -238,6 +258,10 @@ impl ActionQueue {
                         if let Err(err) = spawned {
                             tracing::warn!("action failed: {err}");
                         }
+                        continue;
+                    }
+                    if let SystemAction::Drive(op) = action {
+                        crate::drives::spawn(&state, op, true);
                         continue;
                     }
                     run(ticket, &action, &state);
@@ -616,19 +640,10 @@ fn execute(action: &SystemAction, state: &SystemState) -> Result<(), String> {
             }
             serde_json::json!({ "ok": true })
         }
+        // Started on a thread of its own by the worker, never run here.
+        SystemAction::Drive(_) => serde_json::json!({ "ok": true }),
         SystemAction::Notify { app, icon, urgency, summary, body } => {
-            // Over the bus even to this shell's own server, so DND, the
-            // toast and the notification centre treat it like any other.
-            let bus = zbus::blocking::Connection::session().map_err(|err| format!("no session bus: {err}"))?;
-            let hints = std::collections::HashMap::from([("urgency", zbus::zvariant::Value::U8(*urgency))]);
-            bus.call_method(
-                Some("org.freedesktop.Notifications"),
-                "/org/freedesktop/Notifications",
-                Some("org.freedesktop.Notifications"),
-                "Notify",
-                &(*app, 0u32, *icon, summary, body, Vec::<&str>::new(), hints, -1i32),
-            )
-            .map_err(|err| format!("notify failed: {err}"))?;
+            notify(app, icon, *urgency, summary, body, &[])?;
             serde_json::json!({ "ok": true })
         }
     };

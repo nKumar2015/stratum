@@ -85,7 +85,6 @@ impl App {
         self.render_osd(theme, dt)?;
         self.render_toasts(theme, dt)?;
         self.render_power_menu(theme, dt)?;
-        self.render_polkit_dialog(theme, dt, state_changed)?;
         self.render_hover_menu(theme, dt, state_changed)?;
         self.render_dashboard(theme, dt, state_changed)?;
         self.render_screenshot(theme, dt)?;
@@ -95,6 +94,10 @@ impl App {
         self.render_launcher(theme, dt)?;
         self.render_overview(theme, dt)?;
         self.render_window_switcher(theme, dt)?;
+        // Last of the overlays: a dialog that maps after the others have
+        // unmapped in this pass (a toast or menu that asked for it) avoids
+        // wlroots' configure race; one that maps before them does not.
+        self.render_polkit_dialog(theme, dt, state_changed)?;
         self.render_bars(theme, dt)
     }
 
@@ -394,6 +397,21 @@ impl App {
             let focused = self.focused_output();
             let payload = self.state.polkit.get();
             if self.polkit_dialog.sync(&payload, &focused) {
+                self.mark_polkit_dirty();
+            }
+        }
+        // A drive's passphrase, once no other request holds the dialog.
+        // Not while a hover menu is mapped (it usually asked for this, and
+        // is closing): mapping the dialog in the pass that unmaps the menu
+        // is the configure race that makes sway kill the client. The menu
+        // is closed, unmaps below, and the dialog opens on the next pass.
+        if let Some(ask) = self.state.drives_unlock.get() {
+            if self.hover_surfaces.iter().any(|e| e.mapped) {
+                self.hover_menus.intent.close();
+                self.mark_hover_dirty();
+                self.state.notify();
+            } else if self.polkit_dialog.open_unlock(&ask.volume, &ask.name, &ask.drive, ask.open, &self.focused_output()) {
+                self.state.drives_unlock.set(None);
                 self.mark_polkit_dirty();
             }
         }

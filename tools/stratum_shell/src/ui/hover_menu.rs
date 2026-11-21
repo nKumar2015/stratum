@@ -31,15 +31,18 @@ pub enum HoverKind {
     Bluetooth,
     Wifi,
     Battery,
+    /// Removable drives; it has no settings page.
+    Drives,
 }
 
 impl HoverKind {
-    pub fn page(self) -> Page {
+    pub fn page(self) -> Option<Page> {
         match self {
-            HoverKind::Audio => Page::Audio,
-            HoverKind::Bluetooth => Page::Bluetooth,
-            HoverKind::Wifi => Page::Wifi,
-            HoverKind::Battery => Page::Battery,
+            HoverKind::Audio => Some(Page::Audio),
+            HoverKind::Bluetooth => Some(Page::Bluetooth),
+            HoverKind::Wifi => Some(Page::Wifi),
+            HoverKind::Battery => Some(Page::Battery),
+            HoverKind::Drives => None,
         }
     }
 }
@@ -67,6 +70,13 @@ pub struct HoverIntent {
 impl HoverIntent {
     pub fn open(&self) -> Option<&OpenMenu> {
         self.open.as_ref()
+    }
+
+    /// Open `menu` now, as a click on an icon without a page does.
+    pub fn show(&mut self, menu: OpenMenu) {
+        self.open = Some(menu);
+        self.resting = None;
+        self.left_at = None;
     }
 
     pub fn close(&mut self) {
@@ -190,6 +200,7 @@ impl HoverMenus {
             HoverKind::Bluetooth => ("\u{f00af}", "Quick Connect"),
             HoverKind::Wifi => ("\u{f0928}", "Network"),
             HoverKind::Battery => ("\u{f0084}", "Battery"),
+            HoverKind::Drives => ("\u{f129e}", "Drives"),
         };
         frame.header(ctx, list, &format!("{glyph}  {title}"));
 
@@ -198,11 +209,14 @@ impl HoverMenus {
             HoverKind::Bluetooth => bluetooth(ctx, list, &mut frame),
             HoverKind::Wifi => network(ctx, list, &mut frame),
             HoverKind::Battery => self.battery(ctx, list, &mut frame),
+            HoverKind::Drives => drives(ctx, list, &mut frame),
         }
 
-        frame.gap(m.section_gap);
-        if frame.link(ctx, list, "Open full settings \u{2192}") {
-            frame.events.push(MenuEvent::OpenPage(kind.page()));
+        if let Some(page) = kind.page() {
+            frame.gap(m.section_gap);
+            if frame.link(ctx, list, "Open full settings \u{2192}") {
+                frame.events.push(MenuEvent::OpenPage(page));
+            }
         }
         let height = frame.y + m.padding - origin.y;
         let card = Rect {
@@ -438,6 +452,109 @@ fn network(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
         }
         if let (false, Some(pct)) = (ethernet, signal) {
             f.stat(ctx, list, "Signal", &format!("{pct}%"));
+        }
+    }
+}
+
+/// Each removable drive with an eject button, and its filesystems: a click
+/// opens one (mounting it first), and a mounted one can be unmounted.
+fn drives(ctx: &mut PaintCtx<'_>, list: &mut DisplayList, f: &mut Frame) {
+    use crate::drives::DriveOp;
+    let m = ctx.metrics.hover_menu.clone();
+    let drives: Vec<_> = ctx.state.drives.get().into_iter().filter(|d| d.removable).collect();
+    let busy = ctx.state.drives_busy.get();
+    if drives.is_empty() {
+        f.note(ctx, list, "No drives");
+        return;
+    }
+    let caption = |ctx: &mut PaintCtx<'_>, text: &str| {
+        let style = crate::text::TextStyle {
+            family: std::sync::Arc::from(ctx.theme.font.as_str()),
+            size: m.caption,
+            weight: ctx.metrics.typography.weight_regular,
+            color: ctx.theme.text_muted,
+        };
+        ctx.text.measure(text, &style).0
+    };
+    for (i, drive) in drives.iter().enumerate() {
+        if i > 0 {
+            f.gap(m.gap);
+            let rule = f.take(m.border);
+            list.push_rect(Rect { color: ctx.theme.border_inactive, ..rule });
+            f.gap(m.gap);
+        }
+        let row = f.take(m.row_height);
+        let eject = Rect { x: row.x + row.width - m.row_height, width: m.row_height, radius: m.button_radius, ..row };
+        let ejecting = busy.contains(&drive.object);
+        ui::paint_text_vcentered(ctx, list, crate::ui::widgets::drives::glyph(drive), row.x, row, m.icon, ctx.metrics.typography.weight_regular, ctx.theme.primary);
+        let name_x = row.x + m.icon + m.gap;
+        let name = ui::wrap_text(ctx, &drive.name, m.text, ctx.metrics.typography.weight_medium, eject.x - name_x - m.gap, 1);
+        if let Some(name) = name.first() {
+            ui::paint_text_vcentered(ctx, list, name, name_x, row, m.text, ctx.metrics.typography.weight_medium, ctx.theme.text_main);
+        }
+        let hovered = f.hover(eject);
+        if hovered && !ejecting {
+            list.push_rect(Rect { color: ctx.theme.bg_hover, ..eject });
+        }
+        let glyph = if ejecting { "\u{2026}" } else { "\u{f01ea}" };
+        ui::paint_text_centered(ctx, list, glyph, eject, m.icon, if hovered { ctx.theme.text_main } else { ctx.theme.text_muted });
+        if f.clicked_in(eject) && !ejecting {
+            f.events.push(MenuEvent::System(SystemAction::Drive(DriveOp::Eject(drive.object.clone()))));
+        }
+        f.gap(m.row_gap);
+
+        for volume in &drive.volumes {
+            let row = f.take(m.row_height);
+            let working = ejecting || busy.contains(&volume.object);
+            let mounted = volume.mounted().is_some();
+            let hint = if working {
+                "Working\u{2026}"
+            } else if volume.locked {
+                "Unlock"
+            } else if mounted {
+                "Unmount"
+            } else {
+                "Open"
+            };
+            let hint_w = caption(ctx, hint);
+            let hint_rect = Rect { x: row.x + row.width - hint_w - m.gap * 2.0, width: hint_w + m.gap * 2.0, ..row };
+            let hovered = f.hover(row);
+            if hovered {
+                list.push_rect(Rect { radius: m.button_radius, color: ctx.theme.bg_hover, ..row });
+            }
+            let mark_rect = Rect { x: name_x, width: m.icon, ..row };
+            ui::paint_text_centered(ctx, list, if mounted { "\u{25cf}" } else { "\u{25cb}" }, mark_rect, m.caption, if mounted { ctx.theme.primary } else { ctx.theme.text_muted });
+            let label_x = name_x + m.icon + m.gap;
+            let size = stratum_drives::format_size(volume.size);
+            let size_w = caption(ctx, &size);
+            let label_room = hint_rect.x - label_x - size_w - m.gap * 2.0;
+            let label = ui::wrap_text(ctx, &volume.name(), m.text, ctx.metrics.typography.weight_regular, label_room.max(0.0), 1);
+            let label = label.first().cloned().unwrap_or_default();
+            ui::paint_text_vcentered(ctx, list, &label, label_x, row, m.text, ctx.metrics.typography.weight_regular, if mounted { ctx.theme.text_main } else { ctx.theme.text_muted });
+            if volume.label.trim().is_empty() {
+                // Its name is its size already.
+            } else {
+                let style = crate::text::TextStyle {
+                    family: std::sync::Arc::from(ctx.theme.font.as_str()),
+                    size: m.text,
+                    weight: ctx.metrics.typography.weight_regular,
+                    color: ctx.theme.text_main,
+                };
+                let label_w = ctx.text.measure(&label, &style).0;
+                ui::paint_text_vcentered(ctx, list, &size, label_x + label_w + m.gap, row, m.caption, ctx.metrics.typography.weight_regular, ctx.theme.text_muted);
+            }
+            let hint_hovered = f.hover(hint_rect);
+            let hint_color = if hint_hovered && mounted && !working { ctx.theme.secondary } else if hovered { ctx.theme.text_main } else { ctx.theme.text_muted };
+            ui::paint_text_vcentered(ctx, list, hint, hint_rect.x + m.gap, row, m.caption, ctx.metrics.typography.weight_regular, hint_color);
+            if f.clicked_in(row) && !working {
+                if mounted && hint_hovered {
+                    f.events.push(MenuEvent::System(SystemAction::Drive(DriveOp::Unmount(volume.object.clone()))));
+                } else {
+                    f.events.push(MenuEvent::System(SystemAction::Drive(DriveOp::Open(volume.object.clone()))));
+                    f.events.push(MenuEvent::Close);
+                }
+            }
+            f.gap(m.row_gap);
         }
     }
 }

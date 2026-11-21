@@ -64,6 +64,14 @@ enum Command {
     Undo,
     /// A place in the sidebar, opened from its menu.
     OpenPlace(PathBuf),
+    /// A drive's filesystem by udisks object, with its name for messages
+    /// and, to unmount, the folder it is mounted on.
+    Mount(String, String),
+    /// Ask for an encrypted volume's passphrase.
+    Unlock(String, String),
+    Unmount(String, String, PathBuf),
+    /// A drive by udisks object, and its name.
+    Eject(String, String),
     AddBookmark(PathBuf),
     RemoveBookmark(PathBuf),
     NewFolder,
@@ -79,6 +87,16 @@ struct Menu {
     scroll: Option<f32>,
     /// Opened by this frame's click, which is not a click outside it.
     fresh: bool,
+}
+
+/// The passphrase dialog for an encrypted drive.
+struct Unlock {
+    volume: String,
+    name: String,
+    field: TextField,
+    /// Waiting for udisks.
+    busy: bool,
+    error: Option<String>,
 }
 
 /// What is being typed into.
@@ -169,10 +187,14 @@ pub struct Browser {
     search: TextField,
     editing: Editing,
     places: Vec<(Section, Place)>,
+    /// udisks, started with the window; and the drives it last listed.
+    drives: Option<crate::drives::Drives>,
+    drive_list: Vec<stratum_drives::Drive>,
     menu: Option<Menu>,
     menu_rect: Option<Rect>,
     open_with: Vec<stratum_ui::apps::App>,
     confirm: Option<Vec<PathBuf>>,
+    unlock: Option<Unlock>,
     job: Option<Job>,
     message: Option<(String, bool, Instant)>,
     thumbs: HashMap<PathBuf, Option<IconImage>>,
@@ -268,10 +290,13 @@ impl Browser {
             search: TextField::with_capacity(LONG_FIELD),
             editing: Editing::None,
             places: places::load(),
+            drives: None,
+            drive_list: Vec::new(),
             menu: None,
             menu_rect: None,
             open_with: Vec::new(),
             confirm: None,
+            unlock: None,
             job: None,
             message: None,
             thumbs: HashMap::new(),
@@ -809,6 +834,18 @@ impl Browser {
                 }
                 self.go(path);
             }
+            Command::Mount(volume, name) => self.mount(volume, name),
+            Command::Unlock(volume, name) => self.ask_unlock(volume, name),
+            Command::Unmount(volume, name, at) => {
+                if let Some(drives) = &self.drives {
+                    drives.unmount(volume, name, at);
+                }
+            }
+            Command::Eject(drive, name) => {
+                if let Some(drives) = &self.drives {
+                    drives.eject(drive, name);
+                }
+            }
             Command::AddBookmark(path) => self.set_bookmark(&path, true),
             Command::RemoveBookmark(path) => self.set_bookmark(&path, false),
             Command::EmptyTrash => {
@@ -889,8 +926,25 @@ impl Browser {
     }
 
     /// A sidebar row's menu: open it, and keep or drop it as a bookmark.
-    fn place_menu(&mut self, at: (f32, f32), section: Section, path: PathBuf, width: f32) {
-        let mut items: Vec<(String, Command)> = vec![("Open".into(), Command::OpenPlace(path.clone()))];
+    fn place_menu(&mut self, at: (f32, f32), section: Section, place: Place, width: f32) {
+        let path = place.path.clone();
+        let mut items: Vec<(String, Command)> = Vec::new();
+        if let Some(drive) = &place.drive {
+            if drive.locked {
+                items.push(("Unlock and open".into(), Command::Unlock(drive.volume.clone(), place.name.clone())));
+            } else if drive.mounted {
+                items.push(("Open".into(), Command::OpenPlace(path.clone())));
+                items.push(("Unmount".into(), Command::Unmount(drive.volume.clone(), place.name.clone(), path.clone())));
+            } else {
+                items.push(("Mount and open".into(), Command::Mount(drive.volume.clone(), place.name.clone())));
+            }
+            if drive.removable {
+                items.push((format!("Eject {}", drive.drive_name), Command::Eject(drive.drive.clone(), drive.drive_name.clone())));
+            }
+            self.menu = Some(Menu { anchor: rect(at.0, at.1, width, 0.0), items, scroll: None, fresh: true });
+            return;
+        }
+        items.push(("Open".into(), Command::OpenPlace(path.clone())));
         if trash::is_trash(&path) {
             items.push(("Empty the trash".into(), Command::EmptyTrash));
         } else if section == Section::Bookmarks || path.is_dir() {
@@ -900,6 +954,133 @@ impl Browser {
         self.menu = Some(Menu { anchor: rect(at.0, at.1, width, 0.0), items, scroll: None, fresh: true });
     }
 
+    /// The places read again, with the drives udisks last listed.
+    fn reload_places(&mut self) {
+        self.places = places::with_drives(places::load(), &self.drive_list);
+    }
+
+    fn mount(&mut self, volume: String, name: String) {
+        match &self.drives {
+            Some(drives) => {
+                drives.mount(volume, name.clone());
+                self.say(format!("Mounting {name}\u{2026}"), false);
+            }
+            None => self.say("udisks is not running".into(), true),
+        }
+        self.repaint = true;
+    }
+
+    fn ask_unlock(&mut self, volume: String, name: String) {
+        self.unlock = Some(Unlock { volume, name, field: TextField::new(), busy: false, error: None });
+        self.repaint = true;
+    }
+
+    fn submit_unlock(&mut self, passphrase: stratum_ui::secret::Secret) {
+        let (Some(unlock), Some(drives)) = (&mut self.unlock, &self.drives) else {
+            return;
+        };
+        unlock.busy = true;
+        unlock.error = None;
+        drives.unlock(unlock.volume.clone(), passphrase, unlock.name.clone());
+        self.repaint = true;
+    }
+
+    /// The passphrase dialog: a masked field, Cancel and Unlock. It stays
+    /// open on a wrong passphrase.
+    fn paint_unlock(&mut self, ui: &mut AppUi, list: &mut DisplayList, area: Rect, input: &InputState, clicked: bool) {
+        let Some(unlock) = &self.unlock else { return };
+        let (name, busy, error) = (unlock.name.clone(), unlock.busy, unlock.error.clone());
+        let m = ui.config.metrics.files.clone();
+        let page = ui.config.metrics.page.clone();
+        let theme = ui.theme.clone();
+        list.push_layer();
+        ui::paint_scrim(list, area, 0.4);
+        let h = page.card_padding * 4.0 + page.badge * 3.0;
+        let card = rect(area.x + (area.width - m.dialog_width) * 0.5, area.y + (area.height - h) * 0.4, m.dialog_width, h);
+        layout::card(ui, list, card, Card::Plain);
+        let inner_w = card.width - page.card_padding * 2.0;
+        let line = rect(card.x + page.card_padding, card.y + page.card_padding, inner_w, page.badge);
+        let detail = match &error {
+            Some(error) => ui::elide(ui, error, m.detail_text, 400, inner_w),
+            None => "Enter its passphrase.".to_string(),
+        };
+        layout::two_lines(ui, list, line, &format!("Unlock {name}"), &detail, if error.is_some() { theme.error } else { theme.text_muted });
+        let field = rect(line.x, line.y + page.badge + page.card_padding, inner_w, page.badge);
+        ui::paint_frame(list, Rect { radius: field.height * 0.5, ..field }, 1.5, if busy { theme.surface_high } else { theme.primary }, theme.surface_high);
+        let style = FieldStyle { text: m.text, padding: m.gap, caret_width: 1.5, masked: true, placeholder: Some("Passphrase") };
+        if let Some(unlock) = &self.unlock {
+            unlock.field.paint(ui, list, field, style, busy);
+        }
+        let y = card.y + card.height - page.card_padding - page.badge;
+        let labels: [&str; 2] = ["Cancel", if busy { "Unlocking\u{2026}" } else { "Unlock" }];
+        let (_, hit) = layout::text_buttons(ui, list, card.x + card.width - page.card_padding, y, &labels, true, input, clicked && !busy);
+        match hit {
+            Some(1) => {
+                if let Some(passphrase) = self.unlock.as_mut().and_then(|u| u.field.take()) {
+                    self.submit_unlock(passphrase);
+                }
+            }
+            Some(_) => self.unlock = None,
+            None if clicked && !busy && !layout::hovered(input, card) => self.unlock = None,
+            None => {}
+        }
+    }
+
+    /// A new drive list from udisks, and how operations ended.
+    fn take_drives(&mut self) -> bool {
+        let Some(drives) = &self.drives else {
+            return false;
+        };
+        let (list, events) = drives.take();
+        let changed = list.is_some() || !events.is_empty();
+        if let Some(list) = list {
+            self.drive_list = list;
+            self.reload_places();
+        }
+        for event in events {
+            match event {
+                crate::drives::Event::UnlockFailed(why) => {
+                    if let Some(unlock) = &mut self.unlock {
+                        unlock.busy = false;
+                        unlock.error = Some(why);
+                    }
+                }
+                crate::drives::Event::Mounted(path) => {
+                    self.unlock = None;
+                    self.reload_places();
+                    self.message = None;
+                    self.go(path);
+                }
+                crate::drives::Event::Unmounted(at) => {
+                    if self.dir.starts_with(&at) {
+                        self.go(places::home_dir());
+                    }
+                    self.say(format!("Unmounted {}", at.file_name().map_or_else(|| at.display().to_string(), |n| n.to_string_lossy().into_owned())), false);
+                }
+                crate::drives::Event::Ejected(name) => {
+                    let gone: Vec<PathBuf> = self
+                        .places
+                        .iter()
+                        .filter(|(_, p)| p.drive.as_ref().is_some_and(|d| d.drive_name == name) && !p.path.as_os_str().is_empty())
+                        .map(|(_, p)| p.path.clone())
+                        .collect();
+                    if gone.iter().any(|g| self.dir.starts_with(g)) {
+                        self.go(places::home_dir());
+                    }
+                    self.say(format!("{name} can be removed"), false);
+                }
+                crate::drives::Event::Failed(message) => {
+                    self.unlock = None;
+                    self.say(message, true);
+                }
+            }
+        }
+        if changed {
+            self.repaint = true;
+        }
+        changed
+    }
+
     /// Add `path` to the bookmarks, or take it out, and show the sidebar
     /// as it now is.
     fn set_bookmark(&mut self, path: &Path, keep: bool) {
@@ -907,7 +1088,7 @@ impl Browser {
         let result = if keep { places::add_bookmark(path) } else { places::remove_bookmark(path) };
         match result {
             Ok(()) => {
-                self.places = places::load();
+                self.reload_places();
                 self.say(if keep { format!("Added {name} to the bookmarks") } else { format!("Removed {name} from the bookmarks") }, false);
             }
             Err(err) => self.say(format!("The bookmarks were not changed: {err}"), true),
@@ -1143,6 +1324,8 @@ impl Browser {
         let mut y = top;
         let mut section = None;
         let mut go = None;
+        let mut mount = None;
+        let mut unlock = None;
         let mut menu = None;
         for (s, place) in self.places.clone() {
             if section != Some(s) {
@@ -1178,12 +1361,16 @@ impl Browser {
             let visible = row.y + row.height > area.y && row.y < area.y + area.height;
             let under = visible && layout::hovered(input, row) && layout::hovered(input, area);
             if clicked && under {
-                go = Some(place.path.clone());
+                match &place.drive {
+                    Some(drive) if drive.locked => unlock = Some((drive.volume.clone(), place.name.clone())),
+                    Some(drive) if !drive.mounted => mount = Some((drive.volume.clone(), place.name.clone())),
+                    _ => go = Some(place.path.clone()),
+                }
             }
             if secondary && under {
-                menu = Some((s, place.path.clone()));
+                menu = Some((s, place.clone()));
             }
-            if visible {
+            if visible && !place.path.as_os_str().is_empty() {
                 // Only what shows, and only its shown part, takes a drop.
                 let y0 = row.y.max(area.y);
                 let y1 = (row.y + row.height).min(area.y + area.height);
@@ -1193,8 +1380,14 @@ impl Browser {
         }
         list.pop_clip();
         self.sidebar_height = y - top + m.padding;
-        if let (Some((section, path)), Some(at)) = (menu, input.pointer) {
-            self.place_menu(at, section, path, m.menu_width);
+        if let (Some((section, place)), Some(at)) = (menu, input.pointer) {
+            self.place_menu(at, section, place, m.menu_width);
+        }
+        if let Some((volume, name)) = mount {
+            self.mount(volume, name);
+        }
+        if let Some((volume, name)) = unlock {
+            self.ask_unlock(volume, name);
         }
         if let Some(dir) = go {
             if trash::is_trash(&dir) {
@@ -2011,6 +2204,7 @@ pub fn count(n: usize, what: &str) -> String {
 
 impl App for Browser {
     fn start(&mut self, waker: Waker) {
+        self.drives = Some(crate::drives::Drives::start(waker.clone()));
         self.waker = Some(waker);
     }
 
@@ -2028,7 +2222,7 @@ impl App for Browser {
         // A dialog opened during this frame (the status bar's Empty the
         // trash) must not take the click that opened it as a click
         // outside, which closed it at once.
-        let confirming = self.confirm.is_some();
+        let confirming = self.confirm.is_some() || self.unlock.is_some();
         let covered = confirming || self.menu_rect.is_some_and(|r| layout::hovered(&pointer.input, r));
         let masked = InputState { pointer: if covered { None } else { pointer.input.pointer }, pressed: pointer.input.pressed };
         let input = &masked;
@@ -2084,6 +2278,7 @@ impl App for Browser {
             list.push_outline(Rect { radius: m.row_radius, color: ui.theme.primary, ..*zone }, 2.0);
         }
         self.paint_confirm(ui, list, area, &pointer.input, pointer.clicked && confirming);
+        self.paint_unlock(ui, list, area, &pointer.input, pointer.clicked && confirming);
 
         // The menu, over everything.
         self.menu_rect = None;
@@ -2121,6 +2316,19 @@ impl App for Browser {
             return Flow::Continue;
         }
         let config = ui.config.files.clone();
+        if let Some(unlock) = &mut self.unlock {
+            if unlock.busy {
+                return Flow::Continue;
+            }
+            match unlock.field.key(key.keysym, key.text.as_deref(), key.ctrl) {
+                FieldKey::Submit(passphrase) => self.submit_unlock(passphrase),
+                FieldKey::Escape => self.unlock = None,
+                FieldKey::Changed => unlock.error = None,
+                FieldKey::Ignored => {}
+            }
+            self.repaint = true;
+            return Flow::Continue;
+        }
         if self.confirm.is_some() {
             match key.keysym {
                 Keysym::Return | Keysym::KP_Enter => {
@@ -2299,7 +2507,8 @@ impl App for Browser {
         let thumbs = self.take_thumbnails();
         let job = self.take_job();
         let preview = self.preview.take();
-        thumbs || job || preview
+        let drives = self.take_drives();
+        thumbs || job || preview || drives
     }
 
     fn done(&self) -> bool {

@@ -12,6 +12,7 @@ mod clipboard;
 mod dashboard;
 mod display_manager;
 mod displays;
+mod drives;
 mod palette;
 mod wallpapers;
 mod hyprland;

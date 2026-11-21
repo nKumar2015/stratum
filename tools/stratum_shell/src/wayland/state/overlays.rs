@@ -154,6 +154,14 @@ impl App {
                     let _ = sender.send(PolkitEvent { cookie, verdict });
                 });
             }
+            DialogAction::Unlock { cookie, volume, passphrase, open } => {
+                let Some(sender) = self.polkit_events.clone() else {
+                    return;
+                };
+                crate::drives::unlock(&self.state, volume, passphrase, open, move |verdict| {
+                    let _ = sender.send(PolkitEvent { cookie, verdict });
+                });
+            }
         }
         self.mark_polkit_dirty();
     }

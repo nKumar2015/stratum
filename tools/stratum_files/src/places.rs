@@ -10,6 +10,22 @@ pub struct Place {
     pub path: PathBuf,
     /// An icon name.
     pub icon: &'static str,
+    /// The filesystem a Drives row is, from udisks. An unmounted one has
+    /// no path yet: a click mounts it.
+    pub drive: Option<DriveRef>,
+}
+
+/// Which udisks filesystem, and on which drive, a place is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DriveRef {
+    pub volume: String,
+    pub drive: String,
+    pub drive_name: String,
+    pub mounted: bool,
+    /// Encrypted and not unlocked: a click asks for its passphrase.
+    pub locked: bool,
+    /// It can be ejected: a removable drive.
+    pub removable: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,12 +35,12 @@ pub enum Section {
     Drives,
 }
 
-fn home() -> PathBuf {
+pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn config_home() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home().join(".config"))
+    std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home_dir().join(".config"))
 }
 
 /// `XDG_*_DIR="$HOME/..."` lines from `user-dirs.dirs`.
@@ -54,7 +70,7 @@ pub fn parse_bookmarks(text: &str) -> Vec<Place> {
                 .map(str::to_string)
                 .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| path.display().to_string());
-            Some(Place { name, path, icon: "folder" })
+            Some(Place { name, path, icon: "folder", drive: None })
         })
         .collect()
 }
@@ -137,7 +153,7 @@ pub fn parse_mounts(text: &str, user: &str) -> Vec<Place> {
             ours.then(|| {
                 let path = PathBuf::from(&mount);
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(mount);
-                Place { name, path, icon: "drive-removable-media" }
+                Place { name, path, icon: "drive-removable-media", drive: None }
             })
         })
         .collect()
@@ -145,8 +161,8 @@ pub fn parse_mounts(text: &str, user: &str) -> Vec<Place> {
 
 /// Every place, by section.
 pub fn load() -> Vec<(Section, Place)> {
-    let home = home();
-    let mut out = vec![(Section::Places, Place { name: "Home".into(), path: home.clone(), icon: "user-home" })];
+    let home = home_dir();
+    let mut out = vec![(Section::Places, Place { name: "Home".into(), path: home.clone(), icon: "user-home", drive: None })];
     let dirs = std::fs::read_to_string(config_home().join("user-dirs.dirs")).unwrap_or_default();
     let dirs = parse_user_dirs(&dirs, &home);
     for (key, label, icon) in [
@@ -159,17 +175,57 @@ pub fn load() -> Vec<(Section, Place)> {
     ] {
         let path = dirs.iter().find(|(k, _)| k == key).map(|(_, p)| p.clone()).unwrap_or_else(|| home.join(label));
         if path.is_dir() {
-            out.push((Section::Places, Place { name: label.into(), path, icon }));
+            out.push((Section::Places, Place { name: label.into(), path, icon, drive: None }));
         }
     }
-    out.push((Section::Places, Place { name: "Trash".into(), path: crate::trash::files_dir(), icon: "user-trash" }));
+    out.push((Section::Places, Place { name: "Trash".into(), path: crate::trash::files_dir(), icon: "user-trash", drive: None }));
     let bookmarks = std::fs::read_to_string(bookmarks_file()).unwrap_or_default();
     out.extend(parse_bookmarks(&bookmarks).into_iter().map(|p| (Section::Bookmarks, p)));
     let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
     let user = std::env::var("USER").unwrap_or_default();
     out.extend(parse_mounts(&mounts, &user).into_iter().map(|p| (Section::Drives, p)));
-    out.push((Section::Drives, Place { name: "File system".into(), path: PathBuf::from("/"), icon: "drive-harddisk" }));
+    out.push((Section::Drives, Place { name: "File system".into(), path: PathBuf::from("/"), icon: "drive-harddisk", drive: None }));
     out
+}
+
+/// The places with udisks' drives laid over the Drives section: a mounted
+/// filesystem's row learns which drive it is (so it can be ejected), and
+/// unmounted ones (and locked, encrypted ones) are added before "File
+/// system".
+pub fn with_drives(mut places: Vec<(Section, Place)>, drives: &[stratum_drives::Drive]) -> Vec<(Section, Place)> {
+    let root = places.iter().position(|(s, p)| *s == Section::Drives && p.path == Path::new("/"));
+    let mut added = Vec::new();
+    for drive in drives {
+        for volume in &drive.volumes {
+            let mounted = volume.mounted().map(Path::to_path_buf);
+            let reference = DriveRef {
+                volume: volume.object.clone(),
+                drive: drive.object.clone(),
+                drive_name: drive.name.clone(),
+                mounted: mounted.is_some(),
+                locked: volume.locked,
+                removable: drive.removable,
+            };
+            let existing = mounted
+                .as_ref()
+                .and_then(|m| places.iter_mut().find(|(s, p)| *s == Section::Drives && &p.path == m));
+            match existing {
+                Some((_, place)) => place.drive = Some(reference),
+                None => added.push((
+                    Section::Drives,
+                    Place {
+                        name: volume.name(),
+                        path: mounted.unwrap_or_default(),
+                        icon: if drive.removable { "drive-removable-media" } else { "drive-harddisk" },
+                        drive: Some(reference),
+                    },
+                )),
+            }
+        }
+    }
+    let at = root.unwrap_or(places.len());
+    places.splice(at..at, added);
+    places
 }
 
 #[cfg(test)]
@@ -207,5 +263,50 @@ mod tests {
         let drives = parse_mounts(mounts, "me");
         assert_eq!(drives.len(), 1);
         assert_eq!(drives[0].name, "USB Stick");
+    }
+
+    #[test]
+    fn drives_join_the_drives_section() {
+        use stratum_drives::{Drive, Volume};
+        let volume = |object: &str, label: &str, mounted: Option<&str>| Volume {
+            object: object.into(),
+            device: String::new(),
+            label: label.into(),
+            fs_type: "exfat".into(),
+            size: 8_000_000_000,
+            mount_points: mounted.map(PathBuf::from).into_iter().collect(),
+            read_only: false,
+            system: false,
+            locked: false,
+            backing: None,
+        };
+        let mut locked = volume("sdb3", "", None);
+        locked.locked = true;
+        let drive = Drive {
+            object: "stick".into(),
+            name: "SanDisk Cruzer".into(),
+            removable: true,
+            can_power_off: true,
+            ejectable: false,
+            optical: false,
+            bus: "usb".into(),
+            size: 16_000_000_000,
+            volumes: vec![volume("sdb1", "STICK", Some("/run/media/me/STICK")), volume("sdb2", "", None), locked],
+        };
+        let places = vec![
+            (Section::Places, Place { name: "Home".into(), path: "/home/me".into(), icon: "user-home", drive: None }),
+            (Section::Drives, Place { name: "STICK".into(), path: "/run/media/me/STICK".into(), icon: "drive-removable-media", drive: None }),
+            (Section::Drives, Place { name: "File system".into(), path: "/".into(), icon: "drive-harddisk", drive: None }),
+        ];
+        let merged = with_drives(places, &[drive]);
+        let names: Vec<_> = merged.iter().map(|(_, p)| p.name.as_str()).collect();
+        assert_eq!(names, ["Home", "STICK", "8.0 GB Volume", "8.0 GB Volume", "File system"]);
+        assert!(merged[3].1.drive.as_ref().is_some_and(|d| d.locked && !d.mounted));
+        let stick = merged[1].1.drive.as_ref().expect("the mounted row knows its drive");
+        assert!(stick.mounted && stick.removable);
+        assert_eq!(stick.drive, "stick");
+        let unmounted = &merged[2].1;
+        assert_eq!(unmounted.path, PathBuf::new());
+        assert_eq!(unmounted.drive.as_ref().map(|d| (d.volume.as_str(), d.mounted)), Some(("sdb2", false)));
     }
 }

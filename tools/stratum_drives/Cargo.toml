@@ -1,0 +1,13 @@
+[package]
+name = "stratum_drives"
+version.workspace = true
+edition.workspace = true
+description = "Drives and their filesystems through udisks2, shared by the shell and the file manager"
+
+# zbus only: the file manager uses this too, and `stratum_sys` would link
+# PipeWire and PulseAudio into it.
+[dependencies]
+zbus = { workspace = true }
+serde = { workspace = true }
+libc = { workspace = true }
+tracing = { workspace = true }

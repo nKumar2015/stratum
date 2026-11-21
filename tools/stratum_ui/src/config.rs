@@ -41,6 +41,7 @@ pub struct Config {
     pub idle: IdleConfig,
     pub launcher: LauncherConfig,
     pub clipboard: ClipboardConfig,
+    pub drives: DrivesConfig,
     pub night_light: NightLightConfig,
     pub files: FilesConfig,
     pub screenshot: ScreenshotConfig,
@@ -522,6 +523,8 @@ pub enum WidgetKind {
     IdleInhibit,
     /// Night light: warmer screens now, or back to the schedule.
     NightLight,
+    /// Removable drives: shown only while one is attached.
+    Drives,
 }
 
 /// Look-and-feel knobs that are not colours.
@@ -933,6 +936,21 @@ pub struct ClipboardConfig {
     pub max_entries: usize,
     /// A copy larger than this is not recorded.
     pub max_entry_mb: usize,
+}
+
+/// Removable drives, through udisks2 (`crate::drives` in the shell).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DrivesConfig {
+    /// Watch for drives. Read at start.
+    pub enabled: bool,
+    /// A toast when a drive is plugged in, with Open and Eject.
+    pub notify: bool,
+    /// Mount a new drive's filesystems as soon as it is plugged in.
+    pub automount: bool,
+    /// The program a mounted drive is opened with, given its folder last.
+    /// Started under `[launcher] launch_prefix`.
+    pub open_command: Vec<String>,
 }
 
 /// When night light is on.

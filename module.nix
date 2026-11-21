@@ -4,6 +4,8 @@ self: {
   config,
   lib,
   pkgs,
+  # Set when Home Manager runs as a NixOS module.
+  osConfig ? null,
   ...
 }: let
   cfg = config.programs.stratum;
@@ -12,6 +14,11 @@ self: {
   # The shell's defaults, which the written file starts from. Read from this
   # flake's source, not from the package, which would be import-from-derivation.
   defaults = builtins.fromTOML (builtins.readFile ./tools/stratum_shell/config.default.toml);
+  # Without the file manager, a drive opens in whatever opens folders.
+  moduleDefaults = lib.optionalAttrs (!cfg.fileManager.enable) {
+    drives.open_command = ["xdg-open"];
+  };
+  udisksOff = osConfig != null && !(osConfig.services.udisks2.enable or false);
 in {
   imports = [
     (lib.mkRemovedOptionModule ["programs" "stratum" "setupPolkit"] ''
@@ -103,10 +110,15 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    warnings = lib.optional (cfg.fileManager.setDefault && !config.xdg.mimeApps.enable) ''
-      programs.stratum.fileManager.setDefault needs xdg.mimeApps.enable; folders
-      still open in the previous app.
-    '';
+    warnings =
+      lib.optional (cfg.fileManager.setDefault && !config.xdg.mimeApps.enable) ''
+        programs.stratum.fileManager.setDefault needs xdg.mimeApps.enable; folders
+        still open in the previous app.
+      ''
+      ++ lib.optional udisksOff ''
+        Stratum's removable drives need services.udisks2.enable = true in the
+        NixOS configuration; without it no drive shows or mounts.
+      '';
 
     xdg.mimeApps.defaultApplications = lib.mkIf (cfg.fileManager.enable && cfg.fileManager.setDefault) {
       "inode/directory" = ["org.stratum.Files.desktop"];
@@ -132,7 +144,7 @@ in {
       ]);
 
     xdg.configFile."stratum/config.toml".source =
-      toml.generate "stratum-config.toml" (lib.recursiveUpdate defaults cfg.settings);
+      toml.generate "stratum-config.toml" (lib.recursiveUpdate (lib.recursiveUpdate defaults moduleDefaults) cfg.settings);
 
     systemd.user.services.stratum-shell = {
       Unit = {
