@@ -30,6 +30,7 @@ Rules from the user that apply to every item:
 | Workspace overview (5) and window switcher (6), over `hyprland-toplevel-export-v1` | `6d14f17` (pushed 2026-11-20); empty workspaces hidden from the overview afterwards | — |
 | Per-app outputs through an EQ for each device (a follow-up to the mixer) | `9a44aae` | pavucontrol |
 | Removable drives (7): udisks2, a bar icon and menu, toasts with Open and Eject, unmounted drives and Unmount/Eject in the file manager, a passphrase prompt for LUKS drives | committed 2026-11-20 | udiskie-style helpers (none installed) |
+| Battery menu revamp: stay awake and night light moved into it, the power mode as a draggable tachometer (asked for 2026-11-20) | `fb10c9b` | — |
 
 On the user's side: the file manager is enabled in `~/nixos-config`;
 `nix flake update stratum` and a rebuild bring in everything pushed,
